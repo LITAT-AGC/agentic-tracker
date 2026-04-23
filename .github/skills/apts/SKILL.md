@@ -23,10 +23,6 @@ Este skill empaqueta los recursos minimos para conectar un proyecto cliente con 
 - [Cliente HTTP de ejemplo](./assets/apts-client.js)
 - [Guia base para AGENTS.md o copilot-instructions.md](./assets/apts-agent-guidelines.md)
 
-## Distribucion publica
-
-Si el proyecto cliente no tiene acceso a este repositorio, puede descargar los mismos archivos desde el repo publico de distribucion `LITAT-AGC/apts-client`.
-
 ## Procedimiento recomendado
 
 1. Revisa el [contrato de API](./references/api-contract.md) para confirmar variables, endpoints y payloads.

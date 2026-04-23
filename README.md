@@ -49,9 +49,7 @@ Importante: este repositorio publica la API y el contrato de skills, pero no inc
 
 Ademas del contrato raiz en `apts_skills.json`, el repositorio ahora incluye un paquete descargable para proyectos clientes en `.github/skills/apts/`. Ese paquete agrupa el skill, un contrato JSON copiable, un cliente HTTP base y una guia de instrucciones para agentes.
 
-Si solo necesitas descargar los assets publicamente sin abrir este repositorio privado, tambien existe el repo de distribucion ligera `LITAT-AGC/apts-client`, pensado para exponer `apts-client.js`, `apts_skills.json` y `apts-agent-guidelines.md` por URL directa.
-
-La sincronizacion automatica hacia ese repo publico se realiza con `.github/workflows/sync-apts-client.yml`. Ese workflow requiere un secreto `APTS_CLIENT_SYNC_TOKEN` con permisos de escritura sobre `LITAT-AGC/apts-client`.
+Como este repositorio es publico, esos assets se consumen directamente desde `.github/skills/apts/assets/`.
 
 Todas las llamadas de agentes deben incluir la cabecera:
 
