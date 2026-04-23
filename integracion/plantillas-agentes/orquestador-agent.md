@@ -1,5 +1,5 @@
 ---
-name: Orquestador Persona
+name: Orquestador Agent
 description: "Use when: orchestrate backlog-driven execution from APTS, take the next ready item, delegate implementation to a subagent, and continue until completion or blocker."
 tools: ['agent', 'read', 'search', 'edit', 'execute']
 agents: ['Ejecutor Dev Test Commit']

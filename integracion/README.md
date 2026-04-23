@@ -6,7 +6,7 @@ Se mantiene fuera de `.github/` para evitar que VS Code/Copilot lo trate como cu
 
 ## Estructura
 
-- `plantillas-agentes/`: plantillas de agentes para orquestacion y ejecucion contra APTS.
+- `plantillas-agentes/`: plantillas de agentes para orquestacion y ejecucion contra APTS, incluyendo `orquestador-agent.md` y `ejecutor-dev-test-commit.agent.md`.
 - `paquete-apts/`: paquete exportable con contrato JSON, cliente HTTP, guia operativa y referencia de API.
 
 ## Uso recomendado

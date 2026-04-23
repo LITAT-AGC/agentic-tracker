@@ -105,8 +105,8 @@ Un backlog item puede enlazarse con una `active_task_id` mientras esta en ejecuc
 
 Este repositorio incluye plantillas de agentes de integracion en `integracion/plantillas-agentes/`:
 
-- `Orquestador Persona`: toma items `ready` del backlog en APTS, crea la task de ejecucion y delega el trabajo atomico.
-- `Ejecutor Dev Test Commit`: implementa un solo item del backlog, registra progreso en APTS, ejecuta validaciones relevantes del repositorio y solo committea si pasan.
+- `Orquestador Agent` (`integracion/plantillas-agentes/orquestador-agent.md`): toma items `ready` del backlog en APTS, crea la task de ejecucion y delega el trabajo atomico.
+- `Ejecutor Dev Test Commit` (`integracion/plantillas-agentes/ejecutor-dev-test-commit.agent.md`): implementa un solo item del backlog, registra progreso en APTS, ejecuta validaciones relevantes del repositorio y solo committea si pasan.
 
 Las plantillas exportables viven en `integracion/plantillas-agentes/` y el repo ya no depende de borradores locales temporales.
 
