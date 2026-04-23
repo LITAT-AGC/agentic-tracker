@@ -1,0 +1,66 @@
+name: Sync APTS Client Public Repo
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/skills/apts/assets/apts-client.js
+      - .github/skills/apts/assets/apts_skills.json
+      - .github/skills/apts/assets/apts-agent-guidelines.md
+  workflow_dispatch:
+
+jobs:
+  sync-public-client:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source repository
+        uses: actions/checkout@v4
+
+      - name: Validate sync token
+        env:
+          APTS_CLIENT_SYNC_TOKEN: ${{ secrets['APTS_CLIENT_SYNC_TOKEN'] }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APTS_CLIENT_SYNC_TOKEN}" ]; then
+            echo "Missing required secret: APTS_CLIENT_SYNC_TOKEN"
+            exit 1
+          fi
+
+      - name: Export public files
+        run: |
+          set -euo pipefail
+          mkdir -p public-dist
+          cp .github/skills/apts/assets/apts-client.js public-dist/apts-client.js
+          cp .github/skills/apts/assets/apts_skills.json public-dist/apts_skills.json
+          cp .github/skills/apts/assets/apts-agent-guidelines.md public-dist/apts-agent-guidelines.md
+
+      - name: Clone public distribution repository
+        env:
+          APTS_CLIENT_SYNC_TOKEN: ${{ secrets['APTS_CLIENT_SYNC_TOKEN'] }}
+        run: |
+          set -euo pipefail
+          git clone "https://x-access-token:${APTS_CLIENT_SYNC_TOKEN}@github.com/LITAT-AGC/apts-client.git" target-repo
+
+      - name: Sync managed files
+        run: |
+          set -euo pipefail
+          cp public-dist/apts-client.js target-repo/apts-client.js
+          cp public-dist/apts_skills.json target-repo/apts_skills.json
+          cp public-dist/apts-agent-guidelines.md target-repo/apts-agent-guidelines.md
+
+      - name: Commit and push changes
+        working-directory: target-repo
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- apts-client.js apts_skills.json apts-agent-guidelines.md; then
+            echo "No public asset changes detected."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apts-client.js apts_skills.json apts-agent-guidelines.md
+          git commit -m "chore: sync public APTS client assets"
+          git push origin HEAD:main
