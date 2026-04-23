@@ -1,13 +1,13 @@
 # APTS - Agentic Project Tracking Service
 
-APTS es un servicio de seguimiento de proyectos orientado a agentes de IA. En lugar de depender solo del contexto del chat o de comentarios dispersos en el codigo, APTS centraliza tareas, estados, heartbeats, bloqueos y logs tecnicos en una API REST pensada para automatizacion, con un dashboard web para supervision humana.
+APTS es un servicio de seguimiento de proyectos orientado a agentes de IA. En lugar de depender solo del contexto del chat o de comentarios dispersos en el codigo, APTS centraliza backlog, tareas de ejecucion, estados, heartbeats, bloqueos y logs tecnicos en una API REST pensada para automatizacion, con un dashboard web para supervision humana.
 
 ## Que incluye
 
 - Backend en Node.js + Express + Knex.
 - Base de datos SQLite para desarrollo y test, y PostgreSQL para produccion.
 - Dashboard web en Vue 3 + Vite + Pinia + PrimeVue + Tailwind CSS + ECharts.
-- Contrato de skills para agentes en `apts_skills.json`.
+- Material de integracion para proyectos cliente en `integracion/`.
 - Script de prueba de API para validar el flujo de agentes.
 - Reglas operativas para agentes y pruebas E2E en `AGENTS.md`.
 
@@ -16,6 +16,7 @@ APTS es un servicio de seguimiento de proyectos orientado a agentes de IA. En lu
 APTS esta pensado para equipos que usan agentes de desarrollo y necesitan:
 
 - Ver que esta haciendo cada agente en tiempo casi real.
+- Gestionar backlog por proyecto como fuente de verdad del trabajo planificado.
 - Tener trazabilidad por proyecto, rama, tarea y log tecnico.
 - Detectar tareas bloqueadas o agentes sin actividad reciente.
 - Permitir supervision humana desde un dashboard separado.
@@ -41,15 +42,15 @@ APTS esta pensado para equipos que usan agentes de desarrollo y necesitan:
 
 ### Capa de integracion de agentes
 
-El archivo `apts_skills.json` describe las herramientas que un runtime de agentes puede exponer. Cada skill se corresponde con un endpoint REST del backend.
+El paquete `integracion/paquete-apts/` describe las herramientas que un runtime de agentes puede exponer. Cada skill se corresponde con un endpoint REST del backend.
 
 Importante: este repositorio publica la API y el contrato de skills, pero no incluye un servidor MCP dedicado ni un adaptador universal para todos los agentes. Cada proyecto que quiera integrarse debe cargar ese JSON en su runtime de herramientas o crear un pequeno cliente HTTP que exponga esas mismas funciones.
 
 ## Skills disponibles
 
-Ademas del contrato raiz en `apts_skills.json`, el repositorio ahora incluye un paquete descargable para proyectos clientes en `.github/skills/apts/`. Ese paquete agrupa el skill, un contrato JSON copiable, un cliente HTTP base y una guia de instrucciones para agentes.
+El repositorio incluye un paquete descargable para proyectos clientes en `integracion/paquete-apts/`. Ese paquete agrupa el skill, un contrato JSON copiable, un cliente HTTP base y una guia de instrucciones para agentes.
 
-Como este repositorio es publico, esos assets se consumen directamente desde `.github/skills/apts/assets/`.
+Como este repositorio es publico, esos archivos se consumen directamente desde `integracion/paquete-apts/`.
 
 Todas las llamadas de agentes deben incluir la cabecera:
 
@@ -59,8 +60,11 @@ Authorization: Bearer <APTS_API_KEY>
 
 | Skill | Metodo | Endpoint | Uso |
 | --- | --- | --- | --- |
-| `register_task` | POST | `/api/projects/tasks` | Crear una tarea nueva y obtener `task_id`. |
-| `read_project_context` | GET | `/api/projects/context?url=...&limit=...` | Leer tareas y logs recientes del proyecto. |
+| `register_task` | POST | `/api/projects/tasks` | Crear una tarea nueva y obtener `task_id` (opcionalmente vinculada a `backlog_item_id`). |
+| `read_project_context` | GET | `/api/projects/context?url=...&limit=...` | Leer backlog, tareas y logs recientes del proyecto. |
+| `list_backlog_items` | GET | `/api/projects/backlog?url=...&status=...` | Listar backlog por proyecto, ordenado por prioridad y orden manual. |
+| `create_backlog_item` | POST | `/api/projects/backlog` | Crear un backlog item gestionado en APTS. |
+| `update_backlog_item` | PATCH | `/api/backlog/:id` | Editar estado, prioridad o contenido de un backlog item. |
 | `update_task_status` | PATCH | `/api/tasks/:id/status` | Cambiar estado de una tarea. |
 | `log_agent_progress` | POST | `/api/tasks/:id/logs` | Registrar progreso, decisiones o cambios tecnicos. |
 | `report_blocker` | POST | `/api/projects/blockers` | Reportar bloqueo y marcar proyecto como bloqueado. |
@@ -69,11 +73,12 @@ Authorization: Bearer <APTS_API_KEY>
 ## Flujo esperado de un agente
 
 1. Resolver identidad desde Git local.
-2. Crear la tarea si aun no tiene `task_id`.
-3. Leer el contexto del proyecto antes de trabajar.
-4. Registrar progreso y enviar heartbeat mientras ejecuta la tarea.
-5. Reportar blocker si no puede continuar.
-6. Marcar la tarea como `done` o `review` cuando termina.
+2. Consultar backlog (`list_backlog_items`) y seleccionar un item pendiente o crear uno nuevo si corresponde.
+3. Crear la tarea de ejecucion con `register_task` y asociarla al `backlog_item_id`.
+4. Leer el contexto del proyecto antes de trabajar (`read_project_context`).
+5. Registrar progreso y enviar heartbeat mientras ejecuta la tarea.
+6. Reportar blocker si no puede continuar.
+7. Marcar la tarea como `done` o `review` cuando termina; APTS sincroniza el estado del backlog vinculado.
 
 Valores que el agente debe resolver localmente antes de llamar las skills:
 
@@ -85,6 +90,25 @@ branch=$(git branch --show-current)
 ```
 
 El backend normaliza la URL del repositorio para que valores como `git@github.com:org/repo.git` y `https://github.com/org/repo` se traten como el mismo proyecto.
+
+## Modelo operativo backlog -> task
+
+APTS separa la planificacion del trabajo de su ejecucion:
+
+- `backlog_items`: trabajo planificado y priorizado por proyecto.
+- `tasks`: ejecuciones concretas de agentes (una sesion de trabajo sobre un item).
+- `agent_logs`: evidencia tecnica de la ejecucion.
+
+Un backlog item puede enlazarse con una `active_task_id` mientras esta en ejecucion.
+
+## Agentes recomendados
+
+Este repositorio incluye plantillas de agentes de integracion en `integracion/plantillas-agentes/`:
+
+- `Orquestador Persona`: toma items `ready` del backlog en APTS, crea la task de ejecucion y delega el trabajo atomico.
+- `Ejecutor Dev Test Commit`: implementa un solo item del backlog, registra progreso en APTS, ejecuta validaciones relevantes del repositorio y solo committea si pasan.
+
+Las plantillas exportables viven en `integracion/plantillas-agentes/` y el repo ya no depende de borradores locales temporales.
 
 ## Requisitos
 
@@ -165,6 +189,9 @@ El login del dashboard usa `DASHBOARD_PASSWORD` y crea una sesion HTTP con cooki
 - `GET /api/dashboard/overview`
 - `GET /api/dashboard/projects`
 - `GET /api/dashboard/projects/:url`
+- `GET /api/dashboard/projects/:url/backlog`
+- `POST /api/dashboard/projects/:url/backlog`
+- `PATCH /api/dashboard/backlog/:id`
 - `POST /api/tasks/:id/resolve`
 
 ## Scripts utiles
@@ -227,11 +254,11 @@ Si el servicio APTS esta desplegado en otro host, reemplaza la URL base por la c
 
 Tienes dos opciones validas.
 
-Si quieres una base lista para descargar, copia directamente la carpeta `.github/skills/apts/` de este repositorio al proyecto cliente y reutiliza sus assets.
+Si quieres una base lista para descargar, copia directamente la carpeta `integracion/paquete-apts/` de este repositorio al proyecto cliente y reutiliza sus assets.
 
 #### Opcion A: tu runtime soporta esquemas JSON o function calling
 
-1. Copia `apts_skills.json` a tu proyecto integrador, por ejemplo en `tools/apts_skills.json`.
+1. Copia `integracion/paquete-apts/apts_skills.json` a tu proyecto integrador, por ejemplo en `tools/apts_skills.json`.
 2. Registra cada skill en tu runtime usando el mismo nombre y parametros.
 3. Haz que cada tool invoque el endpoint HTTP correspondiente en APTS.
 4. Adjunta siempre `Authorization: Bearer <APTS_API_KEY>`.
@@ -242,6 +269,9 @@ Mapeo recomendado:
 | --- | --- |
 | `register_task` | `POST {APTS_BASE_URL}/projects/tasks` |
 | `read_project_context` | `GET {APTS_BASE_URL}/projects/context?url=...&limit=...` |
+| `list_backlog_items` | `GET {APTS_BASE_URL}/projects/backlog?url=...&status=...` |
+| `create_backlog_item` | `POST {APTS_BASE_URL}/projects/backlog` |
+| `update_backlog_item` | `PATCH {APTS_BASE_URL}/backlog/:id` |
 | `update_task_status` | `PATCH {APTS_BASE_URL}/tasks/:id/status` |
 | `log_agent_progress` | `POST {APTS_BASE_URL}/tasks/:id/logs` |
 | `report_blocker` | `POST {APTS_BASE_URL}/projects/blockers` |
@@ -270,7 +300,7 @@ async function register_task(payload) {
 }
 ```
 
-Con ese patron puedes implementar las 6 skills y publicarlas como herramientas del agente que use tu equipo.
+Con ese patron puedes implementar las skills y publicarlas como herramientas del agente que use tu equipo.
 
 ### Paso 3: instalar el prompt en el proyecto integrador
 
@@ -282,7 +312,7 @@ Si el proyecto integrador usa VS Code con GitHub Copilot, la recomendacion pract
 - Prompts reutilizables para tareas puntuales: `.github/prompts/*.prompt.md`
 - Skills nativos de VS Code/Copilot: `.github/skills/<nombre>/SKILL.md`
 
-Nota importante: APTS no publica aun un skill nativo listo para copiar en `.github/skills/`. Lo que si publica hoy es el contrato HTTP en `apts_skills.json`. Por eso, para integrarse con APTS, un proyecto cliente normalmente hace una de estas dos cosas:
+Nota importante: APTS no instala por defecto estas piezas como customizacion activa del propio repositorio. Lo que publica hoy es un paquete de integracion en `integracion/paquete-apts/`. Por eso, para integrarse con APTS, un proyecto cliente normalmente hace una de estas dos cosas:
 
 1. Usa instrucciones y prompts para obligar el flujo de trabajo del agente, y un wrapper local o MCP para ejecutar las llamadas HTTP.
 2. Crea un skill propio del proyecto que internamente invoque la API de APTS.
@@ -299,13 +329,14 @@ Antes de usar cualquier skill debes resolver desde el entorno Git local:
 - branch: `git branch --show-current`
 
 Reglas obligatorias:
-1. Si no tienes task_id, usa `register_task`.
-2. Antes de modificar codigo, usa `read_project_context`.
-3. Mientras trabajas, envia `heartbeat` periodicamente.
-4. Cada hito importante debe registrarse con `log_agent_progress`.
-5. Si no puedes continuar, usa `report_blocker` y deten el trabajo.
-6. Al terminar, usa `update_task_status` con `done` o `review`.
-7. Nunca inventes `project_url`, `agent_name` ni `branch`; resuelvelos siempre desde Git.
+1. Lee backlog del proyecto (`list_backlog_items`) y toma un item apto para ejecucion.
+2. Si no tienes task_id, usa `register_task` (incluyendo `backlog_item_id` cuando exista).
+3. Antes de modificar codigo, usa `read_project_context`.
+4. Mientras trabajas, envia `heartbeat` periodicamente.
+5. Cada hito importante debe registrarse con `log_agent_progress`.
+6. Si no puedes continuar, usa `report_blocker` y deten el trabajo.
+7. Al terminar, usa `update_task_status` con `done` o `review`.
+8. Nunca inventes `project_url`, `agent_name` ni `branch`; resuelvelos siempre desde Git.
 ```
 
 ### Paso 4: estructura recomendada para un proyecto cliente
@@ -359,8 +390,8 @@ En ese caso, el `SKILL.md` del proyecto cliente debe describir cuando usar la sk
 
 - No hay servidor MCP oficial en este repositorio.
 - No hay paquete NPM cliente publicado aun.
-- La instalacion final de skills en proyectos clientes sigue dependiendo del runtime del agente que use cada equipo, aunque este repo ya incluye un paquete base descargable en `.github/skills/apts/`.
+- La instalacion final de skills en proyectos clientes sigue dependiendo del runtime del agente que use cada equipo, aunque este repo ya incluye un paquete base exportable en `integracion/paquete-apts/`.
 
 ## Proximo paso natural
 
-Si quieres que la integracion sea casi plug-and-play para otros repositorios, el siguiente paso recomendable es crear un adaptador MCP o un cliente NPM que cargue `apts_skills.json` y traduzca automaticamente cada tool a llamadas HTTP contra APTS.
+Si quieres que la integracion sea casi plug-and-play para otros repositorios, el siguiente paso recomendable es crear un adaptador MCP o un cliente NPM que cargue `integracion/paquete-apts/apts_skills.json` y traduzca automaticamente cada tool a llamadas HTTP contra APTS.

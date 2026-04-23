@@ -53,10 +53,46 @@ async function registerTask(payload) {
   });
 }
 
-async function readProjectContext(url, limit = 5) {
-  const encodedUrl = encodeURIComponent(url);
-  return request(`/projects/context?url=${encodedUrl}&limit=${limit}`, {
+async function readProjectContext(url, limitOrOptions = 5) {
+  const options = typeof limitOrOptions === 'object' && limitOrOptions !== null
+    ? limitOrOptions
+    : { limit: limitOrOptions };
+  const params = new URLSearchParams({
+    url,
+    limit: String(options.limit ?? 5),
+  });
+
+  if (options.backlogStatus) {
+    params.set('backlog_status', options.backlogStatus);
+  }
+
+  return request(`/projects/context?${params.toString()}`, {
     method: 'GET',
+  });
+}
+
+async function listBacklogItems(url, status) {
+  const params = new URLSearchParams({ url });
+  if (status) {
+    params.set('status', status);
+  }
+
+  return request(`/projects/backlog?${params.toString()}`, {
+    method: 'GET',
+  });
+}
+
+async function createBacklogItem(payload) {
+  return request('/projects/backlog', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+async function updateBacklogItem(backlogItemId, payload) {
+  return request(`/backlog/${backlogItemId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
   });
 }
 
@@ -89,11 +125,14 @@ async function heartbeat(taskId, payload) {
 }
 
 module.exports = {
+  createBacklogItem,
   heartbeat,
+  listBacklogItems,
   logAgentProgress,
   readProjectContext,
   registerTask,
   reportBlocker,
   resolveGitIdentity,
+  updateBacklogItem,
   updateTaskStatus,
 };

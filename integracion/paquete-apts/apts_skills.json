@@ -20,6 +20,9 @@
           },
           "context": {
             "type": "string"
+          },
+          "backlog_item_id": {
+            "type": "string"
           }
         },
         "required": [
@@ -32,7 +35,7 @@
     },
     {
       "name": "read_project_context",
-      "description": "Read current project state, pending tasks, and recent history.",
+      "description": "Read current project state, backlog items, pending tasks, and recent history.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -42,10 +45,167 @@
           "limit": {
             "type": "number",
             "default": 5
+          },
+          "backlog_status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "ready",
+              "in_progress",
+              "review",
+              "blocked",
+              "done",
+              "archived"
+            ]
           }
         },
         "required": [
           "url"
+        ]
+      }
+    },
+    {
+      "name": "list_backlog_items",
+      "description": "List backlog items for a project ordered by priority and sort order.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "ready",
+              "in_progress",
+              "review",
+              "blocked",
+              "done",
+              "archived"
+            ]
+          }
+        },
+        "required": [
+          "url"
+        ]
+      }
+    },
+    {
+      "name": "create_backlog_item",
+      "description": "Create a managed backlog item for a project.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project_url": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "acceptance_criteria": {
+            "type": "string"
+          },
+          "item_type": {
+            "type": "string",
+            "enum": [
+              "feature",
+              "bug",
+              "chore",
+              "research"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "ready",
+              "in_progress",
+              "review",
+              "blocked",
+              "done",
+              "archived"
+            ]
+          },
+          "priority": {
+            "type": "number"
+          },
+          "sort_order": {
+            "type": "number"
+          },
+          "source_kind": {
+            "type": "string"
+          },
+          "source_ref": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_url",
+          "title"
+        ]
+      }
+    },
+    {
+      "name": "update_backlog_item",
+      "description": "Update the state, priority or content of an existing backlog item.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "backlog_item_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "acceptance_criteria": {
+            "type": "string"
+          },
+          "item_type": {
+            "type": "string",
+            "enum": [
+              "feature",
+              "bug",
+              "chore",
+              "research"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "ready",
+              "in_progress",
+              "review",
+              "blocked",
+              "done",
+              "archived"
+            ]
+          },
+          "priority": {
+            "type": "number"
+          },
+          "sort_order": {
+            "type": "number"
+          },
+          "source_kind": {
+            "type": "string"
+          },
+          "source_ref": {
+            "type": "string"
+          },
+          "active_task_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "backlog_item_id"
         ]
       }
     },

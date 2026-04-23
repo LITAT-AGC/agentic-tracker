@@ -9,6 +9,8 @@ user-invocable: true
 
 Este skill empaqueta los recursos minimos para conectar un proyecto cliente con APTS sin tener que reconstruir el flujo desde cero.
 
+Nota: en este repositorio se publica como material de integracion en la carpeta raiz `integracion/paquete-apts/` para evitar confundirlo con customizaciones activas del propio proyecto APTS.
+
 ## Cuando usarlo
 
 - Cuando un proyecto quiera reportar trabajo de agentes a APTS.
@@ -19,16 +21,16 @@ Este skill empaqueta los recursos minimos para conectar un proyecto cliente con 
 ## Que incluye
 
 - [Contrato de API](./references/api-contract.md)
-- [Contrato JSON de skills](./assets/apts_skills.json)
-- [Cliente HTTP de ejemplo](./assets/apts-client.js)
-- [Guia base para AGENTS.md o copilot-instructions.md](./assets/apts-agent-guidelines.md)
+- [Contrato JSON de skills](./apts_skills.json)
+- [Cliente HTTP de ejemplo](./apts-client.js)
+- [Guia base para AGENTS.md o copilot-instructions.md](./apts-agent-guidelines.md)
 
 ## Procedimiento recomendado
 
 1. Revisa el [contrato de API](./references/api-contract.md) para confirmar variables, endpoints y payloads.
-2. Copia [apts_skills.json](./assets/apts_skills.json) al proyecto cliente si tu runtime soporta function calling o tool schemas.
-3. Copia [apts-client.js](./assets/apts-client.js) al proyecto cliente si necesitas un wrapper HTTP listo para usar.
-4. Copia [apts-agent-guidelines.md](./assets/apts-agent-guidelines.md) a `AGENTS.md` o a `.github/copilot-instructions.md` del proyecto cliente.
+2. Copia [apts_skills.json](./apts_skills.json) al proyecto cliente si tu runtime soporta function calling o tool schemas.
+3. Copia [apts-client.js](./apts-client.js) al proyecto cliente si necesitas un wrapper HTTP listo para usar.
+4. Copia [apts-agent-guidelines.md](./apts-agent-guidelines.md) a `AGENTS.md` o a `.github/copilot-instructions.md` del proyecto cliente.
 5. Configura `APTS_BASE_URL` y `APTS_API_KEY` en el entorno del proyecto cliente.
 6. Valida la integracion ejecutando `register_task`, luego `log_agent_progress` y despues `heartbeat`.
 
