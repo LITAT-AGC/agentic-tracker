@@ -1,0 +1,14 @@
+{
+  "name": "agentic-project-tracking-service",
+  "version": "1.0.0",
+  "description": "APTS - Agentic Project Tracking Service",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd backend && node index.js",
+    "dev:frontend": "cd frontend && npm run dev",
+    "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

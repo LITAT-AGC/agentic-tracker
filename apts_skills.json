@@ -1,0 +1,96 @@
+{
+  "skills": [
+    {
+      "name": "register_task",
+      "description": "Create a new task in the project. Necessary when an agent starts from scratch and doesn't have a task_id.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project_url": { "type": "string" },
+          "title": { "type": "string" },
+          "agent_name": { "type": "string" },
+          "agent_email": { "type": "string" },
+          "context": { "type": "string" }
+        },
+        "required": ["project_url", "title", "agent_name", "agent_email"]
+      }
+    },
+    {
+      "name": "read_project_context",
+      "description": "Read current project state, pending tasks, and recent history.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": { "type": "string" },
+          "limit": { "type": "number", "default": 5 }
+        },
+        "required": ["url"]
+      }
+    },
+    {
+      "name": "update_task_status",
+      "description": "Update the status of a task.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": { "type": "string" },
+          "status": { "type": "string", "enum": ["todo", "in_progress", "review", "done", "stalled"] },
+          "project_url": { "type": "string" },
+          "agent_name": { "type": "string" },
+          "agent_email": { "type": "string" }
+        },
+        "required": ["task_id", "status", "project_url", "agent_name", "agent_email"]
+      }
+    },
+    {
+      "name": "log_agent_progress",
+      "description": "Log agent progress, bugs fixed, architectural decisions.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": { "type": "string" },
+          "project_url": { "type": "string" },
+          "agent_name": { "type": "string" },
+          "branch": { "type": "string" },
+          "message": { "type": "string" },
+          "technical_details": { 
+            "type": "object",
+            "properties": {
+              "files_modified": { "type": "array", "items": { "type": "string" } },
+              "commands_run": { "type": "array", "items": { "type": "string" } },
+              "outcome": { "type": "string", "enum": ["success", "failure"] }
+            }
+          }
+        },
+        "required": ["task_id", "project_url", "agent_name", "branch", "message"]
+      }
+    },
+    {
+      "name": "report_blocker",
+      "description": "Emergency skill to use when blocked.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project_url": { "type": "string" },
+          "task_id": { "type": "string" },
+          "error_message": { "type": "string" },
+          "agent_name": { "type": "string" }
+        },
+        "required": ["project_url", "task_id", "error_message", "agent_name"]
+      }
+    },
+    {
+      "name": "heartbeat",
+      "description": "Periodic life signal sent every 5 minutes.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": { "type": "string" },
+          "agent_name": { "type": "string" },
+          "project_url": { "type": "string" }
+        },
+        "required": ["task_id", "agent_name", "project_url"]
+      }
+    }
+  ]
+}
