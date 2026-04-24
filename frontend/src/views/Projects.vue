@@ -453,6 +453,7 @@ import { ref, onMounted } from 'vue';
 import DataTable from 'primevue/datatable';
 import Column from 'primevue/column';
 import Dialog from 'primevue/dialog';
+import { apiUrl } from '../config/api';
 
 const projects = ref([]);
 const loading = ref(true);
@@ -485,7 +486,7 @@ const newBacklog = ref(getInitialBacklogForm());
 const fetchProjects = async () => {
   loading.value = true;
   try {
-    const response = await fetch('/api/dashboard/projects');
+    const response = await fetch(apiUrl('/dashboard/projects'));
     const data = await response.json();
     if (data.projects) {
       projects.value = data.projects;
@@ -504,7 +505,7 @@ const fetchProjectDetails = async (url) => {
 
   try {
     const encodedUrl = encodeURIComponent(url);
-    const response = await fetch(`/api/dashboard/projects/${encodedUrl}`);
+    const response = await fetch(apiUrl(`/dashboard/projects/${encodedUrl}`));
     const data = await response.json();
 
     if (!response.ok) {
@@ -541,7 +542,7 @@ const createBacklogItem = async () => {
 
   try {
     const encodedUrl = encodeURIComponent(selectedProject.value.url);
-    const response = await fetch(`/api/dashboard/projects/${encodedUrl}/backlog`, {
+    const response = await fetch(apiUrl(`/dashboard/projects/${encodedUrl}/backlog`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -594,7 +595,7 @@ const saveBacklogItem = async () => {
   backlogError.value = null;
 
   try {
-    const response = await fetch(`/api/dashboard/backlog/${editingBacklog.value.id}`, {
+    const response = await fetch(apiUrl(`/dashboard/backlog/${editingBacklog.value.id}`), {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

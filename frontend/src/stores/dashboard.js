@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { apiUrl } from '../config/api'
 
 export const useDashboardStore = defineStore('dashboard', () => {
   const projects = ref([])
@@ -24,17 +25,17 @@ export const useDashboardStore = defineStore('dashboard', () => {
     isLoading.value = true
     error.value = null
     try {
-      const response = await fetch('http://localhost:46100/api/dashboard/overview', {
+      const response = await fetch(apiUrl('/dashboard/overview'), {
         credentials: 'include' // Since backend uses express-session with cookies
       })
-      
+
       if (!response.ok) {
         if (response.status === 401) {
           throw new Error('Unauthorized')
         }
         throw new Error('Failed to fetch dashboard data')
       }
-      
+
       const data = await response.json()
       projects.value = data.projects || []
       tasks.value = data.tasks || []
@@ -49,14 +50,14 @@ export const useDashboardStore = defineStore('dashboard', () => {
 
   const resolveBlocker = async (taskId, instruction) => {
     try {
-      const response = await fetch(`http://localhost:46100/api/tasks/${taskId}/resolve`, {
+      const response = await fetch(apiUrl(`/tasks/${taskId}/resolve`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ instruction }),
         credentials: 'include'
       })
       if (!response.ok) throw new Error('Failed to resolve blocker')
-      
+
       // Refresh the dashboard immediately
       await fetchOverview()
       return true
@@ -66,12 +67,12 @@ export const useDashboardStore = defineStore('dashboard', () => {
     }
   }
 
-  return { 
-    projects, 
-    tasks, 
-    feed, 
-    isLoading, 
-    error, 
+  return {
+    projects,
+    tasks,
+    feed,
+    isLoading,
+    error,
     activeProjectsCount,
     blockedProjectsCount,
     stalledAgentsCount,
