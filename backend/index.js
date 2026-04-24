@@ -178,6 +178,22 @@ const notifyWebhook = async (project_url, payload) => {
   }
 };
 
+app.get('/api/health', async (_req, res) => {
+  try {
+    await db.raw('select 1');
+    res.json({
+      status: 'ok',
+      database: 'ok',
+      environment: process.env.NODE_ENV || 'development'
+    });
+  } catch (_error) {
+    res.status(503).json({
+      status: 'error',
+      database: 'unavailable'
+    });
+  }
+});
+
 // Skill 0: register_task
 app.post('/api/projects/tasks', apiLimiter, authenticateAgent, async (req, res) => {
   const { project_url, title, agent_name, agent_email, context, backlog_item_id } = req.body;
