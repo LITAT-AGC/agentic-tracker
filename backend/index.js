@@ -165,7 +165,7 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '1.2.0';
+const integrationManifestSchemaVersion = '1.3.0';
 const publicIntegrationBasePath = '/api/public/integrar';
 const integrationArtifacts = {
   skills_json: {
@@ -254,14 +254,44 @@ const buildIntegrationManifest = (req) => ({
       storage_recommendation: 'Aloja APTS_API_KEY como variable de entorno o en el sistema de secretos del proyecto cliente. No la hardcodees en codigo, prompts versionados, archivos JSON ni documentos de backlog.',
       companion_env: 'Configura tambien APTS_BASE_URL con la URL base publicada por este manifiesto.'
     },
+    local_resilience_log: {
+      required: true,
+      source_of_truth: false,
+      purpose: 'Mantener una bitacora local append-only de resiliencia por si APTS queda inaccesible o perdiera historial, sin reemplazar a APTS como tracking operativo principal.',
+      recommended_path: '.apts/agent-resilience-log.jsonl',
+      format: 'jsonl',
+      write_on: [
+        'inicio de ejecucion',
+        'hitos importantes',
+        'bloqueos',
+        'fallos de sincronizacion con APTS',
+        'cierre de tarea'
+      ],
+      recommended_fields: [
+        'timestamp',
+        'agent_role',
+        'project_url',
+        'backlog_item_id',
+        'task_id',
+        'branch',
+        'event',
+        'summary',
+        'files_modified',
+        'commands_run',
+        'apts_sync_status'
+      ],
+      replay_policy: 'Si APTS no esta disponible, conserva la bitacora local y sincroniza luego los hitos relevantes cuando el servicio vuelva. No uses la bitacora para repriorizar ni como estado operativo oficial.',
+      forbidden_content: ['APTS_API_KEY', 'otros secretos', 'tokens', 'credenciales']
+    },
     recommended_first_steps: [
       'Resuelve la identidad del proyecto y del agente desde Git local.',
       'Si APTS_API_KEY no existe todavia en el entorno, solicitala al operador y alojala como secreto antes de usar la API protegida.',
+      'Prepara una bitacora local append-only de resiliencia, por ejemplo en .apts/agent-resilience-log.jsonl, sin tratarla como fuente de verdad.',
       'Inspecciona los archivos locales que hoy contengan backlog, plan o tracking operativo.',
       'Crea o actualiza backlog_items en APTS para reflejar ese estado inicial.',
       'A partir de ese momento usa APTS como sistema principal de seguimiento y no inventes trabajo fuera de APTS.'
     ],
-    operator_prompt_template: 'Lee este manifiesto publico, entiende que APTS es la fuente de verdad del tracking, solicita APTS_API_KEY al operador si no esta disponible, alojala como secreto del proyecto cliente y despues revisa los archivos locales de backlog para migrar o sincronizar esos items hacia APTS antes de continuar la ejecucion normal.'
+    operator_prompt_template: 'Lee este manifiesto publico, entiende que APTS es la fuente de verdad del tracking, solicita APTS_API_KEY al operador si no esta disponible, alojala como secreto del proyecto cliente, prepara una bitacora local append-only de resiliencia y despues revisa los archivos locales de backlog para migrar o sincronizar esos items hacia APTS antes de continuar la ejecucion normal.'
   },
   entrypoint: buildAbsoluteUrl(req, publicIntegrationBasePath),
   api_base_url: buildAbsoluteUrl(req, '/api'),
@@ -280,6 +310,7 @@ const buildIntegrationManifest = (req) => ({
   instructions: [
     'Read the bootstrap section first to understand the service purpose and the migration goal from local tracking to APTS.',
     'If APTS_API_KEY is missing, request it from the operator before any protected API call and store it as an environment secret.',
+    'Maintain the local resilience log described in the bootstrap section; it is append-only and must not replace APTS as the source of truth.',
     'Download and install the skills contract first.',
     'Read the base agent guidelines before the first APTS API call.',
     'Download the optional agent templates only if your runtime supports custom agents.',

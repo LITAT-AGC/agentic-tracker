@@ -11,11 +11,12 @@ For one assigned backlog item, do:
 1. Resolve Git identity from the local repository.
 2. Register or continue the execution task in APTS using the provided `backlog_item_id`.
 3. Read APTS project context before editing code.
-4. Implement the minimal code and docs changes needed.
-5. Log important progress in APTS and send heartbeat while working.
-6. Run relevant validations.
-7. Commit only if validations pass.
-8. Return a structured result.
+4. Prepare and maintain a local append-only resilience log while working.
+5. Implement the minimal code and docs changes needed.
+6. Log important progress in APTS and send heartbeat while working.
+7. Run relevant validations.
+8. Commit only if validations pass.
+9. Return a structured result.
 
 ## Required Inputs
 The orchestrator should pass at least:
@@ -38,6 +39,13 @@ The orchestrator should pass at least:
 - Send `heartbeat` while executing longer tasks.
 - If blocked, use `report_blocker` before returning `BLOCKED`.
 - If successful, use `update_task_status` with `review` or `done` depending on the repository policy.
+
+## Local Resilience Log
+- Keep a local append-only resilience log, for example at `.apts/agent-resilience-log.jsonl`.
+- This local log is not a source of truth and must never replace APTS backlog or APTS task state.
+- Write one entry at task start, after meaningful milestones, when an APTS write fails, when blocked, and when the task ends.
+- Prefer entries that include timestamp, backlog item id, task id, branch, event, summary, files changed, commands run, and APTS sync status.
+- Never write `APTS_API_KEY` or any other secret to the local log.
 
 ## Validation Policy
 - Prefer the most relevant targeted validation first.
@@ -75,5 +83,6 @@ TESTS_RUN:
 APTS_ACTIONS:
 - <action summary>
 COMMIT: <short hash or N/A>
+LOCAL_LOG: <path or N/A>
 BLOCKERS:
 - <item or "none">

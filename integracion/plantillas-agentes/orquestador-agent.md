@@ -24,6 +24,12 @@ Run a linear execution cycle over APTS backlog, one item at a time:
 - Do not read pending status from deleted local mirrors or compatibility files.
 - If you need to enrich planning, do it in APTS backlog using backlog skills rather than local checklist files.
 
+## Local Resilience Log
+- Keep a local append-only resilience log, for example at `.apts/agent-resilience-log.jsonl`.
+- This local log is only a resilience journal and must not replace APTS as the operational source of truth.
+- Log backlog selection, task creation, delegation results, blockers, and any APTS synchronization failure.
+- Never store `APTS_API_KEY` or other secrets in the local log.
+
 ## Selection Rule
 - Use backlog items already ordered by APTS priority and `sort_order`.
 - Only take items with status `ready` unless the user explicitly asks to retry `blocked` or `review` items.
@@ -83,3 +89,4 @@ At cycle end, report:
 - completed backlog items count in this run
 - first blocker found (if any)
 - remaining ready items count
+- local resilience log path used

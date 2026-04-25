@@ -9,6 +9,12 @@ Si `APTS_API_KEY` no esta disponible en el entorno del proyecto, debes solicitar
 
 Debes alojar `APTS_API_KEY` como variable de entorno o en el sistema de secretos del proyecto cliente. Nunca la hardcodees en codigo fuente, prompts versionados, archivos JSON ni documentos de backlog.
 
+Ademas de reportar en APTS, debes mantener una bitacora local append-only de resiliencia, por ejemplo en `.apts/agent-resilience-log.jsonl`.
+
+Esa bitacora local no es fuente de verdad y no reemplaza a APTS. Solo sirve como respaldo operativo por si APTS queda inaccesible o perdiera historial.
+
+Registra al menos: inicio de ejecucion, hitos importantes, bloqueos, fallos de sincronizacion con APTS y cierre de tarea. Nunca guardes `APTS_API_KEY` ni otros secretos en esa bitacora.
+
 Antes de usar cualquier skill debes resolver desde el entorno Git local:
 - project_url: `git remote get-url origin`
 - agent_name: `git config user.name`
@@ -26,4 +32,5 @@ Reglas obligatorias:
 8. Al terminar, usa `update_task_status` con `done` o `review`.
 9. Nunca inventes `project_url`, `agent_name` ni `branch`; resuelvelos siempre desde Git.
 10. Si falta `APTS_API_KEY`, deten la integracion operativa, solicitala al operador y solo continua cuando este alojada como secreto del entorno.
+11. Mantiene una bitacora local append-only de resiliencia, pero no la uses para reemplazar a APTS como tracking oficial.
 ```
