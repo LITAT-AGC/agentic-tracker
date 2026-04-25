@@ -24,6 +24,14 @@ const ignoredHttpLogPaths = (process.env.HTTP_LOG_IGNORE_PATHS || '/api/login')
 const shouldIgnoreHttpLog = (req) => ignoredHttpLogPaths
   .some((pathPrefix) => req.url === pathPrefix || req.url.startsWith(`${pathPrefix}?`));
 
+const isFrontendServiceRequest = (req) => {
+  const requestPath = req.path || req.url || '';
+
+  if (requestPath === '/api/login') return true;
+  if (requestPath.startsWith('/api/dashboard')) return true;
+  return /^\/api\/tasks\/[^/]+\/resolve(?:\?|$)/.test(requestPath);
+};
+
 const logger = pino({
   level: process.env.LOG_LEVEL || (isProduction ? 'info' : 'debug'),
   redact: {
@@ -59,6 +67,7 @@ app.use(pinoHttp({
   customLogLevel: (req, res, err) => {
     if (err || res.statusCode >= 500) return 'error';
     if (res.statusCode >= 400) return 'warn';
+    if (isFrontendServiceRequest(req)) return 'silent';
     return 'info';
   }
 }));
@@ -80,7 +89,7 @@ app.use(session({
   cookie: {
     secure: process.env.NODE_ENV === 'production',
     httpOnly: true,
-    maxAge: 1000 * 60 * 60 * 24
+    maxAge: 1000 * 60 * 60 * 24 * 7
   }
 }));
 
