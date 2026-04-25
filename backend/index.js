@@ -5,12 +5,63 @@ const express = require('express');
 const cors = require('cors');
 const session = require('express-session');
 const rateLimit = require('express-rate-limit');
+const pino = require('pino');
+const pinoHttp = require('pino-http');
 const knexConfig = require('./knexfile');
 const rootPackage = require('../package.json');
 const db = require('knex')(knexConfig[process.env.NODE_ENV || 'development']);
 
 const app = express();
 app.set('trust proxy', 1);
+
+const isProduction = process.env.NODE_ENV === 'production';
+const usePrettyLogs = process.env.PINO_PRETTY !== 'false' && !isProduction;
+const ignoredHttpLogPaths = (process.env.HTTP_LOG_IGNORE_PATHS || '/api/login')
+  .split(',')
+  .map((entry) => entry.trim())
+  .filter(Boolean);
+
+const shouldIgnoreHttpLog = (req) => ignoredHttpLogPaths
+  .some((pathPrefix) => req.url === pathPrefix || req.url.startsWith(`${pathPrefix}?`));
+
+const logger = pino({
+  level: process.env.LOG_LEVEL || (isProduction ? 'info' : 'debug'),
+  redact: {
+    paths: [
+      'req.headers.authorization',
+      'req.headers.cookie',
+      'req.body.password',
+      'req.body.token',
+      'req.body.apts_api_key',
+      'req.body.api_key'
+    ],
+    censor: '[REDACTED]'
+  },
+  ...(usePrettyLogs
+    ? {
+      transport: {
+        target: 'pino-pretty',
+        options: {
+          colorize: true,
+          translateTime: 'SYS:standard',
+          ignore: 'pid,hostname'
+        }
+      }
+    }
+    : {})
+});
+
+app.use(pinoHttp({
+  logger,
+  autoLogging: {
+    ignore: shouldIgnoreHttpLog
+  },
+  customLogLevel: (req, res, err) => {
+    if (err || res.statusCode >= 500) return 'error';
+    if (res.statusCode >= 400) return 'warn';
+    return 'info';
+  }
+}));
 
 app.use(express.json());
 const allowedOrigins = process.env.CORS_ORIGIN
@@ -783,7 +834,7 @@ app.post('/api/tasks/:id/resolve', requireAuth, async (req, res) => {
 
 const PORT = process.env.PORT || 46100;
 app.listen(PORT, () => {
-  console.log(`Backend running on port ${PORT}`);
+  logger.info({ port: PORT }, 'Backend running');
 });
 
 // Internal Job: Detect stalled tasks
@@ -796,10 +847,10 @@ setInterval(async () => {
       .update({ status: 'stalled' });
 
     if (updated > 0) {
-      console.log(`[Job] Marked ${updated} tasks as stalled.`);
+      logger.warn({ updated }, 'Job marked tasks as stalled');
     }
   } catch (error) {
-    console.error('[Job Error]', error);
+    logger.error({ err: error }, 'Job Error');
   }
 }, 60 * 1000); // Check every minute
 
