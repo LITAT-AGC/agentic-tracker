@@ -166,9 +166,10 @@ const mapTaskStatusToBacklogStatus = (status) => {
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
 const integrationManifestSchemaVersion = '1.0.0';
+const publicIntegrationBasePath = '/api/public/integrar';
 const integrationArtifacts = {
   skills_json: {
-    route: '/integrar/skills.json',
+    route: `${publicIntegrationBasePath}/skills.json`,
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts_skills.json'),
     fileName: 'apts_skills.json',
     contentType: 'application/json; charset=utf-8',
@@ -177,7 +178,7 @@ const integrationArtifacts = {
     description: 'Machine-readable tool contract for APTS integration.'
   },
   skill_markdown: {
-    route: '/integrar/skill.md',
+    route: `${publicIntegrationBasePath}/skill.md`,
     filePath: path.join(integrationRoot, 'paquete-apts', 'SKILL.md'),
     fileName: 'SKILL.md',
     contentType: 'text/markdown; charset=utf-8',
@@ -186,7 +187,7 @@ const integrationArtifacts = {
     description: 'Copilot skill packaging guide for APTS integration.'
   },
   agent_guidelines: {
-    route: '/integrar/agent-guidelines.md',
+    route: `${publicIntegrationBasePath}/agent-guidelines.md`,
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-agent-guidelines.md'),
     fileName: 'apts-agent-guidelines.md',
     contentType: 'text/markdown; charset=utf-8',
@@ -195,7 +196,7 @@ const integrationArtifacts = {
     description: 'Base operating rules for any agent that reports work to APTS.'
   },
   executor_agent: {
-    route: '/integrar/agentes/ejecutor-dev-test-commit.agent.md',
+    route: `${publicIntegrationBasePath}/agentes/ejecutor-dev-test-commit.agent.md`,
     filePath: path.join(integrationRoot, 'plantillas-agentes', 'ejecutor-dev-test-commit.agent.md'),
     fileName: 'ejecutor-dev-test-commit.agent.md',
     contentType: 'text/markdown; charset=utf-8',
@@ -204,7 +205,7 @@ const integrationArtifacts = {
     description: 'Worker agent template for one backlog item end-to-end.'
   },
   orchestrator_agent: {
-    route: '/integrar/agentes/orquestador-agent.md',
+    route: `${publicIntegrationBasePath}/agentes/orquestador-agent.md`,
     filePath: path.join(integrationRoot, 'plantillas-agentes', 'orquestador-agent.md'),
     fileName: 'orquestador-agent.md',
     contentType: 'text/markdown; charset=utf-8',
@@ -213,7 +214,7 @@ const integrationArtifacts = {
     description: 'Orchestrator agent template that pulls ready backlog items from APTS.'
   },
   js_client: {
-    route: '/integrar/apts-client.js',
+    route: `${publicIntegrationBasePath}/apts-client.js`,
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-client.js'),
     fileName: 'apts-client.js',
     contentType: 'application/javascript; charset=utf-8',
@@ -231,7 +232,7 @@ const buildIntegrationManifest = (req) => ({
   version: rootPackage.version,
   schema_version: integrationManifestSchemaVersion,
   integration_mode: 'agent',
-  entrypoint: buildAbsoluteUrl(req, '/integrar'),
+  entrypoint: buildAbsoluteUrl(req, publicIntegrationBasePath),
   api_base_url: buildAbsoluteUrl(req, '/api'),
   auth: {
     type: 'bearer',
@@ -284,16 +285,16 @@ const sendIntegrationArtifact = async (req, res, artifactKey) => {
   }
 };
 
-app.get('/integrar', (req, res) => {
+app.get(publicIntegrationBasePath, (req, res) => {
   res.json(buildIntegrationManifest(req));
 });
 
-app.get('/integrar/skills.json', async (req, res) => sendIntegrationArtifact(req, res, 'skills_json'));
-app.get('/integrar/skill.md', async (req, res) => sendIntegrationArtifact(req, res, 'skill_markdown'));
-app.get('/integrar/agent-guidelines.md', async (req, res) => sendIntegrationArtifact(req, res, 'agent_guidelines'));
-app.get('/integrar/agentes/ejecutor-dev-test-commit.agent.md', async (req, res) => sendIntegrationArtifact(req, res, 'executor_agent'));
-app.get('/integrar/agentes/orquestador-agent.md', async (req, res) => sendIntegrationArtifact(req, res, 'orchestrator_agent'));
-app.get('/integrar/apts-client.js', async (req, res) => sendIntegrationArtifact(req, res, 'js_client'));
+app.get(`${publicIntegrationBasePath}/skills.json`, async (req, res) => sendIntegrationArtifact(req, res, 'skills_json'));
+app.get(`${publicIntegrationBasePath}/skill.md`, async (req, res) => sendIntegrationArtifact(req, res, 'skill_markdown'));
+app.get(`${publicIntegrationBasePath}/agent-guidelines.md`, async (req, res) => sendIntegrationArtifact(req, res, 'agent_guidelines'));
+app.get(`${publicIntegrationBasePath}/agentes/ejecutor-dev-test-commit.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'executor_agent'));
+app.get(`${publicIntegrationBasePath}/agentes/orquestador-agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'orchestrator_agent'));
+app.get(`${publicIntegrationBasePath}/apts-client.js`, async (req, res) => sendIntegrationArtifact(req, res, 'js_client'));
 
 // --- AGENT API (SKILLS) ---
 
