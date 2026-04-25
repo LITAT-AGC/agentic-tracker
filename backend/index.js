@@ -32,6 +32,24 @@ const isFrontendServiceRequest = (req) => {
   return /^\/api\/tasks\/[^/]+\/resolve(?:\?|$)/.test(requestPath);
 };
 
+const buildReceivedParams = (req) => {
+  const payload = {};
+
+  if (req.params && Object.keys(req.params).length > 0) {
+    payload.path = req.params;
+  }
+
+  if (req.query && Object.keys(req.query).length > 0) {
+    payload.query = req.query;
+  }
+
+  if (req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0) {
+    payload.body = req.body;
+  }
+
+  return payload;
+};
+
 const logger = pino({
   level: process.env.LOG_LEVEL || (isProduction ? 'info' : 'debug'),
   redact: {
@@ -41,7 +59,11 @@ const logger = pino({
       'req.body.password',
       'req.body.token',
       'req.body.apts_api_key',
-      'req.body.api_key'
+      'req.body.api_key',
+      'received.body.password',
+      'received.body.token',
+      'received.body.apts_api_key',
+      'received.body.api_key'
     ],
     censor: '[REDACTED]'
   },
@@ -61,18 +83,35 @@ const logger = pino({
 
 app.use(pinoHttp({
   logger,
-  autoLogging: {
-    ignore: shouldIgnoreHttpLog
-  },
-  customLogLevel: (req, res, err) => {
-    if (err || res.statusCode >= 500) return 'error';
-    if (res.statusCode >= 400) return 'warn';
-    if (isFrontendServiceRequest(req)) return 'silent';
-    return 'info';
-  }
+  autoLogging: false
 }));
 
 app.use(express.json());
+app.use((req, res, next) => {
+  res.on('finish', () => {
+    if (shouldIgnoreHttpLog(req)) return;
+
+    const route = req.path || req.url;
+    const received = buildReceivedParams(req);
+    const payload = { route, received, status_code: res.statusCode };
+
+    if (res.statusCode >= 500) {
+      logger.error(payload, 'HTTP request');
+      return;
+    }
+
+    if (res.statusCode >= 400) {
+      logger.warn(payload, 'HTTP request');
+      return;
+    }
+
+    if (isFrontendServiceRequest(req)) return;
+    logger.info(payload, 'HTTP request');
+  });
+
+  next();
+});
+
 const allowedOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',')
   : ['http://localhost:5173', 'http://localhost:46101'];
@@ -225,8 +264,26 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '1.3.0';
+const integrationManifestSchemaVersion = '1.4.0';
 const publicIntegrationBasePath = '/api/public/integrar';
+const integrationManifestReleaseNotes = [
+  {
+    version: '1.4.0',
+    date: '2026-04-25',
+    changes: [
+      'Se agrega bootstrap.manifest_updates para publicar novedades por version del manifiesto.',
+      'La version actual del manifiesto queda referenciada en bootstrap.manifest_updates.current_version.'
+    ]
+  },
+  {
+    version: '1.3.0',
+    date: '2026-04-25',
+    changes: [
+      'Se incorpora guidance de bitacora local append-only de resiliencia y su politica de no ser fuente de verdad.',
+      'Se amplian reglas de bootstrap para migracion desde tracking local y manejo de APTS_API_KEY.'
+    ]
+  }
+];
 const integrationArtifacts = {
   skills_json: {
     route: `${publicIntegrationBasePath}/skills.json`,
@@ -293,6 +350,10 @@ const buildIntegrationManifest = (req) => ({
   schema_version: integrationManifestSchemaVersion,
   integration_mode: 'agent',
   bootstrap: {
+    manifest_updates: {
+      current_version: integrationManifestSchemaVersion,
+      notes: integrationManifestReleaseNotes
+    },
     summary: 'APTS centraliza el tracking operativo de proyectos ejecutados por agentes y debe convertirse en la fuente de verdad del backlog y de la ejecucion.',
     service_purpose: 'Usa APTS para registrar backlog, tareas en ejecucion, bloqueos, heartbeats y logs tecnicos en una API REST orientada a automatizacion.',
     source_of_truth: 'Una vez iniciada la integracion, backlog_items y tasks en APTS deben reemplazar mirrors o checklists locales como tracking operativo principal.',
