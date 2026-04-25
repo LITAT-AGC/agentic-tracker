@@ -165,7 +165,7 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '1.1.0';
+const integrationManifestSchemaVersion = '1.2.0';
 const publicIntegrationBasePath = '/api/public/integrar';
 const integrationArtifacts = {
   skills_json: {
@@ -247,13 +247,21 @@ const buildIntegrationManifest = (req) => ({
       bootstrap: 'public',
       agent_api: 'bearer_token_required'
     },
+    credential_bootstrap: {
+      required_secret: 'APTS_API_KEY',
+      how_to_obtain: 'Si APTS_API_KEY no esta disponible en el entorno del proyecto, solicitala explicitamente al operador humano o responsable de la integracion antes de intentar llamadas protegidas.',
+      missing_secret_behavior: 'No intentes register_task, read_project_context ni ninguna otra llamada protegida hasta recibir APTS_API_KEY.',
+      storage_recommendation: 'Aloja APTS_API_KEY como variable de entorno o en el sistema de secretos del proyecto cliente. No la hardcodees en codigo, prompts versionados, archivos JSON ni documentos de backlog.',
+      companion_env: 'Configura tambien APTS_BASE_URL con la URL base publicada por este manifiesto.'
+    },
     recommended_first_steps: [
       'Resuelve la identidad del proyecto y del agente desde Git local.',
+      'Si APTS_API_KEY no existe todavia en el entorno, solicitala al operador y alojala como secreto antes de usar la API protegida.',
       'Inspecciona los archivos locales que hoy contengan backlog, plan o tracking operativo.',
       'Crea o actualiza backlog_items en APTS para reflejar ese estado inicial.',
       'A partir de ese momento usa APTS como sistema principal de seguimiento y no inventes trabajo fuera de APTS.'
     ],
-    operator_prompt_template: 'Lee este manifiesto publico, entiende que APTS es la fuente de verdad del tracking, revisa los archivos locales de backlog del proyecto y migra o sincroniza esos items hacia APTS antes de continuar la ejecucion normal.'
+    operator_prompt_template: 'Lee este manifiesto publico, entiende que APTS es la fuente de verdad del tracking, solicita APTS_API_KEY al operador si no esta disponible, alojala como secreto del proyecto cliente y despues revisa los archivos locales de backlog para migrar o sincronizar esos items hacia APTS antes de continuar la ejecucion normal.'
   },
   entrypoint: buildAbsoluteUrl(req, publicIntegrationBasePath),
   api_base_url: buildAbsoluteUrl(req, '/api'),
@@ -261,10 +269,17 @@ const buildIntegrationManifest = (req) => ({
     type: 'bearer',
     header: 'Authorization',
     scheme: 'Bearer',
-    env: ['APTS_API_KEY', 'APTS_BASE_URL']
+    env: ['APTS_API_KEY', 'APTS_BASE_URL'],
+    required_secret: 'APTS_API_KEY',
+    request_secret_from_operator_when_missing: true,
+    secret_storage: {
+      recommended_locations: ['environment_variables', 'project_secret_store'],
+      avoid: ['hardcoded_source_files', 'tracked_prompt_files', 'versioned_json_contracts', 'backlog_documents']
+    }
   },
   instructions: [
     'Read the bootstrap section first to understand the service purpose and the migration goal from local tracking to APTS.',
+    'If APTS_API_KEY is missing, request it from the operator before any protected API call and store it as an environment secret.',
     'Download and install the skills contract first.',
     'Read the base agent guidelines before the first APTS API call.',
     'Download the optional agent templates only if your runtime supports custom agents.',

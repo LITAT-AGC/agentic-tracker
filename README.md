@@ -52,7 +52,7 @@ El repositorio incluye un paquete descargable para proyectos clientes en `integr
 
 Como este repositorio es publico, esos archivos se consumen directamente desde `integracion/paquete-apts/`.
 
-Ademas, el backend puede publicar un punto de entrada publico para agentes en `/api/public/integrar`. Ese endpoint devuelve un manifiesto JSON con el orden recomendado de instalacion, enlaces descargables al contrato de skills, la guia operativa base, las plantillas opcionales de agentes y un bloque `bootstrap` que explica el proposito de APTS, la migracion desde tracking local y que APTS pasa a ser la fuente de verdad operativa, sin requerir token para el bootstrap.
+Ademas, el backend puede publicar un punto de entrada publico para agentes en `/api/public/integrar`. Ese endpoint devuelve un manifiesto JSON con el orden recomendado de instalacion, enlaces descargables al contrato de skills, la guia operativa base, las plantillas opcionales de agentes y un bloque `bootstrap` que explica el proposito de APTS, la migracion desde tracking local, que APTS pasa a ser la fuente de verdad operativa y como solicitar/alojar `APTS_API_KEY`, sin requerir token para el bootstrap.
 
 Todas las llamadas de agentes deben incluir la cabecera:
 
