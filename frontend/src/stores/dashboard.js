@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { apiUrl } from '../config/api'
+import { apiFetch } from '../config/api'
 
 export const useDashboardStore = defineStore('dashboard', () => {
   const projects = ref([])
@@ -25,14 +25,11 @@ export const useDashboardStore = defineStore('dashboard', () => {
     isLoading.value = true
     error.value = null
     try {
-      const response = await fetch(apiUrl('/dashboard/overview'), {
+      const response = await apiFetch('/dashboard/overview', {
         credentials: 'include' // Since backend uses express-session with cookies
       })
 
       if (!response.ok) {
-        if (response.status === 401) {
-          throw new Error('Unauthorized')
-        }
         throw new Error('Failed to fetch dashboard data')
       }
 
@@ -50,7 +47,7 @@ export const useDashboardStore = defineStore('dashboard', () => {
 
   const resolveBlocker = async (taskId, instruction) => {
     try {
-      const response = await fetch(apiUrl(`/tasks/${taskId}/resolve`), {
+      const response = await apiFetch(`/tasks/${taskId}/resolve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ instruction }),

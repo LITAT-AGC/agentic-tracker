@@ -261,11 +261,9 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { useDashboardStore } from '../stores/dashboard'
 
 const dashboard = useDashboardStore()
-const router = useRouter()
 let intervalId = null
 
 // Modal States
@@ -280,10 +278,7 @@ const activeTechDetails = ref(null)
 const refreshData = async () => {
   try {
     await dashboard.fetchOverview()
-  } catch (err) {
-    if (err.message === 'Unauthorized') {
-      router.push('/login')
-    }
+  } catch (_err) {
   }
 }
 

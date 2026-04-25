@@ -453,7 +453,7 @@ import { ref, onMounted } from 'vue';
 import DataTable from 'primevue/datatable';
 import Column from 'primevue/column';
 import Dialog from 'primevue/dialog';
-import { apiUrl } from '../config/api';
+import { apiFetch } from '../config/api';
 
 const projects = ref([]);
 const loading = ref(true);
@@ -486,8 +486,15 @@ const newBacklog = ref(getInitialBacklogForm());
 const fetchProjects = async () => {
   loading.value = true;
   try {
-    const response = await fetch(apiUrl('/dashboard/projects'));
+    const response = await apiFetch('/dashboard/projects', {
+      credentials: 'include'
+    });
     const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || 'Failed to fetch projects');
+    }
+
     if (data.projects) {
       projects.value = data.projects;
     }
@@ -505,7 +512,9 @@ const fetchProjectDetails = async (url) => {
 
   try {
     const encodedUrl = encodeURIComponent(url);
-    const response = await fetch(apiUrl(`/dashboard/projects/${encodedUrl}`));
+    const response = await apiFetch(`/dashboard/projects/${encodedUrl}`, {
+      credentials: 'include'
+    });
     const data = await response.json();
 
     if (!response.ok) {
@@ -542,9 +551,10 @@ const createBacklogItem = async () => {
 
   try {
     const encodedUrl = encodeURIComponent(selectedProject.value.url);
-    const response = await fetch(apiUrl(`/dashboard/projects/${encodedUrl}/backlog`), {
+    const response = await apiFetch(`/dashboard/projects/${encodedUrl}/backlog`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({
         title: newBacklog.value.title.trim(),
         description: newBacklog.value.description || null,
@@ -595,9 +605,10 @@ const saveBacklogItem = async () => {
   backlogError.value = null;
 
   try {
-    const response = await fetch(apiUrl(`/dashboard/backlog/${editingBacklog.value.id}`), {
+    const response = await apiFetch(`/dashboard/backlog/${editingBacklog.value.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
       body: JSON.stringify({
         title: editingBacklog.value.title.trim(),
         description: editingBacklog.value.description || null,
