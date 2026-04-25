@@ -165,7 +165,7 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '1.0.0';
+const integrationManifestSchemaVersion = '1.1.0';
 const publicIntegrationBasePath = '/api/public/integrar';
 const integrationArtifacts = {
   skills_json: {
@@ -232,6 +232,29 @@ const buildIntegrationManifest = (req) => ({
   version: rootPackage.version,
   schema_version: integrationManifestSchemaVersion,
   integration_mode: 'agent',
+  bootstrap: {
+    summary: 'APTS centraliza el tracking operativo de proyectos ejecutados por agentes y debe convertirse en la fuente de verdad del backlog y de la ejecucion.',
+    service_purpose: 'Usa APTS para registrar backlog, tareas en ejecucion, bloqueos, heartbeats y logs tecnicos en una API REST orientada a automatizacion.',
+    source_of_truth: 'Una vez iniciada la integracion, backlog_items y tasks en APTS deben reemplazar mirrors o checklists locales como tracking operativo principal.',
+    migration_goal: 'Si el proyecto todavia gestiona backlog o tracking en archivos locales, leelos primero y migra o sincroniza esos items hacia APTS antes de continuar el trabajo normal.',
+    local_tracking_inputs: [
+      'archivos markdown de backlog',
+      'planes de proyecto o roadmaps locales',
+      'todo lists o mirrors historicos del tracking',
+      'documentos de alcance o criterios de aceptacion existentes'
+    ],
+    access_model: {
+      bootstrap: 'public',
+      agent_api: 'bearer_token_required'
+    },
+    recommended_first_steps: [
+      'Resuelve la identidad del proyecto y del agente desde Git local.',
+      'Inspecciona los archivos locales que hoy contengan backlog, plan o tracking operativo.',
+      'Crea o actualiza backlog_items en APTS para reflejar ese estado inicial.',
+      'A partir de ese momento usa APTS como sistema principal de seguimiento y no inventes trabajo fuera de APTS.'
+    ],
+    operator_prompt_template: 'Lee este manifiesto publico, entiende que APTS es la fuente de verdad del tracking, revisa los archivos locales de backlog del proyecto y migra o sincroniza esos items hacia APTS antes de continuar la ejecucion normal.'
+  },
   entrypoint: buildAbsoluteUrl(req, publicIntegrationBasePath),
   api_base_url: buildAbsoluteUrl(req, '/api'),
   auth: {
@@ -241,6 +264,7 @@ const buildIntegrationManifest = (req) => ({
     env: ['APTS_API_KEY', 'APTS_BASE_URL']
   },
   instructions: [
+    'Read the bootstrap section first to understand the service purpose and the migration goal from local tracking to APTS.',
     'Download and install the skills contract first.',
     'Read the base agent guidelines before the first APTS API call.',
     'Download the optional agent templates only if your runtime supports custom agents.',
