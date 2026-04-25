@@ -22,17 +22,23 @@ Nota: en este repositorio se publica como material de integracion en la carpeta 
 
 - [Contrato de API](./references/api-contract.md)
 - [Contrato JSON de skills](./apts_skills.json)
-- [Cliente HTTP de ejemplo](./apts-client.js)
+- [Cliente HTTP de ejemplo CommonJS](./apts-client.js)
+- [Cliente HTTP de ejemplo ESM](./apts-client.mjs)
 - [Guia base para AGENTS.md o copilot-instructions.md](./apts-agent-guidelines.md)
 
 ## Procedimiento recomendado
 
 1. Revisa el [contrato de API](./references/api-contract.md) para confirmar variables, endpoints y payloads.
 2. Copia [apts_skills.json](./apts_skills.json) al proyecto cliente si tu runtime soporta function calling o tool schemas.
-3. Copia [apts-client.js](./apts-client.js) al proyecto cliente si necesitas un wrapper HTTP listo para usar.
+3. Copia [apts-client.js](./apts-client.js) si el proyecto cliente usa CommonJS, o [apts-client.mjs](./apts-client.mjs) si usa ESM (`"type": "module"`).
 4. Copia [apts-agent-guidelines.md](./apts-agent-guidelines.md) a `AGENTS.md` o a `.github/copilot-instructions.md` del proyecto cliente.
 5. Configura `APTS_BASE_URL` y `APTS_API_KEY` en el entorno del proyecto cliente.
 6. Valida la integracion ejecutando `register_task`, luego `log_agent_progress` y despues `heartbeat`.
+
+## Nota de mantenimiento
+
+- `apts-client.js` y `apts-client.mjs` deben conservar la misma API publica y el mismo comportamiento.
+- Si se cambia un endpoint, payload, helper o manejo de errores en uno, hay que replicar el cambio en el otro.
 
 ## Politica de ejecucion de backlog (obligatoria)
 

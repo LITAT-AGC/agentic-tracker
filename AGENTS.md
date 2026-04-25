@@ -42,3 +42,4 @@ After testing is completed, you can delete the `apts_test.db` to ensure a clean 
 - Always prioritize using the most specific tool for the task at hand.
 - Before modifying database schemas, always create a new migration. Do not modify existing applied migrations.
 - When creating UI components, utilize the existing Tailwind CSS setup and prioritize the dark, premium aesthetic.
+- If you modify the public integration manifest exposed at `/api/public/integrar`, you must bump `schema_version` and add a matching entry to `bootstrap.manifest_updates.notes` describing the change for client integrators.

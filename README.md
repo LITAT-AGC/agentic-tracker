@@ -48,11 +48,13 @@ Importante: este repositorio publica la API y el contrato de skills, pero no inc
 
 ## Skills disponibles
 
-El repositorio incluye un paquete descargable para proyectos clientes en `integracion/paquete-apts/`. Ese paquete agrupa el skill, un contrato JSON copiable, un cliente HTTP base y una guia de instrucciones para agentes.
+El repositorio incluye un paquete descargable para proyectos clientes en `integracion/paquete-apts/`. Ese paquete agrupa el skill, un contrato JSON copiable, clientes HTTP base para CommonJS y ESM, y una guia de instrucciones para agentes.
 
 Como este repositorio es publico, esos archivos se consumen directamente desde `integracion/paquete-apts/`.
 
-Ademas, el backend puede publicar un punto de entrada publico para agentes en `/api/public/integrar`. Ese endpoint devuelve un manifiesto JSON con el orden recomendado de instalacion, enlaces descargables al contrato de skills, la guia operativa base, las plantillas opcionales de agentes y un bloque `bootstrap` que explica el proposito de APTS, la migracion desde tracking local, que APTS pasa a ser la fuente de verdad operativa, como solicitar/alojar `APTS_API_KEY` y como mantener una bitacora local append-only de resiliencia sin convertirla en tracking oficial, sin requerir token para el bootstrap.
+Ademas, el backend puede publicar un punto de entrada publico para agentes en `/api/public/integrar`. Ese endpoint devuelve un manifiesto JSON con el orden recomendado de instalacion, enlaces descargables al contrato de skills, la guia operativa base, las plantillas opcionales de agentes, los dos clientes HTTP de referencia y un bloque `bootstrap` que explica el proposito de APTS, la migracion desde tracking local, que APTS pasa a ser la fuente de verdad operativa, como solicitar/alojar `APTS_API_KEY`, como mantener una bitacora local append-only de resiliencia sin convertirla en tracking oficial y que cliente descargar segun si el proyecto Node.js cliente corre en CommonJS o en ESM, sin requerir token para el bootstrap.
+
+Politica de mantenimiento del manifiesto: cada cambio funcional, estructural o semantico en `/api/public/integrar` debe actualizar `schema_version` y agregar una entrada nueva en `bootstrap.manifest_updates.notes` explicando que cambio, desde que version aplica y por que importa para los clientes del manifiesto.
 
 Todas las llamadas de agentes deben incluir la cabecera:
 
@@ -258,6 +260,13 @@ Tienes dos opciones validas.
 
 Si quieres una base lista para descargar, copia directamente la carpeta `integracion/paquete-apts/` de este repositorio al proyecto cliente y reutiliza sus assets.
 
+Para el cliente HTTP exportable:
+
+- usa `apts-client.js` si el proyecto cliente corre en CommonJS,
+- usa `apts-client.mjs` si el proyecto cliente corre en ESM.
+
+Importante: ambos scripts deben mantenerse sincronizados. Si APTS cambia endpoints, payloads, helpers o manejo de errores del cliente, el ajuste debe replicarse en `integracion/paquete-apts/apts-client.js` y en `integracion/paquete-apts/apts-client.mjs`.
+
 #### Opcion A: tu runtime soporta esquemas JSON o function calling
 
 1. Copia `integracion/paquete-apts/apts_skills.json` a tu proyecto integrador, por ejemplo en `tools/apts_skills.json`.
@@ -353,6 +362,7 @@ mi-proyecto/
     apts_skills.json
   scripts/
     apts-client.js
+    apts-client.mjs
   .env
 ```
 
@@ -368,6 +378,7 @@ mi-proyecto/
       apts/
         SKILL.md
         apts-client.js
+        apts-client.mjs
 ```
 
 En ese caso, el `SKILL.md` del proyecto cliente debe describir cuando usar la skill y delegar la operacion al cliente HTTP o al bridge que habla con APTS.

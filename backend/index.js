@@ -264,9 +264,17 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '1.4.0';
+const integrationManifestSchemaVersion = '1.5.0';
 const publicIntegrationBasePath = '/api/public/integrar';
 const integrationManifestReleaseNotes = [
+  {
+    version: '1.5.0',
+    date: '2026-04-25',
+    changes: [
+      'El manifiesto ahora publica clientes HTTP separados para CommonJS y ESM.',
+      'Cada artefacto declara cuando usarlo segun la configuracion de modulos del proyecto Node.js.'
+    ]
+  },
   {
     version: '1.4.0',
     date: '2026-04-25',
@@ -330,7 +338,7 @@ const integrationArtifacts = {
     recommended: false,
     description: 'Orchestrator agent template that pulls ready backlog items from APTS.'
   },
-  js_client: {
+  js_client_commonjs: {
     route: `${publicIntegrationBasePath}/apts-client.js`,
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-client.js'),
     fileName: 'apts-client.js',
@@ -338,7 +346,21 @@ const integrationArtifacts = {
     kind: 'reference_client',
     recommended: false,
     optional: true,
-    description: 'Optional JavaScript HTTP client for custom runtimes.'
+    module_system: 'commonjs',
+    selection_rule: 'Use this file when the client project runs Node.js in CommonJS mode, typically with require(...) and without type=module in package.json.',
+    description: 'Optional JavaScript HTTP client for CommonJS runtimes.'
+  },
+  js_client_esm: {
+    route: `${publicIntegrationBasePath}/apts-client.mjs`,
+    filePath: path.join(integrationRoot, 'paquete-apts', 'apts-client.mjs'),
+    fileName: 'apts-client.mjs',
+    contentType: 'application/javascript; charset=utf-8',
+    kind: 'reference_client',
+    recommended: false,
+    optional: true,
+    module_system: 'esm',
+    selection_rule: 'Use this file when the client project runs Node.js in ESM mode, typically with import/export or type=module in package.json.',
+    description: 'Optional JavaScript HTTP client for ESM runtimes.'
   }
 };
 
@@ -374,6 +396,20 @@ const buildIntegrationManifest = (req) => ({
       missing_secret_behavior: 'No intentes register_task, read_project_context ni ninguna otra llamada protegida hasta recibir APTS_API_KEY.',
       storage_recommendation: 'Aloja APTS_API_KEY como variable de entorno o en el sistema de secretos del proyecto cliente. No la hardcodees en codigo, prompts versionados, archivos JSON ni documentos de backlog.',
       companion_env: 'Configura tambien APTS_BASE_URL con la URL base publicada por este manifiesto.'
+    },
+    client_download_guidance: {
+      decision_input: 'Revisa la configuracion de modulos del proyecto Node.js cliente antes de descargar el cliente HTTP.',
+      choose_commonjs_when: [
+        'el proyecto usa require(...)',
+        'package.json no declara type=module',
+        'el runtime espera archivos .js tratados como CommonJS'
+      ],
+      choose_esm_when: [
+        'el proyecto usa import/export',
+        'package.json declara type=module',
+        'el runtime espera archivos .mjs o modulos ESM'
+      ],
+      default_rule: 'Si hay duda, inspecciona package.json y el codigo del proyecto cliente antes de elegir el artefacto.'
     },
     local_resilience_log: {
       required: true,
@@ -434,6 +470,7 @@ const buildIntegrationManifest = (req) => ({
     'Maintain the local resilience log described in the bootstrap section; it is append-only and must not replace APTS as the source of truth.',
     'Download and install the skills contract first.',
     'Read the base agent guidelines before the first APTS API call.',
+    'Choose the reference client that matches the client project module system: apts-client.js for CommonJS or apts-client.mjs for ESM.',
     'Download the optional agent templates only if your runtime supports custom agents.',
     'Use APTS_BASE_URL with the published /api base path.'
   ],
@@ -449,6 +486,8 @@ const buildIntegrationManifest = (req) => ({
     description: artifact.description,
     recommended: artifact.recommended,
     optional: artifact.optional || false,
+    module_system: artifact.module_system || null,
+    selection_rule: artifact.selection_rule || null,
     media_type: artifact.contentType,
     url: buildAbsoluteUrl(req, artifact.route),
     download_url: `${buildAbsoluteUrl(req, artifact.route)}?download=1`
@@ -485,7 +524,8 @@ app.get(`${publicIntegrationBasePath}/skill.md`, async (req, res) => sendIntegra
 app.get(`${publicIntegrationBasePath}/agent-guidelines.md`, async (req, res) => sendIntegrationArtifact(req, res, 'agent_guidelines'));
 app.get(`${publicIntegrationBasePath}/agentes/ejecutor-dev-test-commit.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'executor_agent'));
 app.get(`${publicIntegrationBasePath}/agentes/orquestador-agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'orchestrator_agent'));
-app.get(`${publicIntegrationBasePath}/apts-client.js`, async (req, res) => sendIntegrationArtifact(req, res, 'js_client'));
+app.get(`${publicIntegrationBasePath}/apts-client.js`, async (req, res) => sendIntegrationArtifact(req, res, 'js_client_commonjs'));
+app.get(`${publicIntegrationBasePath}/apts-client.mjs`, async (req, res) => sendIntegrationArtifact(req, res, 'js_client_esm'));
 
 // --- AGENT API (SKILLS) ---
 
