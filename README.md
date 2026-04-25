@@ -52,6 +52,8 @@ El repositorio incluye un paquete descargable para proyectos clientes en `integr
 
 Como este repositorio es publico, esos archivos se consumen directamente desde `integracion/paquete-apts/`.
 
+Ademas, el backend puede publicar un punto de entrada para agentes en `/integrar`. Ese endpoint devuelve un manifiesto JSON con el orden recomendado de instalacion y enlaces descargables al contrato de skills, la guia operativa base y las plantillas opcionales de agentes.
+
 Todas las llamadas de agentes deben incluir la cabecera:
 
 ```http

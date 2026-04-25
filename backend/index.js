@@ -1,9 +1,12 @@
 require('dotenv').config();
+const fs = require('node:fs/promises');
+const path = require('node:path');
 const express = require('express');
 const cors = require('cors');
 const session = require('express-session');
 const rateLimit = require('express-rate-limit');
 const knexConfig = require('./knexfile');
+const rootPackage = require('../package.json');
 const db = require('knex')(knexConfig[process.env.NODE_ENV || 'development']);
 
 const app = express();
@@ -160,6 +163,137 @@ const mapTaskStatusToBacklogStatus = (status) => {
 
   return mapping[status];
 };
+
+const integrationRoot = path.join(__dirname, '..', 'integracion');
+const integrationManifestSchemaVersion = '1.0.0';
+const integrationArtifacts = {
+  skills_json: {
+    route: '/integrar/skills.json',
+    filePath: path.join(integrationRoot, 'paquete-apts', 'apts_skills.json'),
+    fileName: 'apts_skills.json',
+    contentType: 'application/json; charset=utf-8',
+    kind: 'skills_contract',
+    recommended: true,
+    description: 'Machine-readable tool contract for APTS integration.'
+  },
+  skill_markdown: {
+    route: '/integrar/skill.md',
+    filePath: path.join(integrationRoot, 'paquete-apts', 'SKILL.md'),
+    fileName: 'SKILL.md',
+    contentType: 'text/markdown; charset=utf-8',
+    kind: 'skill_package',
+    recommended: false,
+    description: 'Copilot skill packaging guide for APTS integration.'
+  },
+  agent_guidelines: {
+    route: '/integrar/agent-guidelines.md',
+    filePath: path.join(integrationRoot, 'paquete-apts', 'apts-agent-guidelines.md'),
+    fileName: 'apts-agent-guidelines.md',
+    contentType: 'text/markdown; charset=utf-8',
+    kind: 'agent_guidelines',
+    recommended: true,
+    description: 'Base operating rules for any agent that reports work to APTS.'
+  },
+  executor_agent: {
+    route: '/integrar/agentes/ejecutor-dev-test-commit.agent.md',
+    filePath: path.join(integrationRoot, 'plantillas-agentes', 'ejecutor-dev-test-commit.agent.md'),
+    fileName: 'ejecutor-dev-test-commit.agent.md',
+    contentType: 'text/markdown; charset=utf-8',
+    kind: 'agent_template',
+    recommended: false,
+    description: 'Worker agent template for one backlog item end-to-end.'
+  },
+  orchestrator_agent: {
+    route: '/integrar/agentes/orquestador-agent.md',
+    filePath: path.join(integrationRoot, 'plantillas-agentes', 'orquestador-agent.md'),
+    fileName: 'orquestador-agent.md',
+    contentType: 'text/markdown; charset=utf-8',
+    kind: 'agent_template',
+    recommended: false,
+    description: 'Orchestrator agent template that pulls ready backlog items from APTS.'
+  },
+  js_client: {
+    route: '/integrar/apts-client.js',
+    filePath: path.join(integrationRoot, 'paquete-apts', 'apts-client.js'),
+    fileName: 'apts-client.js',
+    contentType: 'application/javascript; charset=utf-8',
+    kind: 'reference_client',
+    recommended: false,
+    optional: true,
+    description: 'Optional JavaScript HTTP client for custom runtimes.'
+  }
+};
+
+const buildAbsoluteUrl = (req, route) => `${req.protocol}://${req.get('host')}${route}`;
+
+const buildIntegrationManifest = (req) => ({
+  service: 'APTS',
+  version: rootPackage.version,
+  schema_version: integrationManifestSchemaVersion,
+  integration_mode: 'agent',
+  entrypoint: buildAbsoluteUrl(req, '/integrar'),
+  api_base_url: buildAbsoluteUrl(req, '/api'),
+  auth: {
+    type: 'bearer',
+    header: 'Authorization',
+    scheme: 'Bearer',
+    env: ['APTS_API_KEY', 'APTS_BASE_URL']
+  },
+  instructions: [
+    'Download and install the skills contract first.',
+    'Read the base agent guidelines before the first APTS API call.',
+    'Download the optional agent templates only if your runtime supports custom agents.',
+    'Use APTS_BASE_URL with the published /api base path.'
+  ],
+  identity_requirements: [
+    { field: 'project_url', resolve_with: 'git remote get-url origin' },
+    { field: 'agent_name', resolve_with: 'git config user.name' },
+    { field: 'agent_email', resolve_with: 'git config user.email' },
+    { field: 'branch', resolve_with: 'git branch --show-current' }
+  ],
+  artifacts: Object.entries(integrationArtifacts).map(([id, artifact]) => ({
+    id,
+    kind: artifact.kind,
+    description: artifact.description,
+    recommended: artifact.recommended,
+    optional: artifact.optional || false,
+    media_type: artifact.contentType,
+    url: buildAbsoluteUrl(req, artifact.route),
+    download_url: `${buildAbsoluteUrl(req, artifact.route)}?download=1`
+  }))
+});
+
+const sendIntegrationArtifact = async (req, res, artifactKey) => {
+  const artifact = integrationArtifacts[artifactKey];
+
+  if (!artifact) {
+    return res.status(404).json({ error: 'Integration artifact not found' });
+  }
+
+  try {
+    const content = await fs.readFile(artifact.filePath, 'utf8');
+
+    if (req.query.download === '1') {
+      res.setHeader('Content-Disposition', `attachment; filename="${artifact.fileName}"`);
+    }
+
+    res.setHeader('Content-Type', artifact.contentType);
+    return res.send(content);
+  } catch (error) {
+    return res.status(500).json({ error: `Unable to read integration artifact: ${error.message}` });
+  }
+};
+
+app.get('/integrar', (req, res) => {
+  res.json(buildIntegrationManifest(req));
+});
+
+app.get('/integrar/skills.json', async (req, res) => sendIntegrationArtifact(req, res, 'skills_json'));
+app.get('/integrar/skill.md', async (req, res) => sendIntegrationArtifact(req, res, 'skill_markdown'));
+app.get('/integrar/agent-guidelines.md', async (req, res) => sendIntegrationArtifact(req, res, 'agent_guidelines'));
+app.get('/integrar/agentes/ejecutor-dev-test-commit.agent.md', async (req, res) => sendIntegrationArtifact(req, res, 'executor_agent'));
+app.get('/integrar/agentes/orquestador-agent.md', async (req, res) => sendIntegrationArtifact(req, res, 'orchestrator_agent'));
+app.get('/integrar/apts-client.js', async (req, res) => sendIntegrationArtifact(req, res, 'js_client'));
 
 // --- AGENT API (SKILLS) ---
 
