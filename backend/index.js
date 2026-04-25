@@ -264,9 +264,17 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '1.5.0';
+const integrationManifestSchemaVersion = '1.6.0';
 const publicIntegrationBasePath = '/api/public/integrar';
 const integrationManifestReleaseNotes = [
+  {
+    version: '1.6.0',
+    date: '2026-04-25',
+    changes: [
+      'La plantilla de Orquestador ahora se publica como orquestador.agent.md para compatibilidad con deteccion de custom agents en VS Code.',
+      'Se mantiene una ruta legacy para descargas antiguas de orquestador-agent.md.'
+    ]
+  },
   {
     version: '1.5.0',
     date: '2026-04-25',
@@ -330,9 +338,9 @@ const integrationArtifacts = {
     description: 'Worker agent template for one backlog item end-to-end.'
   },
   orchestrator_agent: {
-    route: `${publicIntegrationBasePath}/agentes/orquestador-agent.md`,
-    filePath: path.join(integrationRoot, 'plantillas-agentes', 'orquestador-agent.md'),
-    fileName: 'orquestador-agent.md',
+    route: `${publicIntegrationBasePath}/agentes/orquestador.agent.md`,
+    filePath: path.join(integrationRoot, 'plantillas-agentes', 'orquestador.agent.md'),
+    fileName: 'orquestador.agent.md',
     contentType: 'text/markdown; charset=utf-8',
     kind: 'agent_template',
     recommended: false,
@@ -523,6 +531,7 @@ app.get(`${publicIntegrationBasePath}/skills.json`, async (req, res) => sendInte
 app.get(`${publicIntegrationBasePath}/skill.md`, async (req, res) => sendIntegrationArtifact(req, res, 'skill_markdown'));
 app.get(`${publicIntegrationBasePath}/agent-guidelines.md`, async (req, res) => sendIntegrationArtifact(req, res, 'agent_guidelines'));
 app.get(`${publicIntegrationBasePath}/agentes/ejecutor-dev-test-commit.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'executor_agent'));
+app.get(`${publicIntegrationBasePath}/agentes/orquestador.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'orchestrator_agent'));
 app.get(`${publicIntegrationBasePath}/agentes/orquestador-agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'orchestrator_agent'));
 app.get(`${publicIntegrationBasePath}/apts-client.js`, async (req, res) => sendIntegrationArtifact(req, res, 'js_client_commonjs'));
 app.get(`${publicIntegrationBasePath}/apts-client.mjs`, async (req, res) => sendIntegrationArtifact(req, res, 'js_client_esm'));

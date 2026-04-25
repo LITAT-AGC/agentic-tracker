@@ -6,7 +6,7 @@ Se mantiene fuera de `.github/` para evitar que VS Code/Copilot lo trate como cu
 
 ## Estructura
 
-- `plantillas-agentes/`: plantillas de agentes para orquestacion y ejecucion contra APTS, incluyendo `orquestador-agent.md` y `ejecutor-dev-test-commit.agent.md`.
+- `plantillas-agentes/`: plantillas de agentes para orquestacion y ejecucion contra APTS, incluyendo `orquestador.agent.md` y `ejecutor-dev-test-commit.agent.md`.
 - `paquete-apts/`: paquete exportable con contrato JSON, clientes HTTP para CommonJS y ESM, guia operativa y referencia de API.
 
 ## Uso recomendado
@@ -14,6 +14,18 @@ Se mantiene fuera de `.github/` para evitar que VS Code/Copilot lo trate como cu
 1. Toma desde `paquete-apts/` el contrato JSON, el cliente HTTP adecuado para CommonJS o ESM, o la guia que necesite tu proyecto integrador.
 2. Copia desde `plantillas-agentes/` las plantillas de agentes si quieres un flujo orquestador/ejecutor apoyado en backlog de APTS.
 3. Instala esos archivos en el proyecto cliente dentro de las ubicaciones que su runtime de agentes soporte.
+
+## Troubleshooting rapido de agentes (VS Code)
+
+Si una plantilla de agente no aparece en VS Code/Copilot, valida este checklist:
+
+1. Nombre de archivo: debe terminar en `.agent.md` (por ejemplo `orquestador.agent.md`).
+2. Ubicacion: instala el archivo dentro del proyecto cliente abierto en VS Code, en `.github/agents/`.
+3. Frontmatter YAML: verifica que el bloque `---` inicial sea valido y que incluya al menos `name` y `description`.
+4. Tipo de artefacto: `apts_skills.json` define tools/skills HTTP, no crea agentes por si solo.
+5. Recarga del editor: tras copiar agentes nuevos, ejecuta `Developer: Reload Window`.
+
+Recomendacion: manten `Orquestador Agent` y `Ejecutor Dev Test Commit` en la misma carpeta `.github/agents/` para asegurar que la referencia del orquestador al subagente funcione.
 
 Si modificas el cliente HTTP exportable, replica el cambio tanto en `paquete-apts/apts-client.js` como en `paquete-apts/apts-client.mjs` para mantener alineadas las variantes CommonJS y ESM.
 

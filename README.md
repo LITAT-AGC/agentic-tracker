@@ -109,7 +109,7 @@ Un backlog item puede enlazarse con una `active_task_id` mientras esta en ejecuc
 
 Este repositorio incluye plantillas de agentes de integracion en `integracion/plantillas-agentes/`:
 
-- `Orquestador Agent` (`integracion/plantillas-agentes/orquestador-agent.md`): toma items `ready` del backlog en APTS, crea la task de ejecucion y delega el trabajo atomico.
+- `Orquestador Agent` (`integracion/plantillas-agentes/orquestador.agent.md`): toma items `ready` del backlog en APTS, crea la task de ejecucion y delega el trabajo atomico.
 - `Ejecutor Dev Test Commit` (`integracion/plantillas-agentes/ejecutor-dev-test-commit.agent.md`): implementa un solo item del backlog, registra progreso en APTS, ejecuta validaciones relevantes del repositorio y solo committea si pasan.
 
 Las plantillas exportables viven en `integracion/plantillas-agentes/` y el repo ya no depende de borradores locales temporales.
@@ -382,6 +382,21 @@ mi-proyecto/
 ```
 
 En ese caso, el `SKILL.md` del proyecto cliente debe describir cuando usar la skill y delegar la operacion al cliente HTTP o al bridge que habla con APTS.
+
+### Troubleshooting: VS Code no reconoce los agentes
+
+Si descargaste las plantillas y no aparecen como custom agents, revisa lo siguiente:
+
+1. El archivo debe terminar en `.agent.md`.
+2. Debe estar en `.github/agents/` del proyecto cliente abierto en VS Code.
+3. El frontmatter YAML debe ser valido (bloque `---` con `name` y `description`).
+4. `apts_skills.json` solo define tools/skills; no instala agentes automaticamente.
+5. Recarga VS Code con `Developer: Reload Window` luego de copiar o renombrar plantillas.
+
+Referencia de plantillas en este repo:
+
+- `integracion/plantillas-agentes/orquestador.agent.md`
+- `integracion/plantillas-agentes/ejecutor-dev-test-commit.agent.md`
 
 ### Paso 5: validacion de la integracion
 
