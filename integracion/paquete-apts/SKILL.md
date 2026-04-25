@@ -34,6 +34,12 @@ Nota: en este repositorio se publica como material de integracion en la carpeta 
 5. Configura `APTS_BASE_URL` y `APTS_API_KEY` en el entorno del proyecto cliente.
 6. Valida la integracion ejecutando `register_task`, luego `log_agent_progress` y despues `heartbeat`.
 
+## Politica de ejecucion de backlog (obligatoria)
+
+- Para pedidos de ejecucion como "siguiente tarea", "next task", "continuar backlog" o "ejecutar backlog", el punto de entrada debe ser `Orquestador Agent`.
+- No ejecutes implementacion directa desde el agente general si corresponde una corrida de backlog.
+- Si `Orquestador Agent` no esta disponible en el proyecto cliente, detiene la operacion y solicita al operador instalar/corregir la plantilla antes de continuar.
+
 ## Resultado esperado
 
 El proyecto cliente queda con:
