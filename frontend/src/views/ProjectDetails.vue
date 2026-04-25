@@ -301,7 +301,8 @@
         content: { class: 'bg-gray-900/90 p-5' },
         closeButton: { class: 'text-gray-400 hover:text-white transition-colors bg-gray-800 hover:bg-gray-700 rounded-full w-8 h-8 flex items-center justify-center border-none outline-none' }
       }"
-      :style="{ width: '90vw', maxWidth: '900px' }"
+      :style="{ width: '98vw', maxWidth: '1800px' }"
+      :contentStyle="{ maxHeight: 'calc(96vh - 8rem)', overflowY: 'auto' }"
       modal
       :dismissableMask="true"
       @hide="cancelBacklogEdit"
@@ -313,7 +314,7 @@
         </div>
       </template>
 
-      <div v-if="editingBacklog" class="space-y-3">
+      <div v-if="editingBacklog" class="space-y-4 min-h-[calc(96vh-14rem)] flex flex-col">
         <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
           <input
             v-model="editingBacklog.title"
@@ -334,20 +335,26 @@
           </select>
         </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-6 gap-3">
-          <textarea
-            v-model="editingBacklog.description"
-            rows="2"
-            class="md:col-span-3 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/40 resize-none"
-          ></textarea>
-          <textarea
-            v-model="editingBacklog.acceptance_criteria"
-            rows="2"
-            class="md:col-span-3 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/40 resize-none"
-          ></textarea>
+        <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 flex-1">
+          <div class="flex flex-col min-h-[34vh]">
+            <label class="block text-[11px] uppercase tracking-wider text-fuchsia-200/70 mb-1">Descripcion</label>
+            <textarea
+              v-model="editingBacklog.description"
+              rows="14"
+              class="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/40 resize-y min-h-[34vh]"
+            ></textarea>
+          </div>
+          <div class="flex flex-col min-h-[34vh]">
+            <label class="block text-[11px] uppercase tracking-wider text-fuchsia-200/70 mb-1">Criterios de aceptacion</label>
+            <textarea
+              v-model="editingBacklog.acceptance_criteria"
+              rows="14"
+              class="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/40 resize-y min-h-[34vh]"
+            ></textarea>
+          </div>
         </div>
 
-        <div class="flex flex-wrap items-end gap-3">
+        <div class="flex flex-wrap items-end gap-3 pt-2 border-t border-gray-700/40">
           <div>
             <label class="block text-[11px] uppercase tracking-wider text-fuchsia-200/70 mb-1">Prioridad</label>
             <input
