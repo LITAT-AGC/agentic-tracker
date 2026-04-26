@@ -30,6 +30,8 @@
 
       <DataTable
         :value="projects"
+        v-model:filters="projectFilters"
+        filterDisplay="row"
         :paginator="true"
         :rows="10"
         dataKey="url"
@@ -59,11 +61,20 @@
             <span class="text-gray-400 text-xs truncate max-w-xs block" :title="data.url">{{ data.url }}</span>
           </template>
         </Column>
-        <Column field="status" header="Estado" sortable>
+        <Column field="status" header="Estado" sortable filter filterField="status" :showFilterMenu="false">
           <template #body="{ data }">
             <span :class="['px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider', getStatusClass(data.status)]">
               {{ data.status }}
             </span>
+          </template>
+          <template #filter="{ filterModel, filterCallback }">
+            <MultiSelect
+              v-model="filterModel.value"
+              :options="projectStatusOptions"
+              @change="filterCallback()"
+              :maxSelectedLabels="1"
+              class="w-full"
+            />
           </template>
         </Column>
         <Column field="webhook_url" header="Webhook">
@@ -95,12 +106,17 @@ import { ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import DataTable from 'primevue/datatable';
 import Column from 'primevue/column';
+import MultiSelect from 'primevue/multiselect';
 import { apiFetch } from '../config/api';
 
 const router = useRouter();
 
 const projects = ref([]);
 const loading = ref(true);
+const projectStatusOptions = ['pending', 'active', 'blocked', 'stalled', 'completed'];
+const projectFilters = ref({
+  status: { value: [...projectStatusOptions], matchMode: 'in' }
+});
 
 const fetchProjects = async () => {
   loading.value = true;

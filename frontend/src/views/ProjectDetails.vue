@@ -42,7 +42,14 @@
         </div>
 
         <div class="bg-gray-800/40 rounded-xl border border-gray-700/50 overflow-hidden">
-          <DataTable :value="projectTasks" :paginator="true" :rows="6"
+          <DataTable
+            :value="projectTasks"
+            v-model:filters="taskFilters"
+            filterDisplay="row"
+            :paginator="true"
+            :rows="200"
+            :scrollable="true"
+            scrollHeight="480px"
             class="w-full text-sm"
             :pt="{
               headerRow: { class: 'bg-gray-800/30' },
@@ -50,7 +57,8 @@
               bodyCell: { class: 'py-3 px-4 border-none text-gray-300' },
               headerCell: { class: 'py-3 px-4 text-gray-400 text-xs font-semibold uppercase tracking-wider border-none bg-transparent' },
               paginator: { class: 'bg-transparent border-t border-gray-800/50' }
-            }">
+            }"
+          >
             <template #empty>
               <div class="p-6 text-center text-gray-500 text-sm">No hay tareas asignadas a este proyecto aún.</div>
             </template>
@@ -70,11 +78,20 @@
                 </div>
               </template>
             </Column>
-            <Column field="status" header="Estado">
+            <Column field="status" header="Estado" filter filterField="status" :showFilterMenu="false">
               <template #body="{ data }">
                 <span :class="['px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider', getTaskStatusClass(data.status)]">
                   {{ data.status.replace('_', ' ') }}
                 </span>
+              </template>
+              <template #filter="{ filterModel, filterCallback }">
+                <MultiSelect
+                  v-model="filterModel.value"
+                  :options="taskStatusOptions"
+                  @change="filterCallback()"
+                  :maxSelectedLabels="1"
+                  class="w-full"
+                />
               </template>
             </Column>
             <Column field="last_heartbeat" header="Última Señal">
@@ -95,80 +112,26 @@
             <div class="w-1 h-5 bg-fuchsia-500 rounded-full"></div>
             <h3 class="text-lg font-bold text-gray-200">Backlog Gestionado</h3>
           </div>
-          <span class="text-xs font-medium text-gray-400">{{ projectBacklog.length }} item(s)</span>
+          <div class="flex items-center gap-3">
+            <button
+              @click="openBacklogCreator"
+              class="px-3 py-1.5 bg-fuchsia-600 hover:bg-fuchsia-700 text-white rounded-lg text-xs font-medium transition-colors"
+            >
+              Agregar item
+            </button>
+            <span class="text-xs font-medium text-gray-400">{{ projectBacklog.length }} item(s)</span>
+          </div>
         </div>
 
         <div class="bg-gray-800/40 rounded-xl border border-gray-700/50 overflow-hidden">
-          <div class="p-4 border-b border-gray-700/40 bg-gray-900/30 space-y-3">
-            <div class="flex items-center justify-between">
-              <h4 class="text-sm font-semibold text-gray-200">Agregar item</h4>
-              <span class="text-[11px] text-gray-500">Fuente de verdad del trabajo planificado</span>
-            </div>
-
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
-              <input
-                v-model="newBacklog.title"
-                type="text"
-                placeholder="Título del backlog item"
-                class="md:col-span-2 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/40"
-              >
-              <select
-                v-model="newBacklog.item_type"
-                class="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/40"
-              >
-                <option v-for="type in backlogTypeOptions" :key="type" :value="type">{{ type }}</option>
-              </select>
-              <select
-                v-model="newBacklog.status"
-                class="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/40"
-              >
-                <option v-for="status in backlogStatusOptions" :key="status" :value="status">{{ status }}</option>
-              </select>
-            </div>
-
-            <div class="grid grid-cols-1 md:grid-cols-6 gap-3">
-              <textarea
-                v-model="newBacklog.description"
-                rows="2"
-                placeholder="Descripción"
-                class="md:col-span-3 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/40 resize-none"
-              ></textarea>
-              <textarea
-                v-model="newBacklog.acceptance_criteria"
-                rows="2"
-                placeholder="Criterios de aceptación"
-                class="md:col-span-3 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/40 resize-none"
-              ></textarea>
-            </div>
-
-            <div class="flex flex-wrap items-end gap-3">
-              <div>
-                <label class="block text-[11px] uppercase tracking-wider text-gray-500 mb-1">Prioridad</label>
-                <input
-                  v-model.number="newBacklog.priority"
-                  type="number"
-                  class="w-28 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/40"
-                >
-              </div>
-              <div>
-                <label class="block text-[11px] uppercase tracking-wider text-gray-500 mb-1">Orden</label>
-                <input
-                  v-model.number="newBacklog.sort_order"
-                  type="number"
-                  class="w-28 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/40"
-                >
-              </div>
-              <button
-                @click="createBacklogItem"
-                :disabled="isSavingBacklog || !newBacklog.title.trim()"
-                class="ml-auto px-4 py-2 bg-fuchsia-600 hover:bg-fuchsia-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors"
-              >
-                {{ isSavingBacklog ? 'Guardando...' : 'Agregar al Backlog' }}
-              </button>
-            </div>
-          </div>
-
-          <DataTable :value="projectBacklog" :paginator="true" :rows="100" :scrollable="true" scrollHeight="480px"
+          <DataTable
+            :value="projectBacklog"
+            v-model:filters="backlogFilters"
+            filterDisplay="row"
+            :paginator="true"
+            :rows="200"
+            :scrollable="true"
+            scrollHeight="480px"
             class="w-full text-sm"
             :pt="{
               headerRow: { class: 'bg-gray-800/30' },
@@ -176,7 +139,8 @@
               bodyCell: { class: 'py-3 px-4 border-none text-gray-300' },
               headerCell: { class: 'py-3 px-4 text-gray-400 text-xs font-semibold uppercase tracking-wider border-none bg-transparent' },
               paginator: { class: 'bg-transparent border-t border-gray-800/50' }
-            }">
+            }"
+          >
 
             <template #empty>
               <div class="p-6 text-center text-gray-500 text-sm">No hay backlog para este proyecto todavía.</div>
@@ -205,17 +169,35 @@
               </template>
             </Column>
 
-            <Column field="item_type" header="Tipo" sortable>
+            <Column field="item_type" header="Tipo" sortable filter filterField="item_type" :showFilterMenu="false">
               <template #body="{ data }">
                 <span class="text-xs uppercase tracking-wider text-gray-400">{{ data.item_type }}</span>
               </template>
+              <template #filter="{ filterModel, filterCallback }">
+                <MultiSelect
+                  v-model="filterModel.value"
+                  :options="backlogTypeOptions"
+                  @change="filterCallback()"
+                  :maxSelectedLabels="1"
+                  class="w-full"
+                />
+              </template>
             </Column>
 
-            <Column field="status" header="Estado" sortable>
+            <Column field="status" header="Estado" sortable filter filterField="status" :showFilterMenu="false">
               <template #body="{ data }">
                 <span :class="['px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider', getBacklogStatusClass(data.status)]">
                   {{ data.status.replace('_', ' ') }}
                 </span>
+              </template>
+              <template #filter="{ filterModel, filterCallback }">
+                <MultiSelect
+                  v-model="filterModel.value"
+                  :options="backlogStatusOptions"
+                  @change="filterCallback()"
+                  :maxSelectedLabels="1"
+                  class="w-full"
+                />
               </template>
             </Column>
 
@@ -251,7 +233,14 @@
         </div>
 
         <div class="bg-gray-800/40 rounded-xl border border-gray-700/50 overflow-hidden">
-          <DataTable :value="projectLogs" :paginator="true" :rows="8"
+          <DataTable
+            :value="projectLogs"
+            v-model:filters="logFilters"
+            filterDisplay="row"
+            :paginator="true"
+            :rows="200"
+            :scrollable="true"
+            scrollHeight="480px"
             class="w-full text-sm"
             :pt="{
               headerRow: { class: 'bg-gray-800/30' },
@@ -259,15 +248,25 @@
               bodyCell: { class: 'py-3 px-4 border-none text-gray-300' },
               headerCell: { class: 'py-3 px-4 text-gray-400 text-xs font-semibold uppercase tracking-wider border-none bg-transparent' },
               paginator: { class: 'bg-transparent border-t border-gray-800/50' }
-            }">
+            }"
+          >
 
             <template #empty>
               <div class="p-6 text-center text-gray-500 text-sm">No hay logs de ejecución registrados aún.</div>
             </template>
 
-            <Column field="action_type" header="Acción">
+            <Column field="action_type" header="Acción" filter filterField="action_type" :showFilterMenu="false">
               <template #body="{ data }">
                 <span class="text-xs font-medium text-gray-400">{{ data.action_type || 'update' }}</span>
+              </template>
+              <template #filter="{ filterModel, filterCallback }">
+                <MultiSelect
+                  v-model="filterModel.value"
+                  :options="logActionOptions"
+                  @change="filterCallback()"
+                  :maxSelectedLabels="1"
+                  class="w-full"
+                />
               </template>
             </Column>
             <Column field="task_title" header="Contexto (Tarea)">
@@ -310,7 +309,7 @@
       <template #header>
         <div class="flex items-center gap-2">
           <div class="w-1 h-5 bg-fuchsia-500 rounded-full"></div>
-          <h4 class="text-sm md:text-base font-semibold text-fuchsia-300">Editar backlog item</h4>
+          <h4 class="text-sm md:text-base font-semibold text-fuchsia-300">{{ backlogDialogMode === 'create' ? 'Agregar backlog item' : 'Editar backlog item' }}</h4>
         </div>
       </template>
 
@@ -376,7 +375,7 @@
             :disabled="isSavingBacklog || !editingBacklog.title?.trim()"
             class="ml-auto px-4 py-2 bg-fuchsia-600 hover:bg-fuchsia-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors"
           >
-            {{ isSavingBacklog ? 'Guardando...' : 'Guardar cambios' }}
+            {{ isSavingBacklog ? 'Guardando...' : backlogDialogMode === 'create' ? 'Crear item' : 'Guardar cambios' }}
           </button>
         </div>
       </div>
@@ -385,11 +384,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue';
+import { computed, ref, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import DataTable from 'primevue/datatable';
 import Column from 'primevue/column';
 import Dialog from 'primevue/dialog';
+import MultiSelect from 'primevue/multiselect';
 import { apiFetch } from '../config/api';
 
 const route = useRoute();
@@ -406,9 +406,28 @@ const backlogError = ref(null);
 const isSavingBacklog = ref(false);
 const editingBacklog = ref(null);
 const showEditBacklogDialog = ref(false);
+const backlogDialogMode = ref('edit');
 
 const backlogTypeOptions = ['feature', 'bug', 'chore', 'research'];
 const backlogStatusOptions = ['draft', 'ready', 'in_progress', 'review', 'blocked', 'done', 'archived'];
+const taskStatusOptions = ['todo', 'in_progress', 'review', 'done', 'stalled'];
+
+const taskFilters = ref({
+  status: { value: [...taskStatusOptions], matchMode: 'in' }
+});
+
+const backlogFilters = ref({
+  item_type: { value: [...backlogTypeOptions], matchMode: 'in' },
+  status: { value: [...backlogStatusOptions], matchMode: 'in' }
+});
+
+const logFilters = ref({
+  action_type: { value: [], matchMode: 'in' }
+});
+
+const logActionOptions = computed(() => {
+  return [...new Set(projectLogs.value.map((log) => log.action_type || 'update'))].sort();
+});
 
 const getInitialBacklogForm = () => ({
   title: '',
@@ -420,16 +439,24 @@ const getInitialBacklogForm = () => ({
   sort_order: 0
 });
 
-const newBacklog = ref(getInitialBacklogForm());
-
 const resetDetails = () => {
   projectTasks.value = [];
   projectBacklog.value = [];
   projectLogs.value = [];
+  taskFilters.value = {
+    status: { value: [...taskStatusOptions], matchMode: 'in' }
+  };
+  backlogFilters.value = {
+    item_type: { value: [...backlogTypeOptions], matchMode: 'in' },
+    status: { value: [...backlogStatusOptions], matchMode: 'in' }
+  };
+  logFilters.value = {
+    action_type: { value: [], matchMode: 'in' }
+  };
   backlogError.value = null;
   editingBacklog.value = null;
+  backlogDialogMode.value = 'edit';
   showEditBacklogDialog.value = false;
-  newBacklog.value = getInitialBacklogForm();
 };
 
 const fetchProjectDetails = async (url) => {
@@ -449,7 +476,16 @@ const fetchProjectDetails = async (url) => {
     selectedProject.value = data.project || { url };
     projectTasks.value = data.tasks || [];
     projectBacklog.value = data.backlog || [];
-    projectLogs.value = data.logs || [];
+    projectLogs.value = (data.logs || []).map((log) => ({
+      ...log,
+      action_type: log.action_type || 'update'
+    }));
+    logFilters.value = {
+      action_type: {
+        value: [...new Set(projectLogs.value.map((log) => log.action_type || 'update'))].sort(),
+        matchMode: 'in'
+      }
+    };
   } catch (error) {
     backlogError.value = error.message;
     throw error;
@@ -477,46 +513,11 @@ const loadProject = async () => {
   }
 };
 
-const createBacklogItem = async () => {
-  if (!selectedProject.value?.url || !newBacklog.value.title.trim()) {
-    return;
-  }
-
-  isSavingBacklog.value = true;
+const openBacklogCreator = () => {
+  editingBacklog.value = getInitialBacklogForm();
+  backlogDialogMode.value = 'create';
+  showEditBacklogDialog.value = true;
   backlogError.value = null;
-
-  try {
-    const encodedUrl = encodeURIComponent(selectedProject.value.url);
-    const response = await apiFetch(`/dashboard/projects/${encodedUrl}/backlog`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({
-        title: newBacklog.value.title.trim(),
-        description: newBacklog.value.description || null,
-        acceptance_criteria: newBacklog.value.acceptance_criteria || null,
-        item_type: newBacklog.value.item_type,
-        status: newBacklog.value.status,
-        priority: Number.parseInt(newBacklog.value.priority, 10),
-        sort_order: Number.parseInt(newBacklog.value.sort_order, 10),
-        source_kind: 'dashboard',
-        source_ref: 'project-details-view'
-      })
-    });
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.error || 'Failed to create backlog item');
-    }
-
-    newBacklog.value = getInitialBacklogForm();
-    await fetchProjectDetails(selectedProject.value.url);
-  } catch (error) {
-    backlogError.value = error.message;
-    console.error('Failed to create backlog item', error);
-  } finally {
-    isSavingBacklog.value = false;
-  }
 };
 
 const openBacklogEditor = (item) => {
@@ -525,6 +526,7 @@ const openBacklogEditor = (item) => {
     priority: Number.parseInt(item.priority, 10),
     sort_order: Number.parseInt(item.sort_order, 10)
   };
+  backlogDialogMode.value = 'edit';
   showEditBacklogDialog.value = true;
   backlogError.value = null;
 };
@@ -532,6 +534,7 @@ const openBacklogEditor = (item) => {
 const cancelBacklogEdit = () => {
   showEditBacklogDialog.value = false;
   editingBacklog.value = null;
+  backlogDialogMode.value = 'edit';
 };
 
 const saveBacklogItem = async () => {
@@ -543,31 +546,40 @@ const saveBacklogItem = async () => {
   backlogError.value = null;
 
   try {
-    const response = await apiFetch(`/dashboard/backlog/${editingBacklog.value.id}`, {
-      method: 'PATCH',
+    const payload = {
+      title: editingBacklog.value.title.trim(),
+      description: editingBacklog.value.description || null,
+      acceptance_criteria: editingBacklog.value.acceptance_criteria || null,
+      item_type: editingBacklog.value.item_type,
+      status: editingBacklog.value.status,
+      priority: Number.parseInt(editingBacklog.value.priority, 10),
+      sort_order: Number.parseInt(editingBacklog.value.sort_order, 10)
+    };
+    const isCreate = backlogDialogMode.value === 'create';
+    const encodedUrl = encodeURIComponent(selectedProject.value.url);
+    const response = await apiFetch(isCreate ? `/dashboard/projects/${encodedUrl}/backlog` : `/dashboard/backlog/${editingBacklog.value.id}`, {
+      method: isCreate ? 'POST' : 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
-      body: JSON.stringify({
-        title: editingBacklog.value.title.trim(),
-        description: editingBacklog.value.description || null,
-        acceptance_criteria: editingBacklog.value.acceptance_criteria || null,
-        item_type: editingBacklog.value.item_type,
-        status: editingBacklog.value.status,
-        priority: Number.parseInt(editingBacklog.value.priority, 10),
-        sort_order: Number.parseInt(editingBacklog.value.sort_order, 10)
-      })
+      body: JSON.stringify(isCreate ? {
+        ...payload,
+        source_kind: 'dashboard',
+        source_ref: 'project-details-view'
+      } : payload)
     });
     const data = await response.json();
 
     if (!response.ok) {
-      throw new Error(data.error || 'Failed to update backlog item');
+      throw new Error(data.error || (isCreate ? 'Failed to create backlog item' : 'Failed to update backlog item'));
     }
 
     showEditBacklogDialog.value = false;
+    editingBacklog.value = null;
+    backlogDialogMode.value = 'edit';
     await fetchProjectDetails(selectedProject.value.url);
   } catch (error) {
     backlogError.value = error.message;
-    console.error('Failed to update backlog item', error);
+    console.error('Failed to save backlog item', error);
   } finally {
     isSavingBacklog.value = false;
   }
