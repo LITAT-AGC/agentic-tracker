@@ -645,112 +645,120 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.2';
+const integrationManifestSchemaVersion = '2.0.3';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
   {
+    version: '2.0.3',
+    date: '2026-04-27',
+    changes: [
+      'The public integration manifest bootstrap content is now fully in English for better LLM compatibility during agent onboarding.',
+      'The public integration package and agent-facing guidance files were translated to English while preserving existing API route names.'
+    ]
+  },
+  {
     version: '2.0.2',
     date: '2026-04-27',
     changes: [
-      'Se sincroniza por unica vez el historial de bootstrap.manifest_updates.notes con la cronologia real de commits del repositorio.',
-      'Se agregan entradas faltantes para las versiones 1.0.0, 1.1.0 y 1.2.0 para conservar trazabilidad completa del manifiesto.'
+      'Bootstrap manifest_updates.notes history was synchronized one time with the real repository commit chronology.',
+      'Missing entries for versions 1.0.0, 1.1.0, and 1.2.0 were added to preserve full manifest traceability.'
     ]
   },
   {
     version: '2.0.1',
     date: '2026-04-27',
     changes: [
-      'Se explicita para integradores que APTS_BASE_URL y APTS_API_KEY deben definirse en un archivo .env en la raiz del proyecto cliente (o en un secret store equivalente) (commit 45297ae).',
-      'Se agrega ejemplo de variables para reducir errores de descubrimiento de URL y API key durante el bootstrap (commit 45297ae).'
+      'Integrators are explicitly instructed to define APTS_BASE_URL and APTS_API_KEY in a .env file at the client project root (or an equivalent secret store) (commit 45297ae).',
+      'A variables example was added to reduce URL and API key discovery errors during bootstrap (commit 45297ae).'
     ]
   },
   {
     version: '2.0.0',
     date: '2026-04-27',
     changes: [
-      'Se renombran las plantillas de agentes publicadas por el manifiesto a nombres mas descriptivos de su funcion (commit c477837).',
-      'Las rutas de descarga de agentes cambian a /agentes/orquestador-backlog-apts.agent.md y /agentes/ejecutor-item-backlog-dev-test-commit.agent.md sin alias legacy (commit c477837).'
+      'Agent templates published by the manifest were renamed to more descriptive functional names (commit c477837).',
+      'Agent download routes changed to /agentes/orquestador-backlog-apts.agent.md and /agentes/ejecutor-item-backlog-dev-test-commit.agent.md without legacy aliases (commit c477837).'
     ]
   },
   {
     version: '1.9.0',
     date: '2026-04-27',
     changes: [
-      'La API de agentes incorpora validacion estructurada con Zod para payloads de POST/PATCH criticos (commit f9d3f98).',
-      'Los endpoints mutantes devuelven errores 400/404 mas consistentes frente a tipos invalidos, enums fuera de contrato o IDs no validos (commit f9d3f98).'
+      'The agent API added structured validation with Zod for critical POST/PATCH payloads (commit f9d3f98).',
+      'Mutating endpoints now return more consistent 400/404 errors for invalid types, out-of-contract enums, or invalid IDs (commit f9d3f98).'
     ]
   },
   {
     version: '1.8.0',
     date: '2026-04-27',
     changes: [
-      'El cliente oficial de integracion (CommonJS y ESM) ahora cubre soft-delete de backlog y listado con include_deleted (commit 40efcc0).',
-      'Se actualiza el contrato de skills para incluir delete_backlog_item y estados needs_details en operaciones de backlog (commit 40efcc0).'
+      'The official integration client (CommonJS and ESM) now covers backlog soft-delete and listing with include_deleted (commit 40efcc0).',
+      'The skills contract was updated to include delete_backlog_item and needs_details backlog status support (commit 40efcc0).'
     ]
   },
   {
     version: '1.7.0',
     date: '2026-04-27',
     changes: [
-      'Se agrega soft-delete para backlog_items en la API de agentes (commits 3d90bb0 y 20163e9).',
-      'Los listados de backlog excluyen eliminados por defecto y permiten incluirlos con include_deleted=true (commits 3d90bb0 y 20163e9).'
+      'Soft-delete support was added for backlog_items in the agent API (commits 3d90bb0 and 20163e9).',
+      'Backlog listings now exclude deleted items by default and can include them with include_deleted=true (commits 3d90bb0 and 20163e9).'
     ]
   },
   {
     version: '1.6.0',
     date: '2026-04-25',
     changes: [
-      'La plantilla de Orquestador se publico como orquestador.agent.md para compatibilidad con deteccion de custom agents en VS Code (commit f683262).',
-      'En esa version tambien se publico una ruta legacy para descargas antiguas de orquestador-agent.md (eliminada en 2.0.0) (commit f683262).'
+      'The orchestrator template was published as orquestador.agent.md for compatibility with custom agent detection in VS Code (commit f683262).',
+      'That version also published a legacy route for older orquestador-agent.md downloads (removed in 2.0.0) (commit f683262).'
     ]
   },
   {
     version: '1.5.0',
     date: '2026-04-25',
     changes: [
-      'El manifiesto ahora publica clientes HTTP separados para CommonJS y ESM (commit 92d170f).',
-      'Cada artefacto declara cuando usarlo segun la configuracion de modulos del proyecto Node.js (commit 92d170f).'
+      'The manifest now publishes separate HTTP clients for CommonJS and ESM (commit 92d170f).',
+      'Each artifact declares when to use it based on the client Node.js module configuration (commit 92d170f).'
     ]
   },
   {
     version: '1.4.0',
     date: '2026-04-25',
     changes: [
-      'Se agrega bootstrap.manifest_updates para publicar novedades por version del manifiesto (commit fc44071).',
-      'La version actual del manifiesto queda referenciada en bootstrap.manifest_updates.current_version (commit fc44071).'
+      'bootstrap.manifest_updates was added to publish changes per manifest version (commit fc44071).',
+      'The current manifest version is referenced in bootstrap.manifest_updates.current_version (commit fc44071).'
     ]
   },
   {
     version: '1.3.0',
     date: '2026-04-25',
     changes: [
-      'Se incorpora guidance de bitacora local append-only de resiliencia y su politica de no ser fuente de verdad (commit e612b89).',
-      'Se mantiene el enfoque de migracion desde tracking local hacia APTS como fuente de verdad operativa (commit e612b89).'
+      'Append-only local resilience log guidance was added, including the policy that it is not a source of truth (commit e612b89).',
+      'Migration guidance from local tracking to APTS as the operational source of truth was reinforced (commit e612b89).'
     ]
   },
   {
     version: '1.2.0',
     date: '2026-04-25',
     changes: [
-      'Se documenta bootstrap explicito de APTS_API_KEY para integradores (commit ee2bdbf).',
-      'Se aclara que llamadas protegidas requieren el secreto antes de invocar skills autenticadas (commit ee2bdbf).'
+      'Explicit APTS_API_KEY bootstrap guidance for integrators was documented (commit ee2bdbf).',
+      'Protected calls were clarified to require the secret before invoking authenticated skills (commit ee2bdbf).'
     ]
   },
   {
     version: '1.1.0',
     date: '2026-04-25',
     changes: [
-      'Se agrega guidance inicial de bootstrap en el manifiesto publico de integracion (commit 23ea8c4).',
-      'Se consolida la exposicion del bootstrap bajo /api/public/integrar para el flujo de agentes (commits 23ea8c4 y cc18a7d).'
+      'Initial bootstrap guidance was added to the public integration manifest (commit 23ea8c4).',
+      'Bootstrap publication under /api/public/integrar was consolidated for agent flows (commits 23ea8c4 and cc18a7d).'
     ]
   },
   {
     version: '1.0.0',
     date: '2026-04-25',
     changes: [
-      'Se publica por primera vez el manifiesto de integracion para agentes en APTS (commit 6bcac00).',
-      'Se establece el endpoint publico de entrada para bootstrap sin token para descubrimiento inicial (commit 6bcac00).'
+      'The agent integration manifest was published for the first time in APTS (commit 6bcac00).',
+      'A public bootstrap entry endpoint without token was established for initial discovery (commit 6bcac00).'
     ]
   }
 ];
@@ -862,15 +870,15 @@ const buildIntegrationManifest = (req) => ({
       latest_note: integrationManifestReleaseNotes[0],
       notes: integrationManifestReleaseNotes
     },
-    summary: 'APTS centraliza el tracking operativo de proyectos ejecutados por agentes y debe convertirse en la fuente de verdad del backlog y de la ejecucion.',
-    service_purpose: 'Usa APTS para registrar backlog, tareas en ejecucion, bloqueos, heartbeats y logs tecnicos en una API REST orientada a automatizacion.',
-    source_of_truth: 'Una vez iniciada la integracion, backlog_items y tasks en APTS deben reemplazar mirrors o checklists locales como tracking operativo principal.',
-    migration_goal: 'Si el proyecto todavia gestiona backlog o tracking en archivos locales, leelos primero y migra o sincroniza esos items hacia APTS antes de continuar el trabajo normal.',
+    summary: 'APTS centralizes operational tracking for agent-executed projects and should become the source of truth for backlog and execution state.',
+    service_purpose: 'Use APTS to register backlog, active tasks, blockers, heartbeats, and technical logs through an automation-oriented REST API.',
+    source_of_truth: 'Once integration starts, backlog_items and tasks in APTS should replace local mirrors or checklists as the primary operational tracker.',
+    migration_goal: 'If the project still manages backlog or tracking in local files, read them first and migrate or sync those items into APTS before normal execution continues.',
     local_tracking_inputs: [
-      'archivos markdown de backlog',
-      'planes de proyecto o roadmaps locales',
-      'todo lists o mirrors historicos del tracking',
-      'documentos de alcance o criterios de aceptacion existentes'
+      'backlog markdown files',
+      'local project plans or roadmaps',
+      'todo lists or historical tracking mirrors',
+      'existing scope documents or acceptance criteria'
     ],
     access_model: {
       bootstrap: 'public',
@@ -878,42 +886,42 @@ const buildIntegrationManifest = (req) => ({
     },
     credential_bootstrap: {
       required_secret: 'APTS_API_KEY',
-      how_to_obtain: 'Si APTS_API_KEY no esta disponible en el entorno del proyecto, solicitala explicitamente al operador humano o responsable de la integracion antes de intentar llamadas protegidas.',
-      missing_secret_behavior: 'No intentes register_task, read_project_context ni ninguna otra llamada protegida hasta recibir APTS_API_KEY.',
-      storage_recommendation: 'Define APTS_BASE_URL y APTS_API_KEY en un archivo .env ubicado en la raiz del proyecto cliente, o en un sistema de secretos equivalente que las exponga como variables de entorno en runtime. No las hardcodees en codigo, prompts versionados, archivos JSON ni documentos de backlog.',
-      preferred_env_file: '.env (raiz del proyecto cliente)',
+      how_to_obtain: 'If APTS_API_KEY is not available in the project environment, explicitly request it from the human operator or integration owner before attempting protected calls.',
+      missing_secret_behavior: 'Do not attempt register_task, read_project_context, or any other protected call until APTS_API_KEY is provided.',
+      storage_recommendation: 'Define APTS_BASE_URL and APTS_API_KEY in a .env file at the client project root, or in an equivalent secret system that exposes them as runtime environment variables. Never hardcode them in source code, versioned prompts, JSON files, or backlog documents.',
+      preferred_env_file: '.env (client project root)',
       env_example: [
         'APTS_BASE_URL=https://apts.informaticos.ar/api',
-        'APTS_API_KEY=coloca-aqui-tu-api-key'
+        'APTS_API_KEY=place-your-api-key-here'
       ],
-      companion_env: 'APTS_BASE_URL debe apuntar a la URL base /api publicada por este manifiesto.'
+      companion_env: 'APTS_BASE_URL must point to the /api base URL published by this manifest.'
     },
     client_download_guidance: {
-      decision_input: 'Revisa la configuracion de modulos del proyecto Node.js cliente antes de descargar el cliente HTTP.',
+      decision_input: 'Review the client Node.js module configuration before downloading the HTTP client.',
       choose_commonjs_when: [
-        'el proyecto usa require(...)',
-        'package.json no declara type=module',
-        'el runtime espera archivos .js tratados como CommonJS'
+        'the project uses require(...)',
+        'package.json does not declare type=module',
+        'the runtime expects .js files treated as CommonJS modules'
       ],
       choose_esm_when: [
-        'el proyecto usa import/export',
-        'package.json declara type=module',
-        'el runtime espera archivos .mjs o modulos ESM'
+        'the project uses import/export',
+        'package.json declares type=module',
+        'the runtime expects .mjs files or ESM modules'
       ],
-      default_rule: 'Si hay duda, inspecciona package.json y el codigo del proyecto cliente antes de elegir el artefacto.'
+      default_rule: 'If in doubt, inspect package.json and the client project code before choosing an artifact.'
     },
     local_resilience_log: {
       required: true,
       source_of_truth: false,
-      purpose: 'Mantener una bitacora local append-only de resiliencia por si APTS queda inaccesible o perdiera historial, sin reemplazar a APTS como tracking operativo principal.',
+      purpose: 'Maintain a local append-only resilience journal in case APTS becomes temporarily unavailable or loses history, without replacing APTS as the primary operational tracker.',
       recommended_path: '.apts/agent-resilience-log.jsonl',
       format: 'jsonl',
       write_on: [
-        'inicio de ejecucion',
-        'hitos importantes',
-        'bloqueos',
-        'fallos de sincronizacion con APTS',
-        'cierre de tarea'
+        'execution start',
+        'important milestones',
+        'blockers',
+        'APTS synchronization failures',
+        'task completion'
       ],
       recommended_fields: [
         'timestamp',
@@ -928,19 +936,19 @@ const buildIntegrationManifest = (req) => ({
         'commands_run',
         'apts_sync_status'
       ],
-      replay_policy: 'Si APTS no esta disponible, conserva la bitacora local y sincroniza luego los hitos relevantes cuando el servicio vuelva. No uses la bitacora para repriorizar ni como estado operativo oficial.',
-      forbidden_content: ['APTS_API_KEY', 'otros secretos', 'tokens', 'credenciales']
+      replay_policy: 'If APTS is unavailable, keep the local journal and synchronize relevant milestones when service is restored. Do not use this journal for reprioritization or as official operational state.',
+      forbidden_content: ['APTS_API_KEY', 'other secrets', 'tokens', 'credentials']
     },
     recommended_first_steps: [
-      'Resuelve la identidad del proyecto y del agente desde Git local.',
-      'Si APTS_API_KEY no existe todavia en el entorno, solicitale al operador APTS_API_KEY y confirma tambien APTS_BASE_URL.',
-      'Crea o actualiza el archivo .env en la raiz del proyecto cliente con APTS_BASE_URL y APTS_API_KEY antes de usar la API protegida.',
-      'Prepara una bitacora local append-only de resiliencia, por ejemplo en .apts/agent-resilience-log.jsonl, sin tratarla como fuente de verdad.',
-      'Inspecciona los archivos locales que hoy contengan backlog, plan o tracking operativo.',
-      'Crea o actualiza backlog_items en APTS para reflejar ese estado inicial.',
-      'A partir de ese momento usa APTS como sistema principal de seguimiento y no inventes trabajo fuera de APTS.'
+      'Resolve project and agent identity from local Git.',
+      'If APTS_API_KEY is not yet present in the environment, request APTS_API_KEY from the operator and confirm APTS_BASE_URL as well.',
+      'Create or update a .env file at the client project root with APTS_BASE_URL and APTS_API_KEY before using protected APIs.',
+      'Prepare a local append-only resilience journal, for example at .apts/agent-resilience-log.jsonl, without treating it as a source of truth.',
+      'Inspect local files that currently contain backlog, planning, or operational tracking.',
+      'Create or update backlog_items in APTS to reflect that initial state.',
+      'From that point onward, use APTS as the primary tracking system and do not invent work outside APTS.'
     ],
-    operator_prompt_template: 'Lee este manifiesto publico, entiende que APTS es la fuente de verdad del tracking, solicita al operador APTS_BASE_URL y APTS_API_KEY si faltan, guardalas en .env en la raiz del proyecto cliente (o en su secret store equivalente), prepara una bitacora local append-only de resiliencia y despues revisa los archivos locales de backlog para migrar o sincronizar esos items hacia APTS antes de continuar la ejecucion normal.'
+    operator_prompt_template: 'Read this public manifest, understand that APTS is the tracking source of truth, request APTS_BASE_URL and APTS_API_KEY from the operator if missing, store them in a .env file at the client project root (or equivalent secret store), prepare a local append-only resilience journal, and then review local backlog files to migrate or synchronize those items into APTS before normal execution continues.'
   },
   entrypoint: buildAbsoluteUrl(req, publicIntegrationBasePath),
   api_base_url: buildAbsoluteUrl(req, '/api'),

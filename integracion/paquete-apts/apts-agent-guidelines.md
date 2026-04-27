@@ -1,50 +1,50 @@
-# Guia Base para Proyectos Integrados con APTS
+# Base Guide for Projects Integrated with APTS
 
-Usa este contenido como base para `AGENTS.md` o `.github/copilot-instructions.md` del proyecto cliente.
+Use this content as a baseline for `AGENTS.md` or `.github/copilot-instructions.md` in the client project.
 
 ```md
-Eres un agente de desarrollo integrado con APTS.
+You are a development agent integrated with APTS.
 
-Si `APTS_API_KEY` no esta disponible en el entorno del proyecto, debes solicitarla al operador humano antes de usar cualquier endpoint protegido de APTS.
+If `APTS_API_KEY` is not available in the project environment, you must request it from the human operator before using any protected APTS endpoint.
 
-Debes alojar `APTS_API_KEY` como variable de entorno o en el sistema de secretos del proyecto cliente. Nunca la hardcodees en codigo fuente, prompts versionados, archivos JSON ni documentos de backlog.
+You must store `APTS_API_KEY` as an environment variable or in the client project's secret system. Never hardcode it in source code, versioned prompts, JSON files, or backlog documents.
 
-Define `APTS_BASE_URL` y `APTS_API_KEY` en un archivo `.env` ubicado en la raiz del proyecto cliente.
+Define `APTS_BASE_URL` and `APTS_API_KEY` in a `.env` file at the root of the client project.
 
-Ejemplo minimo de `.env` en el proyecto cliente:
+Minimum `.env` example for the client project:
 
 ```env
 APTS_BASE_URL=https://apts.informaticos.ar/api
-APTS_API_KEY=coloca-aqui-tu-api-key
+APTS_API_KEY=place-your-api-key-here
 ```
 
-Si el proyecto usa un secret manager en vez de `.env`, debe exponer los mismos nombres de variables en runtime (`APTS_BASE_URL` y `APTS_API_KEY`).
+If the project uses a secret manager instead of `.env`, it must expose the same runtime variable names (`APTS_BASE_URL` and `APTS_API_KEY`).
 
-Ademas de reportar en APTS, debes mantener una bitacora local append-only de resiliencia, por ejemplo en `.apts/agent-resilience-log.jsonl`.
+Besides reporting in APTS, you must maintain a local append-only resilience journal, for example at `.apts/agent-resilience-log.jsonl`.
 
-Esa bitacora local no es fuente de verdad y no reemplaza a APTS. Solo sirve como respaldo operativo por si APTS queda inaccesible o perdiera historial.
+This local journal is not a source of truth and does not replace APTS. It is only an operational fallback if APTS becomes unavailable or loses history.
 
-Registra al menos: inicio de ejecucion, hitos importantes, bloqueos, fallos de sincronizacion con APTS y cierre de tarea. Nunca guardes `APTS_API_KEY` ni otros secretos en esa bitacora.
+Record at least: execution start, important milestones, blockers, APTS synchronization failures, and task completion. Never store `APTS_API_KEY` or any other secret in this journal.
 
-Antes de usar cualquier skill debes resolver desde el entorno Git local:
+Before using any skill, resolve from the local Git environment:
 - project_url: `git remote get-url origin`
 - agent_name: `git config user.name`
 - agent_email: `git config user.email`
 - branch: `git branch --show-current`
 
-Reglas obligatorias:
-0. Si el usuario pide "siguiente tarea", "next task", "continuar backlog", "ejecutar backlog" o equivalentes, debes invocar primero `Orquestador Backlog APTS` y no ejecutar implementacion directa desde el agente general.
-0.1. Usa el cliente oficial de APTS (`apts-client.js` o `apts-client.mjs`) como capa de integracion; no desarrolles scripts paralelos para cubrir operaciones base del contrato.
-1. Lee backlog del proyecto con `list_backlog_items` y elige un item apto para ejecucion.
-2. Si no tienes task_id, usa `register_task` e incluye `backlog_item_id` cuando exista.
-3. Antes de modificar codigo, usa `read_project_context`.
-4. Mientras trabajas, envia `heartbeat` periodicamente.
-5. Cada hito importante debe registrarse con `log_agent_progress`.
-6. Si no puedes continuar, usa `report_blocker` y deten el trabajo.
-7. Si estas refinando alcance o plan, usa `create_backlog_item` o `update_backlog_item` en vez de inventar trabajo fuera de APTS.
-8. Al terminar, usa `update_task_status` con `done` o `review`.
-9. Nunca inventes `project_url`, `agent_name` ni `branch`; resuelvelos siempre desde Git.
-10. Si falta `APTS_API_KEY`, deten la integracion operativa, solicitala al operador y solo continua cuando este alojada como secreto del entorno.
-11. Mantiene una bitacora local append-only de resiliencia, pero no la uses para reemplazar a APTS como tracking oficial.
-12. Si `Orquestador Backlog APTS` no esta instalado o no puede invocarse, debes detener la ejecucion de la tarea y pedir al operador la instalacion/correccion; no avances con un flujo alternativo sin orquestador.
+Mandatory rules:
+0. If the user asks for "next task", "continue backlog", "run backlog", or equivalent requests, you must invoke `APTS Backlog Orchestrator` first and not run direct implementation from the general agent.
+0.1. Use the official APTS client (`apts-client.js` or `apts-client.mjs`) as the integration layer; do not build parallel scripts for base contract operations.
+1. Read the project backlog with `list_backlog_items` and select an item suitable for execution.
+2. If you do not have `task_id`, use `register_task` and include `backlog_item_id` when available.
+3. Before modifying code, use `read_project_context`.
+4. While working, send `heartbeat` periodically.
+5. Each important milestone must be recorded with `log_agent_progress`.
+6. If you cannot continue, use `report_blocker` and stop work.
+7. If you are refining scope or planning, use `create_backlog_item` or `update_backlog_item` instead of inventing work outside APTS.
+8. At completion, use `update_task_status` with `done` or `review`.
+9. Never invent `project_url`, `agent_name`, or `branch`; always resolve them from Git.
+10. If `APTS_API_KEY` is missing, stop operational integration, request it from the operator, and continue only after it is stored as an environment secret.
+11. Keep a local append-only resilience journal, but never use it to replace APTS as official tracking.
+12. If `APTS Backlog Orchestrator` is not installed or cannot be invoked, stop task execution and ask the operator to install/fix it; do not proceed with an alternative flow without the orchestrator.
 ```
