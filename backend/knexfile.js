@@ -1,22 +1,30 @@
 require('dotenv').config();
 
+const path = require('node:path');
+
+const sqliteDatabasePath = (fileName) => path.join(__dirname, fileName);
+const migrationsDirectory = path.join(__dirname, 'migrations');
+
 module.exports = {
   development: {
     client: 'better-sqlite3',
     connection: {
-      filename: './apts.db'
+      filename: sqliteDatabasePath('apts.db')
     },
-    useNullAsDefault: true
+    useNullAsDefault: true,
+    migrations: {
+      directory: migrationsDirectory
+    }
   },
 
   test: {
     client: 'better-sqlite3',
     connection: {
-      filename: './apts_test.db'
+      filename: sqliteDatabasePath('apts_test.db')
     },
     useNullAsDefault: true,
     migrations: {
-      directory: './migrations'
+      directory: migrationsDirectory
     }
   },
 
@@ -28,6 +36,7 @@ module.exports = {
       max: 10
     },
     migrations: {
+      directory: migrationsDirectory,
       tableName: 'knex_migrations'
     }
   }

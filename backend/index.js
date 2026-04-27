@@ -148,7 +148,247 @@ const authenticateAgent = (req, res, next) => {
 };
 
 const BACKLOG_ITEM_TYPES = ['feature', 'bug', 'chore', 'research'];
-const BACKLOG_STATUSES = ['draft', 'ready', 'in_progress', 'review', 'blocked', 'done', 'archived'];
+const BACKLOG_STATUSES = ['draft', 'needs_details', 'ready', 'in_progress', 'review', 'blocked', 'done', 'archived'];
+const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
+const OPENROUTER_CHAT_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const DEFAULT_OPENROUTER_MODEL = process.env.OPENROUTER_DEFAULT_MODEL || 'google/gemini-2.0-flash-lite-001';
+const CONFIG_KEYS = {
+  openrouterModel: 'openrouter_model'
+};
+const AUTO_TRIAGE_BACKLOG_STATUSES = new Set(['draft', 'needs_details', 'ready']);
+
+const parseJsonArray = (value) => {
+  if (!value) return [];
+  if (Array.isArray(value)) return value;
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (_error) {
+    return [];
+  }
+};
+
+const toNumberOrNull = (value) => {
+  if (value == null || value === '') return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const mapBacklogItemRecord = (item) => {
+  if (!item) return item;
+
+  return {
+    ...item,
+    llm_missing_details: parseJsonArray(item.llm_missing_details),
+    llm_confidence: toNumberOrNull(item.llm_confidence)
+  };
+};
+
+const cleanStringList = (values, { limit = 8 } = {}) => {
+  if (!Array.isArray(values)) return [];
+
+  return values
+    .map((value) => (typeof value === 'string' ? value.trim() : ''))
+    .filter(Boolean)
+    .slice(0, limit);
+};
+
+const getConfigValue = async (key) => {
+  const entry = await db('config').where({ key }).first();
+  return entry?.value || null;
+};
+
+const setConfigValue = async (key, value) => {
+  await db('config')
+    .insert({
+      key,
+      value,
+      updated_at: db.fn.now()
+    })
+    .onConflict('key')
+    .merge({
+      value,
+      updated_at: db.fn.now()
+    });
+};
+
+const getOpenRouterApiKey = () => {
+  const apiKey = (process.env.OPENROUTER_API_KEY || '').trim();
+  if (!apiKey) {
+    const error = new Error('OPENROUTER_API_KEY is not configured in backend environment');
+    error.statusCode = 503;
+    throw error;
+  }
+  return apiKey;
+};
+
+const getEffectiveOpenRouterModel = async () => {
+  const configuredModel = await getConfigValue(CONFIG_KEYS.openrouterModel);
+  return configuredModel || DEFAULT_OPENROUTER_MODEL;
+};
+
+const getOpenRouterHeaders = () => {
+  const headers = {
+    Authorization: `Bearer ${getOpenRouterApiKey()}`,
+    'Content-Type': 'application/json',
+    'X-Title': 'APTS'
+  };
+
+  const referer = (process.env.PUBLIC_APP_URL || allowedOrigins[0] || '').trim();
+  if (referer) {
+    headers['HTTP-Referer'] = referer;
+  }
+
+  return headers;
+};
+
+const readOpenRouterResponse = async (response) => {
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(data?.error?.message || data?.message || `OpenRouter request failed with status ${response.status}`);
+    error.statusCode = response.status;
+    throw error;
+  }
+  return data;
+};
+
+const fetchOpenRouterModels = async () => {
+  const response = await fetch(OPENROUTER_MODELS_URL, {
+    headers: getOpenRouterHeaders()
+  });
+  const data = await readOpenRouterResponse(response);
+
+  return (data.data || [])
+    .map((model) => ({
+      id: model.id,
+      name: model.name || model.id,
+      description: model.description || '',
+      context_length: model.context_length || null,
+      prompt_price: toNumberOrNull(model.pricing?.prompt),
+      completion_price: toNumberOrNull(model.pricing?.completion),
+      is_free: String(model.id || '').includes(':free')
+    }))
+    .sort((left, right) => {
+      const leftPrompt = left.prompt_price ?? Number.MAX_SAFE_INTEGER;
+      const rightPrompt = right.prompt_price ?? Number.MAX_SAFE_INTEGER;
+      if (leftPrompt !== rightPrompt) {
+        return leftPrompt - rightPrompt;
+      }
+
+      const leftCompletion = left.completion_price ?? Number.MAX_SAFE_INTEGER;
+      const rightCompletion = right.completion_price ?? Number.MAX_SAFE_INTEGER;
+      return leftCompletion - rightCompletion;
+    });
+};
+
+const extractJsonObject = (value) => {
+  if (typeof value !== 'string') {
+    throw new Error('OpenRouter returned an empty analysis payload');
+  }
+
+  const trimmed = value.trim();
+  const withoutCodeFence = trimmed.startsWith('```')
+    ? trimmed.replace(/^```(?:json)?\s*/i, '').replace(/```$/i, '').trim()
+    : trimmed;
+  const firstBrace = withoutCodeFence.indexOf('{');
+  const lastBrace = withoutCodeFence.lastIndexOf('}');
+  const candidate = firstBrace >= 0 && lastBrace >= 0
+    ? withoutCodeFence.slice(firstBrace, lastBrace + 1)
+    : withoutCodeFence;
+
+  return JSON.parse(candidate);
+};
+
+const normalizeBacklogAnalysis = (analysis) => {
+  const recommendedStatus = analysis?.recommended_status === 'needs_details'
+    ? 'needs_details'
+    : 'ready';
+  const confidence = Math.max(0, Math.min(1, toNumberOrNull(analysis?.confidence) ?? 0.5));
+  const summary = typeof analysis?.summary === 'string' ? analysis.summary.trim() : '';
+
+  return {
+    recommended_status: recommendedStatus,
+    confidence,
+    summary: summary || (recommendedStatus === 'ready'
+      ? 'El item tiene suficiente detalle para entrar al flujo operativo.'
+      : 'El item necesita más definición antes de ejecutarse.'),
+    missing_details: cleanStringList(analysis?.missing_details)
+  };
+};
+
+const buildBacklogAnalysisMessages = (backlogItem) => ([
+  {
+    role: 'system',
+    content: [
+      'Eres un triager de backlog para APTS.',
+      'Clasifica cada item en uno de dos estados: ready o needs_details.',
+      'Usa ready solo si hay suficiente detalle para priorizar o implementar sin pedir información esencial adicional.',
+      'Usa needs_details si faltan datos funcionales, alcance, restricciones, dependencias, actores o criterios de aceptación.',
+      'Responde únicamente JSON válido con estas claves: recommended_status, confidence, summary, missing_details.',
+      'confidence debe ser un número entre 0 y 1.',
+      'missing_details debe ser un array de strings cortos y accionables.'
+    ].join(' ')
+  },
+  {
+    role: 'user',
+    content: JSON.stringify({
+      title: backlogItem.title,
+      description: backlogItem.description || '',
+      acceptance_criteria: backlogItem.acceptance_criteria || '',
+      item_type: backlogItem.item_type,
+      current_status: backlogItem.status,
+      source_kind: backlogItem.source_kind || null,
+      source_ref: backlogItem.source_ref || null
+    })
+  }
+]);
+
+const requestBacklogAnalysis = async (backlogItem) => {
+  const model = await getEffectiveOpenRouterModel();
+  const response = await fetch(OPENROUTER_CHAT_URL, {
+    method: 'POST',
+    headers: getOpenRouterHeaders(),
+    body: JSON.stringify({
+      model,
+      temperature: 0.2,
+      messages: buildBacklogAnalysisMessages(backlogItem)
+    })
+  });
+  const data = await readOpenRouterResponse(response);
+  const content = data?.choices?.[0]?.message?.content;
+  const analysis = normalizeBacklogAnalysis(extractJsonObject(Array.isArray(content)
+    ? content.map((chunk) => chunk?.text || '').join('')
+    : content));
+
+  return {
+    ...analysis,
+    model
+  };
+};
+
+const persistBacklogAnalysis = async (backlogItem) => {
+  const analysis = await requestBacklogAnalysis(backlogItem);
+  const nextStatus = AUTO_TRIAGE_BACKLOG_STATUSES.has(backlogItem.status)
+    ? analysis.recommended_status
+    : backlogItem.status;
+
+  const [updatedBacklogItem] = await db('backlog_items')
+    .where({ id: backlogItem.id })
+    .update({
+      status: nextStatus,
+      llm_analysis_model: analysis.model,
+      llm_analysis_summary: analysis.summary,
+      llm_missing_details: JSON.stringify(analysis.missing_details),
+      llm_confidence: analysis.confidence,
+      llm_recommendation_status: analysis.recommended_status,
+      llm_last_analyzed_at: db.fn.now(),
+      updated_at: db.fn.now()
+    })
+    .returning('*');
+
+  return mapBacklogItemRecord(updatedBacklogItem);
+};
 
 const normalizeUrl = (url) => {
   if (!url) return '';
@@ -180,7 +420,8 @@ const listBacklogItems = async (projectUrl, status) => {
     query.andWhere({ status });
   }
 
-  return query.select('*');
+  const items = await query.select('*');
+  return items.map(mapBacklogItemRecord);
 };
 
 const getBacklogPayload = (body, { partial = false } = {}) => {
@@ -827,8 +1068,30 @@ app.get('/api/dashboard/overview', requireAuth, async (req, res) => {
 
 app.get('/api/dashboard/projects', requireAuth, async (req, res) => {
   try {
-    const projects = await db('projects').select('*').orderBy('updated_at', 'desc');
-    res.json({ projects });
+    const [projects, backlogNeedsDetails] = await Promise.all([
+      db('projects').select('*').orderBy('updated_at', 'desc'),
+      db('backlog_items')
+        .select('project_url')
+        .count({ needs_details_count: '*' })
+        .where({ status: 'needs_details' })
+        .groupBy('project_url')
+    ]);
+
+    const needsDetailsByProject = new Map(
+      backlogNeedsDetails.map((row) => [row.project_url, Number.parseInt(row.needs_details_count, 10) || 0])
+    );
+
+    res.json({
+      projects: projects.map((project) => {
+        const needsDetailsCount = needsDetailsByProject.get(project.url) || 0;
+
+        return {
+          ...project,
+          needs_details_count: needsDetailsCount,
+          has_needs_details: needsDetailsCount > 0
+        };
+      })
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -882,7 +1145,7 @@ app.post('/api/dashboard/projects/:url/backlog', requireAuth, async (req, res) =
       ...payload
     }).returning('*');
 
-    res.status(201).json({ backlog_item: backlogItem });
+    res.status(201).json({ backlog_item: mapBacklogItemRecord(backlogItem) });
   } catch (routeError) {
     res.status(500).json({ error: routeError.message });
   }
@@ -912,9 +1175,104 @@ app.patch('/api/dashboard/backlog/:id', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Backlog item not found' });
     }
 
-    res.json({ backlog_item: backlogItem });
+    res.json({ backlog_item: mapBacklogItemRecord(backlogItem) });
   } catch (routeError) {
     res.status(500).json({ error: routeError.message });
+  }
+});
+
+app.post('/api/dashboard/backlog/:id/analyze', requireAuth, async (req, res) => {
+  try {
+    const backlogItem = mapBacklogItemRecord(await db('backlog_items').where({ id: req.params.id }).first());
+
+    if (!backlogItem) {
+      return res.status(404).json({ error: 'Backlog item not found' });
+    }
+
+    const analyzedItem = await persistBacklogAnalysis(backlogItem);
+    res.json({ backlog_item: analyzedItem });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+app.post('/api/dashboard/projects/:url/backlog/analyze', requireAuth, async (req, res) => {
+  try {
+    const url = normalizeUrl(decodeURIComponent(req.params.url));
+    const requestedStatuses = Array.isArray(req.body?.statuses)
+      ? req.body.statuses.filter((status) => AUTO_TRIAGE_BACKLOG_STATUSES.has(status))
+      : [];
+    const statuses = requestedStatuses.length
+      ? requestedStatuses
+      : [...AUTO_TRIAGE_BACKLOG_STATUSES];
+    const backlogItems = await db('backlog_items')
+      .where({ project_url: url })
+      .whereIn('status', statuses)
+      .orderBy([
+        { column: 'priority', order: 'asc' },
+        { column: 'sort_order', order: 'asc' },
+        { column: 'created_at', order: 'asc' }
+      ])
+      .select('*');
+
+    const analyzed = [];
+    for (const backlogItem of backlogItems.map(mapBacklogItemRecord)) {
+      analyzed.push(await persistBacklogAnalysis(backlogItem));
+    }
+
+    res.json({
+      backlog: analyzed,
+      analyzed_count: analyzed.length
+    });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+app.get('/api/dashboard/config/openrouter', requireAuth, async (_req, res) => {
+  try {
+    const selectedModel = await getConfigValue(CONFIG_KEYS.openrouterModel);
+
+    res.json({
+      openrouter: {
+        api_key_configured: Boolean((process.env.OPENROUTER_API_KEY || '').trim()),
+        selected_model: selectedModel,
+        effective_model: selectedModel || DEFAULT_OPENROUTER_MODEL,
+        default_model: DEFAULT_OPENROUTER_MODEL
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/dashboard/config/openrouter/models', requireAuth, async (_req, res) => {
+  try {
+    const models = await fetchOpenRouterModels();
+    res.json({ models });
+  } catch (error) {
+    res.status(error.statusCode || 500).json({ error: error.message });
+  }
+});
+
+app.patch('/api/dashboard/config/openrouter', requireAuth, async (req, res) => {
+  const model = typeof req.body?.model === 'string' ? req.body.model.trim() : '';
+
+  if (!model) {
+    return res.status(400).json({ error: 'Model is required' });
+  }
+
+  try {
+    await setConfigValue(CONFIG_KEYS.openrouterModel, model);
+    res.json({
+      openrouter: {
+        selected_model: model,
+        effective_model: model,
+        default_model: DEFAULT_OPENROUTER_MODEL
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -952,24 +1310,45 @@ app.post('/api/tasks/:id/resolve', requireAuth, async (req, res) => {
 });
 
 const PORT = process.env.PORT || 46100;
-app.listen(PORT, () => {
-  logger.info({ port: PORT }, 'Backend running');
-});
 
-// Internal Job: Detect stalled tasks
-setInterval(async () => {
-  try {
-    const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000);
-    const updated = await db('tasks')
-      .where('status', 'in_progress')
-      .andWhere('last_heartbeat', '<', fifteenMinsAgo)
-      .update({ status: 'stalled' });
+const startBackgroundJobs = () => {
+  setInterval(async () => {
+    try {
+      const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000);
+      const updated = await db('tasks')
+        .where('status', 'in_progress')
+        .andWhere('last_heartbeat', '<', fifteenMinsAgo)
+        .update({ status: 'stalled' });
 
-    if (updated > 0) {
-      logger.warn({ updated }, 'Job marked tasks as stalled');
+      if (updated > 0) {
+        logger.warn({ updated }, 'Job marked tasks as stalled');
+      }
+    } catch (error) {
+      logger.error({ err: error }, 'Job Error');
     }
+  }, 60 * 1000);
+};
+
+const startServer = async () => {
+  try {
+    const [batchNo, migrationNames] = await db.migrate.latest();
+
+    logger.info({
+      batch: batchNo,
+      migrations_applied: migrationNames.length,
+      migrations: migrationNames
+    }, 'Database migrations checked');
+
+    app.listen(PORT, () => {
+      logger.info({ port: PORT }, 'Backend running');
+    });
+
+    startBackgroundJobs();
   } catch (error) {
-    logger.error({ err: error }, 'Job Error');
+    logger.fatal({ err: error }, 'Backend startup failed while applying migrations');
+    process.exit(1);
   }
-}, 60 * 1000); // Check every minute
+};
+
+startServer();
 
