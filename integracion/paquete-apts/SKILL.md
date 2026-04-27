@@ -26,14 +26,22 @@ Note: in this repository, it is published as integration material under the repo
 - [ESM sample HTTP client](./apts-client.mjs)
 - [Base guide for AGENTS.md or copilot-instructions.md](./apts-agent-guidelines.md)
 
+## Workspace installation policy (recommended)
+
+- Use a workspace-local, runtime-neutral base folder: `.ia/apts/`.
+- Keep the APTS contract and HTTP client in that base folder.
+- Add runtime-specific adapter folders only for discovery when needed: `.github/skills/apts/` (VS Code/Copilot), `.agents/skills/apts/` (agent loaders using `.agents`), and `.claude/skills/apts/` (Claude-style loaders).
+- Avoid user-global skill installation for project integrations because it increases cross-project configuration leakage and version drift.
+
 ## Recommended procedure
 
 1. Review the [API contract](./references/api-contract.md) to confirm variables, endpoints, and payloads.
-2. Copy [apts_skills.json](./apts_skills.json) into the client project if your runtime supports function calling or tool schemas.
-3. Copy [apts-client.js](./apts-client.js) if the client project uses CommonJS, or [apts-client.mjs](./apts-client.mjs) if it uses ESM (`"type": "module"`).
-4. Copy [apts-agent-guidelines.md](./apts-agent-guidelines.md) into `AGENTS.md` or `.github/copilot-instructions.md` of the client project.
-5. Configure `APTS_BASE_URL` and `APTS_API_KEY` in a `.env` file at the client project root (or an equivalent secret manager that exposes them as environment variables).
-6. Validate the integration by running `register_task`, then `log_agent_progress`, and then `heartbeat`.
+2. Create `.ia/apts/` in the client project and copy [apts_skills.json](./apts_skills.json) there.
+3. Copy [apts-client.js](./apts-client.js) if the client project uses CommonJS, or [apts-client.mjs](./apts-client.mjs) if it uses ESM (`"type": "module"`), into `.ia/apts/`.
+4. If your runtime requires a specific discovery path, add a thin adapter under `.github/skills/apts/`, `.agents/skills/apts/`, or `.claude/skills/apts/` that delegates to `.ia/apts/`.
+5. Copy [apts-agent-guidelines.md](./apts-agent-guidelines.md) into `AGENTS.md` or `.github/copilot-instructions.md` of the client project.
+6. Configure `APTS_BASE_URL` and `APTS_API_KEY` in a `.env` file at the client project root (or an equivalent secret manager that exposes them as environment variables).
+7. Validate the integration by running `register_task`, then `log_agent_progress`, and then `heartbeat`.
 
 ## Official client coverage
 

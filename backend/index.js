@@ -645,10 +645,18 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.3';
+const integrationManifestSchemaVersion = '2.0.4';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.4',
+    date: '2026-04-28',
+    changes: [
+      'Integration guidance now recommends a workspace-local, runtime-neutral base folder at .ia/apts for APTS skills artifacts.',
+      'Bootstrap instructions now explicitly recommend runtime-specific adapter paths only when needed (.github/skills/apts, .agents/skills/apts, .claude/skills/apts) and discourage user-global skill installation.'
+    ]
+  },
   {
     version: '2.0.3',
     date: '2026-04-27',
@@ -910,6 +918,12 @@ const buildIntegrationManifest = (req) => ({
       ],
       default_rule: 'If in doubt, inspect package.json and the client project code before choosing an artifact.'
     },
+    skill_installation_paths: {
+      preferred_scope: 'workspace_local',
+      canonical_base_path: '.ia/apts',
+      runtime_adapter_paths: ['.github/skills/apts', '.agents/skills/apts', '.claude/skills/apts'],
+      policy: 'Keep APTS integration artifacts local to each repository and avoid user-global skill installation for project integrations.'
+    },
     local_resilience_log: {
       required: true,
       source_of_truth: false,
@@ -943,6 +957,7 @@ const buildIntegrationManifest = (req) => ({
       'Resolve project and agent identity from local Git.',
       'If APTS_API_KEY is not yet present in the environment, request APTS_API_KEY from the operator and confirm APTS_BASE_URL as well.',
       'Create or update a .env file at the client project root with APTS_BASE_URL and APTS_API_KEY before using protected APIs.',
+      'Create a workspace-local integration folder such as .ia/apts, place the APTS contract and HTTP client there, and only then wire runtime-specific adapters if needed.',
       'Prepare a local append-only resilience journal, for example at .apts/agent-resilience-log.jsonl, without treating it as a source of truth.',
       'Inspect local files that currently contain backlog, planning, or operational tracking.',
       'Create or update backlog_items in APTS to reflect that initial state.',
@@ -968,6 +983,8 @@ const buildIntegrationManifest = (req) => ({
     'Read the bootstrap section first to understand the service purpose and the migration goal from local tracking to APTS.',
     'If APTS_API_KEY is missing, request it from the operator before any protected API call.',
     'Store APTS_BASE_URL and APTS_API_KEY in a .env file at the root of the client project, or in an equivalent project secret store.',
+    'Install APTS integration artifacts in a workspace-local base folder such as .ia/apts.',
+    'Use runtime-specific adapter paths only when needed for discovery (.github/skills/apts, .agents/skills/apts, or .claude/skills/apts), and avoid user-global skill installation.',
     'Maintain the local resilience log described in the bootstrap section; it is append-only and must not replace APTS as the source of truth.',
     'Download and install the skills contract first.',
     'Read the base agent guidelines before the first APTS API call.',

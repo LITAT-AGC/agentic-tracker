@@ -2,6 +2,14 @@
 
 Use this content as a baseline for `AGENTS.md` or `.github/copilot-instructions.md` in the client project.
 
+## Skill installation scope (workspace-local)
+
+Use a workspace-local installation strategy for APTS integration artifacts:
+
+- Keep the canonical contract and HTTP client under `.ia/apts/`.
+- If a runtime needs its own discovery path, add a thin adapter at `.github/skills/apts/`, `.agents/skills/apts/`, or `.claude/skills/apts/` that delegates to `.ia/apts/`.
+- Avoid user-global skill installation for project integrations to prevent cross-project config leakage and version drift.
+
 ```md
 You are a development agent integrated with APTS.
 
@@ -19,6 +27,10 @@ APTS_API_KEY=place-your-api-key-here
 ```
 
 If the project uses a secret manager instead of `.env`, it must expose the same runtime variable names (`APTS_BASE_URL` and `APTS_API_KEY`).
+
+Keep APTS integration artifacts in a workspace-local folder such as `.ia/apts/`.
+If your runtime requires a specific discovery path, add a thin adapter in `.github/skills/apts/`, `.agents/skills/apts/`, or `.claude/skills/apts/` that delegates to `.ia/apts/`.
+Do not rely on user-global skill installation for project integrations.
 
 Besides reporting in APTS, you must maintain a local append-only resilience journal, for example at `.apts/agent-resilience-log.jsonl`.
 
