@@ -7,6 +7,7 @@ const session = require('express-session');
 const rateLimit = require('express-rate-limit');
 const pino = require('pino');
 const pinoHttp = require('pino-http');
+const { z } = require('zod');
 const knexConfig = require('./knexfile');
 const rootPackage = require('../package.json');
 const db = require('knex')(knexConfig[process.env.NODE_ENV || 'development']);
@@ -149,6 +150,8 @@ const authenticateAgent = (req, res, next) => {
 
 const BACKLOG_ITEM_TYPES = ['feature', 'bug', 'chore', 'research'];
 const BACKLOG_STATUSES = ['draft', 'needs_details', 'ready', 'in_progress', 'review', 'blocked', 'done', 'archived'];
+const TASK_STATUSES = ['todo', 'in_progress', 'review', 'done', 'stalled'];
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
 const OPENROUTER_CHAT_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const DEFAULT_OPENROUTER_MODEL = process.env.OPENROUTER_DEFAULT_MODEL || 'google/gemini-2.0-flash-lite-001';
@@ -182,6 +185,187 @@ const parseBooleanFlag = (value) => {
   const normalized = value.trim().toLowerCase();
   return ['1', 'true', 'yes', 'on'].includes(normalized);
 };
+
+const unwrapMatchingQuotes = (value) => {
+  if (typeof value !== 'string') return value;
+
+  const trimmed = value.trim();
+  if (trimmed.length < 2) return trimmed;
+
+  const startsWithDouble = trimmed.startsWith('"') && trimmed.endsWith('"');
+  const startsWithSingle = trimmed.startsWith("'") && trimmed.endsWith("'");
+
+  if (!startsWithDouble && !startsWithSingle) return trimmed;
+  return trimmed.slice(1, -1).trim();
+};
+
+const normalizeInputString = (value, { unwrapQuotes = false, lowercase = false } = {}) => {
+  if (typeof value !== 'string') return null;
+
+  let normalized = value.trim();
+  if (unwrapQuotes) {
+    normalized = unwrapMatchingQuotes(normalized);
+  }
+  if (lowercase) {
+    normalized = normalized.toLowerCase();
+  }
+
+  return normalized;
+};
+
+const isUuid = (value) => typeof value === 'string' && UUID_REGEX.test(value);
+
+const normalizeSchemaInputString = (value, options = {}) => {
+  if (typeof value !== 'string') return value;
+  return normalizeInputString(value, options);
+};
+
+const zodErrorMessage = (validationError) => validationError.issues?.[0]?.message || 'Invalid request payload';
+
+const nonEmptyStringSchema = (
+  requiredMessage,
+  invalidTypeMessage = requiredMessage,
+  options = {}
+) => z.preprocess(
+  (value) => normalizeSchemaInputString(value, options),
+  z.string({ invalid_type_error: invalidTypeMessage }).min(1, requiredMessage)
+);
+
+const optionalStringSchema = (invalidTypeMessage, options = {}) => z.preprocess(
+  (value) => {
+    if (value === undefined) return undefined;
+    return normalizeSchemaInputString(value, options);
+  },
+  z.string({ invalid_type_error: invalidTypeMessage }).optional()
+);
+
+const optionalNullableStringSchema = (invalidTypeMessage, options = {}) => z.preprocess(
+  (value) => {
+    if (value === undefined) return undefined;
+    if (value === null || value === '') return null;
+    return normalizeSchemaInputString(value, options);
+  },
+  z.string({ invalid_type_error: invalidTypeMessage }).nullable().optional()
+);
+
+const enumFieldSchema = (
+  allowedValues,
+  invalidTypeMessage,
+  invalidValueMessage,
+  { optional = false } = {}
+) => {
+  const schema = z.preprocess(
+    (value) => {
+      if (optional && value === undefined) return undefined;
+      return normalizeSchemaInputString(value, { unwrapQuotes: true, lowercase: true });
+    },
+    z.string({ invalid_type_error: invalidTypeMessage })
+      .refine((value) => allowedValues.includes(value), { message: invalidValueMessage })
+  );
+
+  return optional ? schema.optional() : schema;
+};
+
+const integerFieldSchema = (invalidMessage, { optional = false } = {}) => {
+  const schema = z.preprocess(
+    (value) => {
+      if (optional && value === undefined) return undefined;
+      if (value === null || value === '') return value;
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return value;
+        const parsed = Number(trimmed);
+        return Number.isFinite(parsed) ? parsed : value;
+      }
+      return value;
+    },
+    z.number({ invalid_type_error: invalidMessage }).int(invalidMessage)
+  );
+
+  return optional ? schema.optional() : schema;
+};
+
+const uuidFieldSchema = (
+  invalidMessage,
+  { optional = false, nullable = false } = {}
+) => {
+  let schema = z.preprocess(
+    (value) => {
+      if (optional && value === undefined) return undefined;
+      if (nullable && (value === null || value === '')) return null;
+      return normalizeSchemaInputString(value, { unwrapQuotes: true });
+    },
+    z.string({ invalid_type_error: invalidMessage }).regex(UUID_REGEX, invalidMessage)
+  );
+
+  if (nullable) {
+    schema = schema.nullable();
+  }
+
+  if (optional) {
+    schema = schema.optional();
+  }
+
+  return schema;
+};
+
+const taskIdParamSchema = z.object({
+  id: uuidFieldSchema('Task id must be a valid UUID')
+});
+
+const registerTaskBodySchema = z.object({
+  project_url: nonEmptyStringSchema('Project url is required', 'Project url is required', { unwrapQuotes: true }),
+  title: nonEmptyStringSchema('Title is required', 'Title must be a string'),
+  agent_name: optionalStringSchema('Agent name must be a string'),
+  agent_email: optionalStringSchema('Agent email must be a string'),
+  context: z.preprocess(
+    (value) => {
+      if (value === undefined || value === null) return undefined;
+      return normalizeSchemaInputString(value);
+    },
+    z.string({ invalid_type_error: 'Context must be a string' }).optional()
+  ),
+  backlog_item_id: uuidFieldSchema('Backlog item id must be a valid UUID', { optional: true })
+});
+
+const taskStatusUpdateBodySchema = z.object({
+  status: enumFieldSchema(TASK_STATUSES, 'Invalid task status', 'Invalid task status'),
+  project_url: optionalStringSchema('Project url must be a string', { unwrapQuotes: true }),
+  agent_name: optionalStringSchema('Agent name must be a string')
+});
+
+const logAgentProgressBodySchema = z.object({
+  agent_name: optionalStringSchema('Agent name must be a string'),
+  branch: optionalStringSchema('Branch must be a string', { unwrapQuotes: true }),
+  message: nonEmptyStringSchema('Message is required', 'Message must be a string'),
+  technical_details: z.unknown().optional()
+});
+
+const reportBlockerBodySchema = z.object({
+  project_url: nonEmptyStringSchema('Project url is required', 'Project url is required', { unwrapQuotes: true }),
+  task_id: uuidFieldSchema('Task id must be a valid UUID'),
+  error_message: nonEmptyStringSchema('Error message is required', 'Error message must be a string'),
+  agent_name: optionalStringSchema('Agent name must be a string')
+});
+
+const resolveTaskBodySchema = z.object({
+  instruction: nonEmptyStringSchema('Instruction is required', 'Instruction must be a string')
+});
+
+const backlogCreatePayloadSchema = z.object({
+  title: nonEmptyStringSchema('Title is required', 'Title must be a string'),
+  description: optionalNullableStringSchema('Description must be a string'),
+  acceptance_criteria: optionalNullableStringSchema('Acceptance criteria must be a string'),
+  item_type: enumFieldSchema(BACKLOG_ITEM_TYPES, 'Invalid backlog item type', 'Invalid backlog item type', { optional: true }),
+  status: enumFieldSchema(BACKLOG_STATUSES, 'Invalid backlog status', 'Invalid backlog status', { optional: true }),
+  priority: integerFieldSchema('Priority must be an integer', { optional: true }),
+  sort_order: integerFieldSchema('Sort order must be an integer', { optional: true }),
+  source_kind: optionalNullableStringSchema('Source kind must be a string'),
+  source_ref: optionalNullableStringSchema('Source ref must be a string'),
+  active_task_id: uuidFieldSchema('Active task id must be a valid UUID', { optional: true, nullable: true })
+});
+
+const backlogUpdatePayloadSchema = backlogCreatePayloadSchema.partial();
 
 const mapBacklogItemRecord = (item) => {
   if (!item) return item;
@@ -437,71 +621,15 @@ const listBacklogItems = async (projectUrl, status, { includeDeleted = false } =
 };
 
 const getBacklogPayload = (body, { partial = false } = {}) => {
-  const payload = {};
+  const requestBody = body && typeof body === 'object' ? body : {};
+  const schema = partial ? backlogUpdatePayloadSchema : backlogCreatePayloadSchema;
+  const parsed = schema.safeParse(requestBody);
 
-  if (!partial || Object.prototype.hasOwnProperty.call(body, 'title')) {
-    const title = typeof body.title === 'string' ? body.title.trim() : '';
-    if (!partial && !title) {
-      return { error: 'Title is required' };
-    }
-    if (title) {
-      payload.title = title;
-    } else if (!partial && !title) {
-      return { error: 'Title is required' };
-    }
+  if (!parsed.success) {
+    return { error: zodErrorMessage(parsed.error) };
   }
 
-  if (Object.prototype.hasOwnProperty.call(body, 'description')) {
-    payload.description = body.description || null;
-  }
-
-  if (Object.prototype.hasOwnProperty.call(body, 'acceptance_criteria')) {
-    payload.acceptance_criteria = body.acceptance_criteria || null;
-  }
-
-  if (Object.prototype.hasOwnProperty.call(body, 'item_type')) {
-    if (!BACKLOG_ITEM_TYPES.includes(body.item_type)) {
-      return { error: 'Invalid backlog item type' };
-    }
-    payload.item_type = body.item_type;
-  }
-
-  if (Object.prototype.hasOwnProperty.call(body, 'status')) {
-    if (!BACKLOG_STATUSES.includes(body.status)) {
-      return { error: 'Invalid backlog status' };
-    }
-    payload.status = body.status;
-  }
-
-  if (Object.prototype.hasOwnProperty.call(body, 'priority')) {
-    const priority = Number.parseInt(body.priority, 10);
-    if (Number.isNaN(priority)) {
-      return { error: 'Priority must be an integer' };
-    }
-    payload.priority = priority;
-  }
-
-  if (Object.prototype.hasOwnProperty.call(body, 'sort_order')) {
-    const sortOrder = Number.parseInt(body.sort_order, 10);
-    if (Number.isNaN(sortOrder)) {
-      return { error: 'Sort order must be an integer' };
-    }
-    payload.sort_order = sortOrder;
-  }
-
-  if (Object.prototype.hasOwnProperty.call(body, 'source_kind')) {
-    payload.source_kind = body.source_kind || null;
-  }
-
-  if (Object.prototype.hasOwnProperty.call(body, 'source_ref')) {
-    payload.source_ref = body.source_ref || null;
-  }
-
-  if (Object.prototype.hasOwnProperty.call(body, 'active_task_id')) {
-    payload.active_task_id = body.active_task_id || null;
-  }
-
-  return { payload };
+  return { payload: parsed.data };
 };
 
 const mapTaskStatusToBacklogStatus = (status) => {
@@ -517,9 +645,17 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '1.8.0';
+const integrationManifestSchemaVersion = '1.9.0';
 const publicIntegrationBasePath = '/api/public/integrar';
 const integrationManifestReleaseNotes = [
+  {
+    version: '1.9.0',
+    date: '2026-04-27',
+    changes: [
+      'La API de agentes incorpora validacion estructurada con Zod para payloads de POST/PATCH criticos.',
+      'Los endpoints mutantes devuelven errores 400/404 mas consistentes frente a tipos invalidos, enums fuera de contrato o IDs no validos.'
+    ]
+  },
   {
     version: '1.8.0',
     date: '2026-04-27',
@@ -840,24 +976,51 @@ app.get('/api/health', async (_req, res) => {
 
 // Skill 0: register_task
 app.post('/api/projects/tasks', apiLimiter, authenticateAgent, async (req, res) => {
-  const { project_url, title, agent_name, agent_email, context, backlog_item_id } = req.body;
-  const url = normalizeUrl(project_url);
+  const parsedBody = registerTaskBodySchema.safeParse(req.body || {});
+  if (!parsedBody.success) {
+    return res.status(400).json({ error: zodErrorMessage(parsedBody.error) });
+  }
+
+  const {
+    project_url: projectUrl,
+    title,
+    agent_name: agentName,
+    agent_email: agentEmail,
+    context,
+    backlog_item_id: backlogItemId
+  } = parsedBody.data;
+  const url = normalizeUrl(projectUrl || '');
+
+  if (!url) {
+    return res.status(400).json({ error: 'Project url is required' });
+  }
 
   try {
+    if (backlogItemId) {
+      const linkedBacklogItem = await db('backlog_items')
+        .where({ id: backlogItemId, project_url: url })
+        .whereNull('deleted_at')
+        .first();
+
+      if (!linkedBacklogItem) {
+        return res.status(400).json({ error: 'Backlog item id is not valid for project url' });
+      }
+    }
+
     await ensureProjectExists(url);
 
     const [task] = await db('tasks').insert({
       project_url: url,
       title,
-      agent_name,
-      agent_email,
-      context,
+      agent_name: agentName || null,
+      agent_email: agentEmail || null,
+      context: context ?? null,
       status: 'in_progress'
     }).returning('*');
 
-    if (backlog_item_id) {
+    if (backlogItemId) {
       await db('backlog_items')
-        .where({ id: backlog_item_id, project_url: url })
+        .where({ id: backlogItemId, project_url: url })
         .update({
           status: 'in_progress',
           active_task_id: task.id,
@@ -865,7 +1028,7 @@ app.post('/api/projects/tasks', apiLimiter, authenticateAgent, async (req, res) 
         });
     }
 
-    res.json({ task_id: task.id, status: task.status, backlog_item_id: backlog_item_id || null });
+    res.json({ task_id: task.id, status: task.status, backlog_item_id: backlogItemId || null });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -916,7 +1079,7 @@ app.get('/api/projects/backlog', apiLimiter, authenticateAgent, async (req, res)
 
 // Skill 1c: create_backlog_item
 app.post('/api/projects/backlog', apiLimiter, authenticateAgent, async (req, res) => {
-  const { project_url } = req.body;
+  const project_url = normalizeInputString(req.body?.project_url, { unwrapQuotes: true });
   const url = normalizeUrl(project_url);
   const { payload, error } = getBacklogPayload(req.body);
 
@@ -1001,9 +1164,27 @@ app.delete('/api/backlog/:id', apiLimiter, authenticateAgent, async (req, res) =
 
 // Skill 2: update_task_status
 app.patch('/api/tasks/:id/status', apiLimiter, authenticateAgent, async (req, res) => {
-  const { status, project_url, agent_name, agent_email } = req.body;
+  const parsedParams = taskIdParamSchema.safeParse(req.params || {});
+  if (!parsedParams.success) {
+    return res.status(400).json({ error: zodErrorMessage(parsedParams.error) });
+  }
+
+  const parsedBody = taskStatusUpdateBodySchema.safeParse(req.body || {});
+  if (!parsedBody.success) {
+    return res.status(400).json({ error: zodErrorMessage(parsedBody.error) });
+  }
+
+  const taskId = parsedParams.data.id;
+  const { status, project_url: projectUrl, agent_name: agentName } = parsedBody.data;
+
   try {
-    await db('tasks').where({ id: req.params.id }).update({ status });
+    const task = await db('tasks').where({ id: taskId }).first();
+
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    await db('tasks').where({ id: taskId }).update({ status });
 
     const linkedBacklogStatus = mapTaskStatusToBacklogStatus(status);
     if (linkedBacklogStatus) {
@@ -1017,15 +1198,15 @@ app.patch('/api/tasks/:id/status', apiLimiter, authenticateAgent, async (req, re
       }
 
       await db('backlog_items')
-        .where({ active_task_id: req.params.id })
+        .where({ active_task_id: taskId })
         .update(backlogUpdate);
     }
 
-    await notifyWebhook(project_url, {
+    await notifyWebhook(normalizeUrl(projectUrl || task.project_url || ''), {
       event: 'task_status_updated',
-      task_id: req.params.id,
+      task_id: taskId,
       status,
-      agent_name
+      agent_name: agentName
     });
     res.json({ success: true });
   } catch (error) {
@@ -1035,14 +1216,46 @@ app.patch('/api/tasks/:id/status', apiLimiter, authenticateAgent, async (req, re
 
 // Skill 3: log_agent_progress
 app.post('/api/tasks/:id/logs', apiLimiter, authenticateAgent, async (req, res) => {
-  const { project_url, agent_name, branch, message, technical_details } = req.body;
+  const parsedParams = taskIdParamSchema.safeParse(req.params || {});
+  if (!parsedParams.success) {
+    return res.status(400).json({ error: zodErrorMessage(parsedParams.error) });
+  }
+
+  const parsedBody = logAgentProgressBodySchema.safeParse(req.body || {});
+  if (!parsedBody.success) {
+    return res.status(400).json({ error: zodErrorMessage(parsedBody.error) });
+  }
+
+  const taskId = parsedParams.data.id;
+  const {
+    agent_name: agentName,
+    branch,
+    message,
+    technical_details: technicalDetails
+  } = parsedBody.data;
+  const hasTechnicalDetails = Object.prototype.hasOwnProperty.call(parsedBody.data, 'technical_details');
+
+  let serializedTechnicalDetails = null;
+  if (hasTechnicalDetails && technicalDetails != null) {
+    try {
+      serializedTechnicalDetails = JSON.stringify(technicalDetails);
+    } catch (_error) {
+      return res.status(400).json({ error: 'Technical details must be valid JSON data' });
+    }
+  }
+
   try {
+    const task = await db('tasks').where({ id: taskId }).first();
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
     const [log] = await db('agent_logs').insert({
-      task_id: req.params.id,
-      agent_name,
+      task_id: taskId,
+      agent_name: agentName || null,
       branch,
       message,
-      technical_details: technical_details ? JSON.stringify(technical_details) : null
+      technical_details: serializedTechnicalDetails
     }).returning('*');
     res.json({ success: true, log });
   } catch (error) {
@@ -1052,24 +1265,44 @@ app.post('/api/tasks/:id/logs', apiLimiter, authenticateAgent, async (req, res) 
 
 // Skill 4: report_blocker
 app.post('/api/projects/blockers', apiLimiter, authenticateAgent, async (req, res) => {
-  const { project_url, task_id, error_message, agent_name } = req.body;
-  const url = normalizeUrl(project_url);
+  const parsedBody = reportBlockerBodySchema.safeParse(req.body || {});
+  if (!parsedBody.success) {
+    return res.status(400).json({ error: zodErrorMessage(parsedBody.error) });
+  }
+
+  const {
+    project_url: projectUrl,
+    task_id: taskId,
+    error_message: errorMessage,
+    agent_name: agentName
+  } = parsedBody.data;
+  const url = normalizeUrl(projectUrl || '');
+
+  if (!url) {
+    return res.status(400).json({ error: 'Project url is required' });
+  }
+
   try {
+    const task = await db('tasks').where({ id: taskId }).first();
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
     await db('projects').where({ url }).update({ status: 'blocked' });
     await db('backlog_items')
-      .where({ active_task_id: task_id })
+      .where({ active_task_id: taskId })
       .update({ status: 'blocked', updated_at: db.fn.now() });
     await db('agent_logs').insert({
-      task_id,
-      agent_name,
-      message: 'BLOCKER REPORTED: ' + error_message,
+      task_id: taskId,
+      agent_name: agentName || null,
+      message: 'BLOCKER REPORTED: ' + errorMessage,
       action_type: 'error'
     });
     await notifyWebhook(url, {
       event: 'project_blocked',
-      task_id,
-      error_message,
-      agent_name
+      task_id: taskId,
+      error_message: errorMessage,
+      agent_name: agentName
     });
     res.json({ success: true });
   } catch (error) {
@@ -1079,8 +1312,19 @@ app.post('/api/projects/blockers', apiLimiter, authenticateAgent, async (req, re
 
 // Skill 5: heartbeat
 app.post('/api/tasks/:id/heartbeat', apiLimiter, authenticateAgent, async (req, res) => {
+  const parsedParams = taskIdParamSchema.safeParse(req.params || {});
+  if (!parsedParams.success) {
+    return res.status(400).json({ error: zodErrorMessage(parsedParams.error) });
+  }
+
+  const taskId = parsedParams.data.id;
+
   try {
-    await db('tasks').where({ id: req.params.id }).update({ last_heartbeat: db.fn.now() });
+    const updated = await db('tasks').where({ id: taskId }).update({ last_heartbeat: db.fn.now() });
+    if (!updated) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1356,21 +1600,33 @@ app.patch('/api/dashboard/config/openrouter', requireAuth, async (req, res) => {
 });
 
 app.post('/api/tasks/:id/resolve', requireAuth, async (req, res) => {
-  const { instruction } = req.body;
+  const parsedParams = taskIdParamSchema.safeParse(req.params || {});
+  if (!parsedParams.success) {
+    return res.status(400).json({ error: zodErrorMessage(parsedParams.error) });
+  }
+
+  const parsedBody = resolveTaskBodySchema.safeParse(req.body || {});
+  if (!parsedBody.success) {
+    return res.status(400).json({ error: zodErrorMessage(parsedBody.error) });
+  }
+
+  const taskId = parsedParams.data.id;
+  const { instruction } = parsedBody.data;
+
   try {
-    const task = await db('tasks').where({ id: req.params.id }).first();
+    const task = await db('tasks').where({ id: taskId }).first();
     if (!task) return res.status(404).json({ error: 'Task not found' });
 
     // Append the instruction to the context
     const newContext = task.context ? `${task.context}\n\n[Human Unblock]: ${instruction}` : `[Human Unblock]: ${instruction}`;
 
-    await db('tasks').where({ id: req.params.id }).update({
+    await db('tasks').where({ id: taskId }).update({
       status: 'todo',
       context: newContext
     });
 
     await db('backlog_items')
-      .where({ active_task_id: req.params.id })
+      .where({ active_task_id: taskId })
       .update({ status: 'ready', updated_at: db.fn.now() });
 
     await db('projects').where({ url: task.project_url }).update({ status: 'active' });

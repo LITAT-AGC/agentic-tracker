@@ -48,20 +48,20 @@ test.describe('Dashboard Interactive Elements', () => {
 
     // Login flow
     await page.goto('/login');
-    await page.getByLabel('Password').fill('admin');
-    await page.getByRole('button', { name: 'Access Dashboard' }).click();
+    await page.locator('#password').fill('admin');
+    await page.getByRole('button', { name: 'Acceder al Panel' }).click();
     await page.waitForURL('**/dashboard/overview');
 
     // TEST 1: Code Audit Drawer
     // Wait for the "Code" button to appear in the Live Feed and click it
-    const codeBtn = page.locator('button', { hasText: 'Code' });
+    const codeBtn = page.locator('button', { hasText: 'Código' });
     await expect(codeBtn).toBeVisible();
     await codeBtn.click();
 
     // Verify the drawer opens and shows technical details
-    const drawerHeader = page.locator('h3', { hasText: 'Code Audit' });
+    const drawerHeader = page.locator('h3', { hasText: 'Auditoría de Código' });
     await expect(drawerHeader).toBeVisible();
-    await expect(page.locator('text=Execution Outcome:')).toBeVisible();
+    await expect(page.locator('text=Resultado de Ejecución:')).toBeVisible();
     await expect(page.locator('text=failure')).toBeVisible();
     await expect(page.locator('text=package.json')).toBeVisible();
     await expect(page.locator('text=npm install')).toBeVisible();
@@ -76,14 +76,14 @@ test.describe('Dashboard Interactive Elements', () => {
     await resolveBtn.click();
 
     // Verify modal opens
-    const modalHeader = page.locator('h3', { hasText: 'Resolve Blocker' });
+    const modalHeader = page.locator('h3', { hasText: 'Resolver Bloqueo' });
     await expect(modalHeader).toBeVisible();
 
     // Fill instruction and submit
-    const textarea = page.locator('textarea[placeholder="Enter detailed instructions for the agent to proceed..."]');
+    const textarea = page.locator('textarea[placeholder="Ingresa instrucciones detalladas para que el agente proceda..."]');
     await textarea.fill('Try using npm ci instead');
-    
-    const unblockBtn = page.locator('button', { hasText: 'Unblock Agent' });
+
+    const unblockBtn = page.locator('button', { hasText: 'Desbloquear Agente' });
     await unblockBtn.click();
 
     // Wait for modal to close
