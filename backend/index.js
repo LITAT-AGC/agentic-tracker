@@ -645,9 +645,17 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.0';
+const integrationManifestSchemaVersion = '2.0.1';
 const publicIntegrationBasePath = '/api/public/integrar';
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.1',
+    date: '2026-04-27',
+    changes: [
+      'Se explicita para integradores que APTS_BASE_URL y APTS_API_KEY deben definirse en un archivo .env en la raiz del proyecto cliente (o en un secret store equivalente).',
+      'Se agrega ejemplo de variables para reducir errores de descubrimiento de URL y API key durante el bootstrap.'
+    ]
+  },
   {
     version: '2.0.0',
     date: '2026-04-27',
@@ -815,8 +823,13 @@ const buildIntegrationManifest = (req) => ({
       required_secret: 'APTS_API_KEY',
       how_to_obtain: 'Si APTS_API_KEY no esta disponible en el entorno del proyecto, solicitala explicitamente al operador humano o responsable de la integracion antes de intentar llamadas protegidas.',
       missing_secret_behavior: 'No intentes register_task, read_project_context ni ninguna otra llamada protegida hasta recibir APTS_API_KEY.',
-      storage_recommendation: 'Aloja APTS_API_KEY como variable de entorno o en el sistema de secretos del proyecto cliente. No la hardcodees en codigo, prompts versionados, archivos JSON ni documentos de backlog.',
-      companion_env: 'Configura tambien APTS_BASE_URL con la URL base publicada por este manifiesto.'
+      storage_recommendation: 'Define APTS_BASE_URL y APTS_API_KEY en un archivo .env ubicado en la raiz del proyecto cliente, o en un sistema de secretos equivalente que las exponga como variables de entorno en runtime. No las hardcodees en codigo, prompts versionados, archivos JSON ni documentos de backlog.',
+      preferred_env_file: '.env (raiz del proyecto cliente)',
+      env_example: [
+        'APTS_BASE_URL=https://apts.informaticos.ar/api',
+        'APTS_API_KEY=coloca-aqui-tu-api-key'
+      ],
+      companion_env: 'APTS_BASE_URL debe apuntar a la URL base /api publicada por este manifiesto.'
     },
     client_download_guidance: {
       decision_input: 'Revisa la configuracion de modulos del proyecto Node.js cliente antes de descargar el cliente HTTP.',
@@ -863,13 +876,14 @@ const buildIntegrationManifest = (req) => ({
     },
     recommended_first_steps: [
       'Resuelve la identidad del proyecto y del agente desde Git local.',
-      'Si APTS_API_KEY no existe todavia en el entorno, solicitala al operador y alojala como secreto antes de usar la API protegida.',
+      'Si APTS_API_KEY no existe todavia en el entorno, solicitale al operador APTS_API_KEY y confirma tambien APTS_BASE_URL.',
+      'Crea o actualiza el archivo .env en la raiz del proyecto cliente con APTS_BASE_URL y APTS_API_KEY antes de usar la API protegida.',
       'Prepara una bitacora local append-only de resiliencia, por ejemplo en .apts/agent-resilience-log.jsonl, sin tratarla como fuente de verdad.',
       'Inspecciona los archivos locales que hoy contengan backlog, plan o tracking operativo.',
       'Crea o actualiza backlog_items en APTS para reflejar ese estado inicial.',
       'A partir de ese momento usa APTS como sistema principal de seguimiento y no inventes trabajo fuera de APTS.'
     ],
-    operator_prompt_template: 'Lee este manifiesto publico, entiende que APTS es la fuente de verdad del tracking, solicita APTS_API_KEY al operador si no esta disponible, alojala como secreto del proyecto cliente, prepara una bitacora local append-only de resiliencia y despues revisa los archivos locales de backlog para migrar o sincronizar esos items hacia APTS antes de continuar la ejecucion normal.'
+    operator_prompt_template: 'Lee este manifiesto publico, entiende que APTS es la fuente de verdad del tracking, solicita al operador APTS_BASE_URL y APTS_API_KEY si faltan, guardalas en .env en la raiz del proyecto cliente (o en su secret store equivalente), prepara una bitacora local append-only de resiliencia y despues revisa los archivos locales de backlog para migrar o sincronizar esos items hacia APTS antes de continuar la ejecucion normal.'
   },
   entrypoint: buildAbsoluteUrl(req, publicIntegrationBasePath),
   api_base_url: buildAbsoluteUrl(req, '/api'),
@@ -881,13 +895,14 @@ const buildIntegrationManifest = (req) => ({
     required_secret: 'APTS_API_KEY',
     request_secret_from_operator_when_missing: true,
     secret_storage: {
-      recommended_locations: ['environment_variables', 'project_secret_store'],
+      recommended_locations: ['root_dotenv_file', 'environment_variables', 'project_secret_store'],
       avoid: ['hardcoded_source_files', 'tracked_prompt_files', 'versioned_json_contracts', 'backlog_documents']
     }
   },
   instructions: [
     'Read the bootstrap section first to understand the service purpose and the migration goal from local tracking to APTS.',
-    'If APTS_API_KEY is missing, request it from the operator before any protected API call and store it as an environment secret.',
+    'If APTS_API_KEY is missing, request it from the operator before any protected API call.',
+    'Store APTS_BASE_URL and APTS_API_KEY in a .env file at the root of the client project, or in an equivalent project secret store.',
     'Maintain the local resilience log described in the bootstrap section; it is append-only and must not replace APTS as the source of truth.',
     'Download and install the skills contract first.',
     'Read the base agent guidelines before the first APTS API call.',

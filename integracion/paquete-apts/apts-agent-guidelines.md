@@ -9,6 +9,17 @@ Si `APTS_API_KEY` no esta disponible en el entorno del proyecto, debes solicitar
 
 Debes alojar `APTS_API_KEY` como variable de entorno o en el sistema de secretos del proyecto cliente. Nunca la hardcodees en codigo fuente, prompts versionados, archivos JSON ni documentos de backlog.
 
+Define `APTS_BASE_URL` y `APTS_API_KEY` en un archivo `.env` ubicado en la raiz del proyecto cliente.
+
+Ejemplo minimo de `.env` en el proyecto cliente:
+
+```env
+APTS_BASE_URL=https://apts.informaticos.ar/api
+APTS_API_KEY=coloca-aqui-tu-api-key
+```
+
+Si el proyecto usa un secret manager en vez de `.env`, debe exponer los mismos nombres de variables en runtime (`APTS_BASE_URL` y `APTS_API_KEY`).
+
 Ademas de reportar en APTS, debes mantener una bitacora local append-only de resiliencia, por ejemplo en `.apts/agent-resilience-log.jsonl`.
 
 Esa bitacora local no es fuente de verdad y no reemplaza a APTS. Solo sirve como respaldo operativo por si APTS queda inaccesible o perdiera historial.
