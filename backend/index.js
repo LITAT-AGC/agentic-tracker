@@ -175,6 +175,14 @@ const toNumberOrNull = (value) => {
   return Number.isFinite(parsed) ? parsed : null;
 };
 
+const parseBooleanFlag = (value) => {
+  if (typeof value === 'boolean') return value;
+  if (typeof value !== 'string') return false;
+
+  const normalized = value.trim().toLowerCase();
+  return ['1', 'true', 'yes', 'on'].includes(normalized);
+};
+
 const mapBacklogItemRecord = (item) => {
   if (!item) return item;
 
@@ -407,7 +415,7 @@ const ensureProjectExists = async (url) => {
     .onConflict('url').merge();
 };
 
-const listBacklogItems = async (projectUrl, status) => {
+const listBacklogItems = async (projectUrl, status, { includeDeleted = false } = {}) => {
   const query = db('backlog_items')
     .where({ project_url: projectUrl })
     .orderBy([
@@ -415,6 +423,10 @@ const listBacklogItems = async (projectUrl, status) => {
       { column: 'sort_order', order: 'asc' },
       { column: 'created_at', order: 'asc' }
     ]);
+
+  if (!includeDeleted) {
+    query.whereNull('deleted_at');
+  }
 
   if (status) {
     query.andWhere({ status });
@@ -868,6 +880,7 @@ app.get('/api/projects/context', apiLimiter, authenticateAgent, async (req, res)
 app.get('/api/projects/backlog', apiLimiter, authenticateAgent, async (req, res) => {
   const url = normalizeUrl(req.query.url);
   const status = req.query.status;
+  const includeDeleted = parseBooleanFlag(req.query.include_deleted);
 
   if (!url) {
     return res.status(400).json({ error: 'Project url is required' });
@@ -878,7 +891,7 @@ app.get('/api/projects/backlog', apiLimiter, authenticateAgent, async (req, res)
   }
 
   try {
-    const backlog = await listBacklogItems(url, status);
+    const backlog = await listBacklogItems(url, status, { includeDeleted });
     res.json({ backlog });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -930,6 +943,7 @@ app.patch('/api/backlog/:id', apiLimiter, authenticateAgent, async (req, res) =>
   try {
     const [backlogItem] = await db('backlog_items')
       .where({ id: req.params.id })
+      .whereNull('deleted_at')
       .update({
         ...payload,
         updated_at: db.fn.now()
@@ -943,6 +957,29 @@ app.patch('/api/backlog/:id', apiLimiter, authenticateAgent, async (req, res) =>
     res.json({ backlog_item: backlogItem });
   } catch (routeError) {
     res.status(500).json({ error: routeError.message });
+  }
+});
+
+app.delete('/api/backlog/:id', apiLimiter, authenticateAgent, async (req, res) => {
+  try {
+    const [backlogItem] = await db('backlog_items')
+      .where({ id: req.params.id })
+      .whereNull('deleted_at')
+      .update({
+        status: 'archived',
+        active_task_id: null,
+        deleted_at: db.fn.now(),
+        updated_at: db.fn.now()
+      })
+      .returning('*');
+
+    if (!backlogItem) {
+      return res.status(404).json({ error: 'Backlog item not found' });
+    }
+
+    res.json({ success: true, backlog_item: mapBacklogItemRecord(backlogItem) });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 });
 
@@ -1074,6 +1111,7 @@ app.get('/api/dashboard/projects', requireAuth, async (req, res) => {
         .select('project_url')
         .count({ needs_details_count: '*' })
         .where({ status: 'needs_details' })
+        .whereNull('deleted_at')
         .groupBy('project_url')
     ]);
 
@@ -1104,7 +1142,8 @@ app.get('/api/dashboard/projects/:url', requireAuth, async (req, res) => {
     if (!project) return res.status(404).json({ error: 'Project not found' });
 
     const tasks = await db('tasks').where({ project_url: url }).orderBy('updated_at', 'desc');
-    const backlog = await listBacklogItems(url);
+    const includeDeleted = parseBooleanFlag(req.query.include_deleted);
+    const backlog = await listBacklogItems(url, null, { includeDeleted });
     const logs = await db('agent_logs')
       .join('tasks', 'agent_logs.task_id', 'tasks.id')
       .where('tasks.project_url', url)
@@ -1120,7 +1159,8 @@ app.get('/api/dashboard/projects/:url', requireAuth, async (req, res) => {
 app.get('/api/dashboard/projects/:url/backlog', requireAuth, async (req, res) => {
   try {
     const url = normalizeUrl(decodeURIComponent(req.params.url));
-    const backlog = await listBacklogItems(url, req.query.status);
+    const includeDeleted = parseBooleanFlag(req.query.include_deleted);
+    const backlog = await listBacklogItems(url, req.query.status, { includeDeleted });
     res.json({ backlog });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1165,6 +1205,7 @@ app.patch('/api/dashboard/backlog/:id', requireAuth, async (req, res) => {
   try {
     const [backlogItem] = await db('backlog_items')
       .where({ id: req.params.id })
+      .whereNull('deleted_at')
       .update({
         ...payload,
         updated_at: db.fn.now()
@@ -1181,9 +1222,30 @@ app.patch('/api/dashboard/backlog/:id', requireAuth, async (req, res) => {
   }
 });
 
+app.delete('/api/dashboard/backlog/:id', requireAuth, async (req, res) => {
+  try {
+    const deletedRows = await db('backlog_items')
+      .where({ id: req.params.id })
+      .del();
+
+    if (!deletedRows) {
+      return res.status(404).json({ error: 'Backlog item not found' });
+    }
+
+    res.json({ success: true, deleted_rows: deletedRows });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 app.post('/api/dashboard/backlog/:id/analyze', requireAuth, async (req, res) => {
   try {
-    const backlogItem = mapBacklogItemRecord(await db('backlog_items').where({ id: req.params.id }).first());
+    const backlogItem = mapBacklogItemRecord(
+      await db('backlog_items')
+        .where({ id: req.params.id })
+        .whereNull('deleted_at')
+        .first()
+    );
 
     if (!backlogItem) {
       return res.status(404).json({ error: 'Backlog item not found' });
@@ -1207,6 +1269,7 @@ app.post('/api/dashboard/projects/:url/backlog/analyze', requireAuth, async (req
       : [...AUTO_TRIAGE_BACKLOG_STATUSES];
     const backlogItems = await db('backlog_items')
       .where({ project_url: url })
+      .whereNull('deleted_at')
       .whereIn('status', statuses)
       .orderBy([
         { column: 'priority', order: 'asc' },
