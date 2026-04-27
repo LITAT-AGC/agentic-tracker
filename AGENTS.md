@@ -43,4 +43,5 @@ After testing is completed, you can delete the `apts_test.db` to ensure a clean 
 - Before modifying database schemas, always create a new migration. Do not modify existing applied migrations.
 - When creating UI components, utilize the existing Tailwind CSS setup and prioritize the dark, premium aesthetic.
 - For any functional change in APTS that affects behavior exposed to integrators (API routes, payloads, statuses, auth flow, downloadable artifacts, or integration guidance), you must bump the public integration manifest `schema_version` and add a matching entry to `bootstrap.manifest_updates.notes`.
+- `bootstrap.manifest_updates.notes` is append-only version history: never replace it with only the latest change, never delete previous entries, and always prepend the new version entry.
 - Any new capability added to the APTS service must be reflected in the official downloadable integration client scripts (`integracion/paquete-apts/apts-client.js` and `integracion/paquete-apts/apts-client.mjs`) and in `integracion/paquete-apts/apts_skills.json`. Client integrators must not need to build ad-hoc scripts to cover base APTS integration features.
