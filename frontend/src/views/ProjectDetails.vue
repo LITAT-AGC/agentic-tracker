@@ -114,6 +114,19 @@
           </div>
           <div class="flex items-center gap-3">
             <button
+              @click="router.push('/dashboard/settings')"
+              class="px-3 py-1.5 border border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-200 rounded-lg text-xs font-medium transition-colors"
+            >
+              Configurar IA
+            </button>
+            <button
+              @click="analyzeProjectBacklog"
+              :disabled="isAnalyzingBacklog || triageableBacklogCount === 0"
+              class="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-slate-950 rounded-lg text-xs font-semibold transition-colors"
+            >
+              {{ isAnalyzingBacklog ? 'Analizando backlog...' : `Analizar IA (${triageableBacklogCount})` }}
+            </button>
+            <button
               @click="openBacklogCreator"
               class="px-3 py-1.5 bg-fuchsia-600 hover:bg-fuchsia-700 text-white rounded-lg text-xs font-medium transition-colors"
             >
@@ -201,6 +214,26 @@
               </template>
             </Column>
 
+            <Column header="Triage IA">
+              <template #body="{ data }">
+                <div class="max-w-[280px]">
+                  <div v-if="data.llm_last_analyzed_at" class="space-y-1">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <span :class="['px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider', getBacklogStatusClass(data.llm_recommendation_status || data.status)]">
+                        {{ (data.llm_recommendation_status || data.status).replace('_', ' ') }}
+                      </span>
+                      <span class="text-[11px] text-gray-500">{{ formatConfidence(data.llm_confidence) }}</span>
+                    </div>
+                    <p class="text-xs leading-snug text-gray-300">{{ data.llm_analysis_summary }}</p>
+                    <p v-if="data.llm_missing_details?.length" class="text-[11px] text-amber-300">
+                      Faltan {{ data.llm_missing_details.length }} dato(s) clave.
+                    </p>
+                  </div>
+                  <p v-else class="text-xs text-gray-500">Sin análisis todavía.</p>
+                </div>
+              </template>
+            </Column>
+
             <Column header="Task Activa">
               <template #body="{ data }">
                 <span v-if="data.active_task_id" class="text-xs text-indigo-300">En ejecución</span>
@@ -210,12 +243,21 @@
 
             <Column header="Acciones">
               <template #body="{ data }">
-                <button
-                  @click="openBacklogEditor(data)"
-                  class="px-2.5 py-1 bg-gray-700/70 hover:bg-gray-700 text-gray-200 text-xs font-medium rounded transition-colors"
-                >
-                  Editar
-                </button>
+                <div class="flex flex-wrap items-center gap-2">
+                  <button
+                    @click="analyzeBacklogItem(data)"
+                    :disabled="analyzingBacklogId === data.id"
+                    class="px-2.5 py-1 bg-cyan-500/80 hover:bg-cyan-400 disabled:opacity-50 text-slate-950 text-xs font-semibold rounded transition-colors"
+                  >
+                    {{ analyzingBacklogId === data.id ? 'Analizando...' : 'Analizar IA' }}
+                  </button>
+                  <button
+                    @click="openBacklogEditor(data)"
+                    class="px-2.5 py-1 bg-gray-700/70 hover:bg-gray-700 text-gray-200 text-xs font-medium rounded transition-colors"
+                  >
+                    Editar
+                  </button>
+                </div>
               </template>
             </Column>
           </DataTable>
@@ -353,6 +395,24 @@
           </div>
         </div>
 
+        <div v-if="editingBacklog.llm_last_analyzed_at" class="rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4 space-y-3">
+          <div class="flex flex-wrap items-center gap-3">
+            <span :class="['px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider', getBacklogStatusClass(editingBacklog.llm_recommendation_status || editingBacklog.status)]">
+              {{ (editingBacklog.llm_recommendation_status || editingBacklog.status).replace('_', ' ') }}
+            </span>
+            <span class="text-xs text-cyan-100">{{ formatConfidence(editingBacklog.llm_confidence) }}</span>
+            <span class="text-xs text-gray-400">{{ editingBacklog.llm_analysis_model || 'modelo no informado' }}</span>
+            <span class="text-xs text-gray-500">{{ formatDateTime(editingBacklog.llm_last_analyzed_at) }}</span>
+          </div>
+          <p class="text-sm text-gray-200 leading-relaxed">{{ editingBacklog.llm_analysis_summary }}</p>
+          <div v-if="editingBacklog.llm_missing_details?.length" class="space-y-2">
+            <p class="text-[11px] uppercase tracking-wider text-amber-200/80">Datos que faltan</p>
+            <ul class="space-y-2 text-sm text-amber-100/90 list-disc pl-5">
+              <li v-for="detail in editingBacklog.llm_missing_details" :key="detail">{{ detail }}</li>
+            </ul>
+          </div>
+        </div>
+
         <div class="flex flex-wrap items-end gap-3 pt-2 border-t border-gray-700/40">
           <div>
             <label class="block text-[11px] uppercase tracking-wider text-fuchsia-200/70 mb-1">Prioridad</label>
@@ -404,13 +464,19 @@ const projectBacklog = ref([]);
 const projectLogs = ref([]);
 const backlogError = ref(null);
 const isSavingBacklog = ref(false);
+const isAnalyzingBacklog = ref(false);
+const analyzingBacklogId = ref(null);
 const editingBacklog = ref(null);
 const showEditBacklogDialog = ref(false);
 const backlogDialogMode = ref('edit');
 
 const backlogTypeOptions = ['feature', 'bug', 'chore', 'research'];
-const backlogStatusOptions = ['draft', 'ready', 'in_progress', 'review', 'blocked', 'done', 'archived'];
+const backlogStatusOptions = ['draft', 'needs_details', 'ready', 'in_progress', 'review', 'blocked', 'done', 'archived'];
 const taskStatusOptions = ['todo', 'in_progress', 'review', 'done', 'stalled'];
+
+const triageableBacklogCount = computed(() => {
+  return projectBacklog.value.filter((item) => ['draft', 'needs_details', 'ready'].includes(item.status)).length;
+});
 
 const taskFilters = ref({
   status: { value: [...taskStatusOptions], matchMode: 'in' }
@@ -457,6 +523,8 @@ const resetDetails = () => {
   editingBacklog.value = null;
   backlogDialogMode.value = 'edit';
   showEditBacklogDialog.value = false;
+  isAnalyzingBacklog.value = false;
+  analyzingBacklogId.value = null;
 };
 
 const fetchProjectDetails = async (url) => {
@@ -537,6 +605,76 @@ const cancelBacklogEdit = () => {
   backlogDialogMode.value = 'edit';
 };
 
+const analyzeBacklogItem = async (item) => {
+  if (!item?.id) {
+    return;
+  }
+
+  analyzingBacklogId.value = item.id;
+  backlogError.value = null;
+
+  try {
+    const response = await apiFetch(`/dashboard/backlog/${item.id}/analyze`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json'
+      }
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || 'No se pudo analizar el backlog item');
+    }
+
+    await fetchProjectDetails(selectedProject.value.url);
+
+    if (editingBacklog.value?.id === item.id) {
+      editingBacklog.value = { ...data.backlog_item };
+    }
+  } catch (error) {
+    backlogError.value = error.message;
+    console.error('Failed to analyze backlog item', error);
+  } finally {
+    analyzingBacklogId.value = null;
+  }
+};
+
+const analyzeProjectBacklog = async () => {
+  if (!selectedProject.value?.url) {
+    return;
+  }
+
+  isAnalyzingBacklog.value = true;
+  backlogError.value = null;
+
+  try {
+    const encodedUrl = encodeURIComponent(selectedProject.value.url);
+    const response = await apiFetch(`/dashboard/projects/${encodedUrl}/backlog/analyze`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        statuses: ['draft', 'needs_details', 'ready']
+      })
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || 'No se pudo analizar el backlog del proyecto');
+    }
+
+    await fetchProjectDetails(selectedProject.value.url);
+  } catch (error) {
+    backlogError.value = error.message;
+    console.error('Failed to analyze project backlog', error);
+  } finally {
+    isAnalyzingBacklog.value = false;
+  }
+};
+
 const saveBacklogItem = async () => {
   if (!editingBacklog.value || !editingBacklog.value.title?.trim()) {
     return;
@@ -610,6 +748,7 @@ const getTaskStatusClass = (status) => {
 const getBacklogStatusClass = (status) => {
   const map = {
     draft: 'bg-gray-500/10 text-gray-400',
+    needs_details: 'bg-amber-500/10 text-amber-300',
     ready: 'bg-blue-500/10 text-blue-400',
     in_progress: 'bg-indigo-500/10 text-indigo-400',
     review: 'bg-purple-500/10 text-purple-400',
@@ -618,6 +757,22 @@ const getBacklogStatusClass = (status) => {
     archived: 'bg-slate-500/10 text-slate-400'
   };
   return map[status] || 'bg-gray-500/10 text-gray-400';
+};
+
+const formatConfidence = (value) => {
+  if (value == null) {
+    return 'Confianza n/d';
+  }
+
+  return `Confianza ${Math.round(value * 100)}%`;
+};
+
+const formatDateTime = (value) => {
+  if (!value) {
+    return 'Sin fecha';
+  }
+
+  return new Date(value).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
 };
 
 watch(() => route.params.projectId, () => {

@@ -12,6 +12,9 @@
         <router-link to="/dashboard/projects" class="block px-4 py-2 rounded text-white font-medium hover:bg-gray-600" active-class="bg-gray-700">
           Proyectos
         </router-link>
+        <router-link to="/dashboard/settings" class="block px-4 py-2 rounded text-white font-medium hover:bg-gray-600" active-class="bg-gray-700">
+          Configuración
+        </router-link>
       </nav>
     </aside>
 

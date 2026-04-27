@@ -9,27 +9,50 @@
         <p class="mt-2 text-sm text-gray-400">Selecciona un proyecto para abrir su vista detallada en pantalla completa.</p>
       </div>
 
-      <button
-        @click="fetchProjects"
-        :disabled="loading"
-        class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-sm font-medium transition-colors shadow-lg shadow-indigo-900/20 disabled:opacity-50 flex items-center justify-center space-x-2"
-      >
-        <svg v-if="loading" class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-        </svg>
-        <svg v-else class="h-4 w-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-        </svg>
-        <span>Actualizar</span>
-      </button>
+      <div class="flex flex-col items-stretch gap-3 md:items-end">
+        <div class="inline-flex flex-wrap items-center gap-2 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-1">
+          <button
+            @click="needsDetailsFilter = 'all'"
+            :class="[
+              'px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors',
+              needsDetailsFilter === 'all' ? 'bg-gray-200 text-gray-950' : 'text-gray-300 hover:bg-white/5'
+            ]"
+          >
+            Todos
+          </button>
+          <button
+            @click="needsDetailsFilter = 'needs_details'"
+            :class="[
+              'px-3 py-1.5 rounded-xl text-xs font-semibold transition-colors',
+              needsDetailsFilter === 'needs_details' ? 'bg-amber-300 text-amber-950' : 'text-amber-200 hover:bg-amber-500/10'
+            ]"
+          >
+            Requieren más datos ({{ projectsWithNeedsDetailsCount }})
+          </button>
+        </div>
+
+        <button
+          @click="fetchProjects"
+          :disabled="loading"
+          class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-md text-sm font-medium transition-colors shadow-lg shadow-indigo-900/20 disabled:opacity-50 flex items-center justify-center space-x-2"
+        >
+          <svg v-if="loading" class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+          </svg>
+          <svg v-else class="h-4 w-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          <span>Actualizar</span>
+        </button>
+      </div>
     </div>
 
     <div class="bg-gray-900/60 backdrop-blur-xl rounded-2xl border border-gray-800 shadow-xl overflow-hidden relative">
       <div class="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-indigo-500/30 to-transparent"></div>
 
       <DataTable
-        :value="projects"
+        :value="filteredProjects"
         v-model:filters="projectFilters"
         filterDisplay="row"
         :paginator="true"
@@ -77,6 +100,23 @@
             />
           </template>
         </Column>
+        <Column field="needs_details_count" header="Solicitudes incompletas" sortable>
+          <template #body="{ data }">
+            <div class="flex items-center gap-2">
+              <span
+                :class="[
+                  'inline-flex min-w-8 justify-center rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider',
+                  data.needs_details_count > 0 ? 'bg-amber-500/15 text-amber-300' : 'bg-gray-800 text-gray-500'
+                ]"
+              >
+                {{ data.needs_details_count || 0 }}
+              </span>
+              <span class="text-xs" :class="data.needs_details_count > 0 ? 'text-amber-200' : 'text-gray-500'">
+                {{ data.needs_details_count > 0 ? 'Requiere seguimiento' : 'Sin pendientes' }}
+              </span>
+            </div>
+          </template>
+        </Column>
         <Column field="webhook_url" header="Webhook">
           <template #body="{ data }">
             <div class="flex items-center space-x-1.5" v-if="data.webhook_url">
@@ -102,7 +142,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue';
+import { computed, ref, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import DataTable from 'primevue/datatable';
 import Column from 'primevue/column';
@@ -113,9 +153,22 @@ const router = useRouter();
 
 const projects = ref([]);
 const loading = ref(true);
+const needsDetailsFilter = ref('all');
 const projectStatusOptions = ['pending', 'active', 'blocked', 'stalled', 'completed'];
 const projectFilters = ref({
   status: { value: [...projectStatusOptions], matchMode: 'in' }
+});
+
+const projectsWithNeedsDetailsCount = computed(() => {
+  return projects.value.filter((project) => Number.parseInt(project.needs_details_count, 10) > 0).length;
+});
+
+const filteredProjects = computed(() => {
+  if (needsDetailsFilter.value !== 'needs_details') {
+    return projects.value;
+  }
+
+  return projects.value.filter((project) => Number.parseInt(project.needs_details_count, 10) > 0);
 });
 
 const fetchProjects = async () => {

@@ -28,6 +28,11 @@ const routes = [
         path: 'projects/:projectId',
         name: 'ProjectDetails',
         component: () => import('../views/ProjectDetails.vue')
+      },
+      {
+        path: 'settings',
+        name: 'Settings',
+        component: () => import('../views/Settings.vue')
       }
     ]
   }
