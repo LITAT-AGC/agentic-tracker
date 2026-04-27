@@ -50,6 +50,7 @@
             "type": "string",
             "enum": [
               "draft",
+              "needs_details",
               "ready",
               "in_progress",
               "review",
@@ -77,6 +78,7 @@
             "type": "string",
             "enum": [
               "draft",
+              "needs_details",
               "ready",
               "in_progress",
               "review",
@@ -84,6 +86,10 @@
               "done",
               "archived"
             ]
+          },
+          "include_deleted": {
+            "type": "boolean",
+            "default": false
           }
         },
         "required": [
@@ -122,6 +128,7 @@
             "type": "string",
             "enum": [
               "draft",
+              "needs_details",
               "ready",
               "in_progress",
               "review",
@@ -180,6 +187,7 @@
             "type": "string",
             "enum": [
               "draft",
+              "needs_details",
               "ready",
               "in_progress",
               "review",
@@ -201,6 +209,21 @@
             "type": "string"
           },
           "active_task_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "backlog_item_id"
+        ]
+      }
+    },
+    {
+      "name": "delete_backlog_item",
+      "description": "Soft-delete a backlog item. It will be hidden from listings unless include_deleted=true is requested.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "backlog_item_id": {
             "type": "string"
           }
         },

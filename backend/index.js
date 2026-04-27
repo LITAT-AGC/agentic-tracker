@@ -517,9 +517,17 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '1.7.0';
+const integrationManifestSchemaVersion = '1.8.0';
 const publicIntegrationBasePath = '/api/public/integrar';
 const integrationManifestReleaseNotes = [
+  {
+    version: '1.8.0',
+    date: '2026-04-27',
+    changes: [
+      'El cliente oficial de integracion (CommonJS y ESM) ahora cubre soft-delete de backlog y listado con include_deleted.',
+      'Se actualiza el contrato de skills para incluir delete_backlog_item y estados needs_details en operaciones de backlog.'
+    ]
+  },
   {
     version: '1.7.0',
     date: '2026-04-27',

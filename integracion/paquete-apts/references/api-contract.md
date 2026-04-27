@@ -44,6 +44,38 @@ branch=$(git branch --show-current)
 - Metodo: `GET`
 - Ruta: `/projects/context?url=<project_url>&limit=5`
 
+### 2b. list_backlog_items
+
+- Metodo: `GET`
+- Ruta base: `/projects/backlog?url=<project_url>`
+- Query params opcionales:
+  - `status=<draft|needs_details|ready|in_progress|review|blocked|done|archived>`
+  - `include_deleted=true` para incluir items eliminados por soft-delete
+
+### 2c. create_backlog_item
+
+- Metodo: `POST`
+- Ruta: `/projects/backlog`
+- Body minimo:
+
+```json
+{
+  "project_url": "https://github.com/org/repo",
+  "title": "Definir onboarding inicial"
+}
+```
+
+### 2d. update_backlog_item
+
+- Metodo: `PATCH`
+- Ruta: `/backlog/:id`
+
+### 2e. delete_backlog_item (soft-delete)
+
+- Metodo: `DELETE`
+- Ruta: `/backlog/:id`
+- Comportamiento: marca el item como eliminado logicamente. Por defecto no aparece en listados salvo que se pida `include_deleted=true`.
+
 ### 3. update_task_status
 
 - Metodo: `PATCH`
@@ -69,12 +101,18 @@ branch=$(git branch --show-current)
 ## Flujo operativo recomendado
 
 1. Resolver identidad desde Git.
-2. Crear tarea si no hay `task_id`.
-3. Leer contexto del proyecto.
-4. Reportar progreso en cada hito importante.
-5. Enviar heartbeat mientras la tarea siga activa.
-6. Reportar blocker si el agente queda detenido.
-7. Cerrar la tarea con `done` o `review`.
+2. Leer contexto y backlog del proyecto.
+3. Crear o actualizar backlog en APTS (incluyendo soft-delete cuando corresponda).
+4. Crear tarea si no hay `task_id`.
+5. Reportar progreso en cada hito importante.
+6. Enviar heartbeat mientras la tarea siga activa.
+7. Reportar blocker si el agente queda detenido.
+8. Cerrar la tarea con `done` o `review`.
+
+## Cobertura esperada del cliente oficial
+
+- El cliente oficial de APTS (`apts-client.js` o `apts-client.mjs`) debe cubrir todas las operaciones de integracion publicadas en este contrato y en `apts_skills.json`.
+- Un proyecto cliente integrado no deberia necesitar desarrollar scripts adicionales para cubrir operaciones base de APTS.
 
 ## Validacion minima
 

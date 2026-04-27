@@ -23,6 +23,7 @@ Antes de usar cualquier skill debes resolver desde el entorno Git local:
 
 Reglas obligatorias:
 0. Si el usuario pide "siguiente tarea", "next task", "continuar backlog", "ejecutar backlog" o equivalentes, debes invocar primero `Orquestador Agent` y no ejecutar implementacion directa desde el agente general.
+0.1. Usa el cliente oficial de APTS (`apts-client.js` o `apts-client.mjs`) como capa de integracion; no desarrolles scripts paralelos para cubrir operaciones base del contrato.
 1. Lee backlog del proyecto con `list_backlog_items` y elige un item apto para ejecucion.
 2. Si no tienes task_id, usa `register_task` e incluye `backlog_item_id` cuando exista.
 3. Antes de modificar codigo, usa `read_project_context`.

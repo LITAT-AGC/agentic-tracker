@@ -15,6 +15,12 @@ Se mantiene fuera de `.github/` para evitar que VS Code/Copilot lo trate como cu
 2. Copia desde `plantillas-agentes/` las plantillas de agentes si quieres un flujo orquestador/ejecutor apoyado en backlog de APTS.
 3. Instala esos archivos en el proyecto cliente dentro de las ubicaciones que su runtime de agentes soporte.
 
+## Regla de cobertura del cliente exportable
+
+- El cliente HTTP oficial que APTS distribuye (`apts-client.js` y `apts-client.mjs`) debe cubrir todas las funcionalidades de integracion publicadas en `apts_skills.json`.
+- El proyecto cliente no deberia tener que desarrollar scripts extra para completar operaciones base de integracion (por ejemplo listado, alta, actualizacion y soft-delete de backlog).
+- Si aparece una brecha funcional, se corrige primero en el paquete oficial de APTS y luego se consume la version actualizada desde el proyecto cliente.
+
 ## Troubleshooting rapido de agentes (VS Code)
 
 Si una plantilla de agente no aparece en VS Code/Copilot, valida este checklist:

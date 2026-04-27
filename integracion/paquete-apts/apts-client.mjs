@@ -71,10 +71,18 @@ async function readProjectContext(url, limitOrOptions = 5) {
   });
 }
 
-async function listBacklogItems(url, status) {
+async function listBacklogItems(url, statusOrOptions = null) {
+  const options = typeof statusOrOptions === 'object' && statusOrOptions !== null
+    ? statusOrOptions
+    : { status: statusOrOptions };
   const params = new URLSearchParams({ url });
-  if (status) {
-    params.set('status', status);
+
+  if (options.status) {
+    params.set('status', options.status);
+  }
+
+  if (options.includeDeleted) {
+    params.set('include_deleted', 'true');
   }
 
   return request(`/projects/backlog?${params.toString()}`, {
@@ -93,6 +101,12 @@ async function updateBacklogItem(backlogItemId, payload) {
   return request(`/backlog/${backlogItemId}`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
+  });
+}
+
+async function deleteBacklogItem(backlogItemId) {
+  return request(`/backlog/${backlogItemId}`, {
+    method: 'DELETE',
   });
 }
 
@@ -126,6 +140,7 @@ async function heartbeat(taskId, payload) {
 
 export {
   createBacklogItem,
+  deleteBacklogItem,
   heartbeat,
   listBacklogItems,
   logAgentProgress,

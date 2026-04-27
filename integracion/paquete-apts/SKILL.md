@@ -14,7 +14,7 @@ Nota: en este repositorio se publica como material de integracion en la carpeta 
 ## Cuando usarlo
 
 - Cuando un proyecto quiera reportar trabajo de agentes a APTS.
-- Cuando necesites copiar un cliente HTTP base para las 6 skills.
+- Cuando necesites copiar un cliente HTTP oficial que cubra todas las skills publicadas para integracion.
 - Cuando quieras instalar instrucciones o prompts para que el agente siga el flujo de APTS.
 - Cuando necesites el contrato JSON de las tools en un formato descargable junto al skill.
 
@@ -34,6 +34,12 @@ Nota: en este repositorio se publica como material de integracion en la carpeta 
 4. Copia [apts-agent-guidelines.md](./apts-agent-guidelines.md) a `AGENTS.md` o a `.github/copilot-instructions.md` del proyecto cliente.
 5. Configura `APTS_BASE_URL` y `APTS_API_KEY` en el entorno del proyecto cliente.
 6. Valida la integracion ejecutando `register_task`, luego `log_agent_progress` y despues `heartbeat`.
+
+## Cobertura del cliente oficial
+
+- El cliente exportable de APTS (`apts-client.js` / `apts-client.mjs`) debe incluir todas las operaciones del contrato de integracion, incluyendo gestion de backlog con soft-delete.
+- El proyecto cliente no deberia crear wrappers o scripts paralelos para cubrir funciones faltantes del flujo base.
+- Si surge una funcionalidad nueva en el backend de integracion, primero se incorpora al cliente oficial y al `apts_skills.json`, luego se actualiza la guia.
 
 ## Nota de mantenimiento
 
