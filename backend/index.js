@@ -517,9 +517,17 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '1.6.0';
+const integrationManifestSchemaVersion = '1.7.0';
 const publicIntegrationBasePath = '/api/public/integrar';
 const integrationManifestReleaseNotes = [
+  {
+    version: '1.7.0',
+    date: '2026-04-27',
+    changes: [
+      'Se agrega soft-delete para backlog_items en la API de agentes.',
+      'Los listados de backlog excluyen eliminados por defecto y permiten incluirlos con include_deleted=true.'
+    ]
+  },
   {
     version: '1.6.0',
     date: '2026-04-25',
