@@ -645,82 +645,137 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.1';
+const integrationManifestSchemaVersion = '2.0.2';
 const publicIntegrationBasePath = '/api/public/integrar';
+// Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.2',
+    date: '2026-04-27',
+    changes: [
+      'Se sincroniza por unica vez el historial de bootstrap.manifest_updates.notes con la cronologia real de commits del repositorio.',
+      'Se agregan entradas faltantes para las versiones 1.0.0, 1.1.0 y 1.2.0 para conservar trazabilidad completa del manifiesto.'
+    ]
+  },
   {
     version: '2.0.1',
     date: '2026-04-27',
     changes: [
-      'Se explicita para integradores que APTS_BASE_URL y APTS_API_KEY deben definirse en un archivo .env en la raiz del proyecto cliente (o en un secret store equivalente).',
-      'Se agrega ejemplo de variables para reducir errores de descubrimiento de URL y API key durante el bootstrap.'
+      'Se explicita para integradores que APTS_BASE_URL y APTS_API_KEY deben definirse en un archivo .env en la raiz del proyecto cliente (o en un secret store equivalente) (commit 45297ae).',
+      'Se agrega ejemplo de variables para reducir errores de descubrimiento de URL y API key durante el bootstrap (commit 45297ae).'
     ]
   },
   {
     version: '2.0.0',
     date: '2026-04-27',
     changes: [
-      'Se renombran las plantillas de agentes publicadas por el manifiesto a nombres mas descriptivos de su funcion.',
-      'Las rutas de descarga de agentes cambian a /agentes/orquestador-backlog-apts.agent.md y /agentes/ejecutor-item-backlog-dev-test-commit.agent.md sin alias legacy.'
+      'Se renombran las plantillas de agentes publicadas por el manifiesto a nombres mas descriptivos de su funcion (commit c477837).',
+      'Las rutas de descarga de agentes cambian a /agentes/orquestador-backlog-apts.agent.md y /agentes/ejecutor-item-backlog-dev-test-commit.agent.md sin alias legacy (commit c477837).'
     ]
   },
   {
     version: '1.9.0',
     date: '2026-04-27',
     changes: [
-      'La API de agentes incorpora validacion estructurada con Zod para payloads de POST/PATCH criticos.',
-      'Los endpoints mutantes devuelven errores 400/404 mas consistentes frente a tipos invalidos, enums fuera de contrato o IDs no validos.'
+      'La API de agentes incorpora validacion estructurada con Zod para payloads de POST/PATCH criticos (commit f9d3f98).',
+      'Los endpoints mutantes devuelven errores 400/404 mas consistentes frente a tipos invalidos, enums fuera de contrato o IDs no validos (commit f9d3f98).'
     ]
   },
   {
     version: '1.8.0',
     date: '2026-04-27',
     changes: [
-      'El cliente oficial de integracion (CommonJS y ESM) ahora cubre soft-delete de backlog y listado con include_deleted.',
-      'Se actualiza el contrato de skills para incluir delete_backlog_item y estados needs_details en operaciones de backlog.'
+      'El cliente oficial de integracion (CommonJS y ESM) ahora cubre soft-delete de backlog y listado con include_deleted (commit 40efcc0).',
+      'Se actualiza el contrato de skills para incluir delete_backlog_item y estados needs_details en operaciones de backlog (commit 40efcc0).'
     ]
   },
   {
     version: '1.7.0',
     date: '2026-04-27',
     changes: [
-      'Se agrega soft-delete para backlog_items en la API de agentes.',
-      'Los listados de backlog excluyen eliminados por defecto y permiten incluirlos con include_deleted=true.'
+      'Se agrega soft-delete para backlog_items en la API de agentes (commits 3d90bb0 y 20163e9).',
+      'Los listados de backlog excluyen eliminados por defecto y permiten incluirlos con include_deleted=true (commits 3d90bb0 y 20163e9).'
     ]
   },
   {
     version: '1.6.0',
     date: '2026-04-25',
     changes: [
-      'La plantilla de Orquestador se publico como orquestador.agent.md para compatibilidad con deteccion de custom agents en VS Code.',
-      'En esa version tambien se publico una ruta legacy para descargas antiguas de orquestador-agent.md (eliminada en 2.0.0).'
+      'La plantilla de Orquestador se publico como orquestador.agent.md para compatibilidad con deteccion de custom agents en VS Code (commit f683262).',
+      'En esa version tambien se publico una ruta legacy para descargas antiguas de orquestador-agent.md (eliminada en 2.0.0) (commit f683262).'
     ]
   },
   {
     version: '1.5.0',
     date: '2026-04-25',
     changes: [
-      'El manifiesto ahora publica clientes HTTP separados para CommonJS y ESM.',
-      'Cada artefacto declara cuando usarlo segun la configuracion de modulos del proyecto Node.js.'
+      'El manifiesto ahora publica clientes HTTP separados para CommonJS y ESM (commit 92d170f).',
+      'Cada artefacto declara cuando usarlo segun la configuracion de modulos del proyecto Node.js (commit 92d170f).'
     ]
   },
   {
     version: '1.4.0',
     date: '2026-04-25',
     changes: [
-      'Se agrega bootstrap.manifest_updates para publicar novedades por version del manifiesto.',
-      'La version actual del manifiesto queda referenciada en bootstrap.manifest_updates.current_version.'
+      'Se agrega bootstrap.manifest_updates para publicar novedades por version del manifiesto (commit fc44071).',
+      'La version actual del manifiesto queda referenciada en bootstrap.manifest_updates.current_version (commit fc44071).'
     ]
   },
   {
     version: '1.3.0',
     date: '2026-04-25',
     changes: [
-      'Se incorpora guidance de bitacora local append-only de resiliencia y su politica de no ser fuente de verdad.',
-      'Se amplian reglas de bootstrap para migracion desde tracking local y manejo de APTS_API_KEY.'
+      'Se incorpora guidance de bitacora local append-only de resiliencia y su politica de no ser fuente de verdad (commit e612b89).',
+      'Se mantiene el enfoque de migracion desde tracking local hacia APTS como fuente de verdad operativa (commit e612b89).'
+    ]
+  },
+  {
+    version: '1.2.0',
+    date: '2026-04-25',
+    changes: [
+      'Se documenta bootstrap explicito de APTS_API_KEY para integradores (commit ee2bdbf).',
+      'Se aclara que llamadas protegidas requieren el secreto antes de invocar skills autenticadas (commit ee2bdbf).'
+    ]
+  },
+  {
+    version: '1.1.0',
+    date: '2026-04-25',
+    changes: [
+      'Se agrega guidance inicial de bootstrap en el manifiesto publico de integracion (commit 23ea8c4).',
+      'Se consolida la exposicion del bootstrap bajo /api/public/integrar para el flujo de agentes (commits 23ea8c4 y cc18a7d).'
+    ]
+  },
+  {
+    version: '1.0.0',
+    date: '2026-04-25',
+    changes: [
+      'Se publica por primera vez el manifiesto de integracion para agentes en APTS (commit 6bcac00).',
+      'Se establece el endpoint publico de entrada para bootstrap sin token para descubrimiento inicial (commit 6bcac00).'
     ]
   }
 ];
+
+const validateIntegrationManifestReleaseHistory = (history, currentVersion) => {
+  if (!Array.isArray(history) || history.length === 0) {
+    throw new Error('integrationManifestReleaseNotes must be a non-empty array');
+  }
+
+  if (history.length < 2) {
+    throw new Error('integrationManifestReleaseNotes must keep version history (not only the latest change)');
+  }
+
+  if (history[0]?.version !== currentVersion) {
+    throw new Error('integrationManifestReleaseNotes[0].version must match integrationManifestSchemaVersion');
+  }
+
+  const uniqueVersions = new Set(history.map((entry) => entry.version));
+  if (uniqueVersions.size !== history.length) {
+    throw new Error('integrationManifestReleaseNotes cannot contain duplicated versions');
+  }
+};
+
+validateIntegrationManifestReleaseHistory(integrationManifestReleaseNotes, integrationManifestSchemaVersion);
+
 const integrationArtifacts = {
   skills_json: {
     route: `${publicIntegrationBasePath}/skills.json`,
@@ -802,7 +857,9 @@ const buildIntegrationManifest = (req) => ({
   integration_mode: 'agent',
   bootstrap: {
     manifest_updates: {
+      history_mode: 'append_only',
       current_version: integrationManifestSchemaVersion,
+      latest_note: integrationManifestReleaseNotes[0],
       notes: integrationManifestReleaseNotes
     },
     summary: 'APTS centraliza el tracking operativo de proyectos ejecutados por agentes y debe convertirse en la fuente de verdad del backlog y de la ejecucion.',
