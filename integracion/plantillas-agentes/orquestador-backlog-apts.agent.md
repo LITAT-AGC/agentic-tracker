@@ -1,8 +1,8 @@
 ---
-name: Orquestador Agent
+name: Orquestador Backlog APTS
 description: "Use when: user asks to run next task/siguiente tarea, continue backlog/continuar backlog, execute backlog/ejecutar backlog, or orchestrate backlog-driven execution from APTS by taking the next ready item and delegating implementation to a subagent until completion or blocker."
 tools: ['agent', 'read', 'search', 'edit', 'execute']
-agents: ['Ejecutor Dev Test Commit']
+agents: ['Ejecutor Item Backlog Dev Test Commit']
 argument-hint: "Global objective and scope for the cycle, for example: execute the next ready backlog items for this repository in APTS"
 user-invocable: true
 ---
@@ -45,7 +45,7 @@ For each selected backlog item:
 3. Immediately read project context with `read_project_context`.
 
 ## Delegation Rule
-Invoke exactly one subagent run using `Ejecutor Dev Test Commit`.
+Invoke exactly one subagent run using `Ejecutor Item Backlog Dev Test Commit`.
 Pass:
 - backlog item id
 - task id

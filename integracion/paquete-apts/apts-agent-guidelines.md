@@ -22,7 +22,7 @@ Antes de usar cualquier skill debes resolver desde el entorno Git local:
 - branch: `git branch --show-current`
 
 Reglas obligatorias:
-0. Si el usuario pide "siguiente tarea", "next task", "continuar backlog", "ejecutar backlog" o equivalentes, debes invocar primero `Orquestador Agent` y no ejecutar implementacion directa desde el agente general.
+0. Si el usuario pide "siguiente tarea", "next task", "continuar backlog", "ejecutar backlog" o equivalentes, debes invocar primero `Orquestador Backlog APTS` y no ejecutar implementacion directa desde el agente general.
 0.1. Usa el cliente oficial de APTS (`apts-client.js` o `apts-client.mjs`) como capa de integracion; no desarrolles scripts paralelos para cubrir operaciones base del contrato.
 1. Lee backlog del proyecto con `list_backlog_items` y elige un item apto para ejecucion.
 2. Si no tienes task_id, usa `register_task` e incluye `backlog_item_id` cuando exista.
@@ -35,5 +35,5 @@ Reglas obligatorias:
 9. Nunca inventes `project_url`, `agent_name` ni `branch`; resuelvelos siempre desde Git.
 10. Si falta `APTS_API_KEY`, deten la integracion operativa, solicitala al operador y solo continua cuando este alojada como secreto del entorno.
 11. Mantiene una bitacora local append-only de resiliencia, pero no la uses para reemplazar a APTS como tracking oficial.
-12. Si `Orquestador Agent` no esta instalado o no puede invocarse, debes detener la ejecucion de la tarea y pedir al operador la instalacion/correccion; no avances con un flujo alternativo sin orquestador.
+12. Si `Orquestador Backlog APTS` no esta instalado o no puede invocarse, debes detener la ejecucion de la tarea y pedir al operador la instalacion/correccion; no avances con un flujo alternativo sin orquestador.
 ```

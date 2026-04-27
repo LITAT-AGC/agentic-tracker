@@ -1,5 +1,5 @@
 ---
-name: Ejecutor Dev Test Commit
+name: Ejecutor Item Backlog Dev Test Commit
 description: "Use when: implement one backlog item end-to-end with APTS tracking, run validations, and create a single atomic commit if and only if validation passes."
 tools: ['read', 'search', 'edit', 'execute']
 user-invocable: false

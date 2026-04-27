@@ -6,7 +6,7 @@ Se mantiene fuera de `.github/` para evitar que VS Code/Copilot lo trate como cu
 
 ## Estructura
 
-- `plantillas-agentes/`: plantillas de agentes para orquestacion y ejecucion contra APTS, incluyendo `orquestador.agent.md` y `ejecutor-dev-test-commit.agent.md`.
+- `plantillas-agentes/`: plantillas de agentes para orquestacion y ejecucion contra APTS, incluyendo `orquestador-backlog-apts.agent.md` y `ejecutor-item-backlog-dev-test-commit.agent.md`.
 - `paquete-apts/`: paquete exportable con contrato JSON, clientes HTTP para CommonJS y ESM, guia operativa y referencia de API.
 
 ## Uso recomendado
@@ -25,13 +25,13 @@ Se mantiene fuera de `.github/` para evitar que VS Code/Copilot lo trate como cu
 
 Si una plantilla de agente no aparece en VS Code/Copilot, valida este checklist:
 
-1. Nombre de archivo: debe terminar en `.agent.md` (por ejemplo `orquestador.agent.md`).
+1. Nombre de archivo: debe terminar en `.agent.md` (por ejemplo `orquestador-backlog-apts.agent.md`).
 2. Ubicacion: instala el archivo dentro del proyecto cliente abierto en VS Code, en `.github/agents/`.
 3. Frontmatter YAML: verifica que el bloque `---` inicial sea valido y que incluya al menos `name` y `description`.
 4. Tipo de artefacto: `apts_skills.json` define tools/skills HTTP, no crea agentes por si solo.
 5. Recarga del editor: tras copiar agentes nuevos, ejecuta `Developer: Reload Window`.
 
-Recomendacion: manten `Orquestador Agent` y `Ejecutor Dev Test Commit` en la misma carpeta `.github/agents/` para asegurar que la referencia del orquestador al subagente funcione.
+Recomendacion: manten `Orquestador Backlog APTS` y `Ejecutor Item Backlog Dev Test Commit` en la misma carpeta `.github/agents/` para asegurar que la referencia del orquestador al subagente funcione.
 
 Si modificas el cliente HTTP exportable, replica el cambio tanto en `paquete-apts/apts-client.js` como en `paquete-apts/apts-client.mjs` para mantener alineadas las variantes CommonJS y ESM.
 

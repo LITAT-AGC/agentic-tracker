@@ -645,9 +645,17 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '1.9.0';
+const integrationManifestSchemaVersion = '2.0.0';
 const publicIntegrationBasePath = '/api/public/integrar';
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.0',
+    date: '2026-04-27',
+    changes: [
+      'Se renombran las plantillas de agentes publicadas por el manifiesto a nombres mas descriptivos de su funcion.',
+      'Las rutas de descarga de agentes cambian a /agentes/orquestador-backlog-apts.agent.md y /agentes/ejecutor-item-backlog-dev-test-commit.agent.md sin alias legacy.'
+    ]
+  },
   {
     version: '1.9.0',
     date: '2026-04-27',
@@ -676,8 +684,8 @@ const integrationManifestReleaseNotes = [
     version: '1.6.0',
     date: '2026-04-25',
     changes: [
-      'La plantilla de Orquestador ahora se publica como orquestador.agent.md para compatibilidad con deteccion de custom agents en VS Code.',
-      'Se mantiene una ruta legacy para descargas antiguas de orquestador-agent.md.'
+      'La plantilla de Orquestador se publico como orquestador.agent.md para compatibilidad con deteccion de custom agents en VS Code.',
+      'En esa version tambien se publico una ruta legacy para descargas antiguas de orquestador-agent.md (eliminada en 2.0.0).'
     ]
   },
   {
@@ -734,18 +742,18 @@ const integrationArtifacts = {
     description: 'Base operating rules for any agent that reports work to APTS.'
   },
   executor_agent: {
-    route: `${publicIntegrationBasePath}/agentes/ejecutor-dev-test-commit.agent.md`,
-    filePath: path.join(integrationRoot, 'plantillas-agentes', 'ejecutor-dev-test-commit.agent.md'),
-    fileName: 'ejecutor-dev-test-commit.agent.md',
+    route: `${publicIntegrationBasePath}/agentes/ejecutor-item-backlog-dev-test-commit.agent.md`,
+    filePath: path.join(integrationRoot, 'plantillas-agentes', 'ejecutor-item-backlog-dev-test-commit.agent.md'),
+    fileName: 'ejecutor-item-backlog-dev-test-commit.agent.md',
     contentType: 'text/markdown; charset=utf-8',
     kind: 'agent_template',
     recommended: false,
     description: 'Worker agent template for one backlog item end-to-end.'
   },
   orchestrator_agent: {
-    route: `${publicIntegrationBasePath}/agentes/orquestador.agent.md`,
-    filePath: path.join(integrationRoot, 'plantillas-agentes', 'orquestador.agent.md'),
-    fileName: 'orquestador.agent.md',
+    route: `${publicIntegrationBasePath}/agentes/orquestador-backlog-apts.agent.md`,
+    filePath: path.join(integrationRoot, 'plantillas-agentes', 'orquestador-backlog-apts.agent.md'),
+    fileName: 'orquestador-backlog-apts.agent.md',
     contentType: 'text/markdown; charset=utf-8',
     kind: 'agent_template',
     recommended: false,
@@ -935,9 +943,8 @@ app.get(publicIntegrationBasePath, (req, res) => {
 app.get(`${publicIntegrationBasePath}/skills.json`, async (req, res) => sendIntegrationArtifact(req, res, 'skills_json'));
 app.get(`${publicIntegrationBasePath}/skill.md`, async (req, res) => sendIntegrationArtifact(req, res, 'skill_markdown'));
 app.get(`${publicIntegrationBasePath}/agent-guidelines.md`, async (req, res) => sendIntegrationArtifact(req, res, 'agent_guidelines'));
-app.get(`${publicIntegrationBasePath}/agentes/ejecutor-dev-test-commit.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'executor_agent'));
-app.get(`${publicIntegrationBasePath}/agentes/orquestador.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'orchestrator_agent'));
-app.get(`${publicIntegrationBasePath}/agentes/orquestador-agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'orchestrator_agent'));
+app.get(`${publicIntegrationBasePath}/agentes/ejecutor-item-backlog-dev-test-commit.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'executor_agent'));
+app.get(`${publicIntegrationBasePath}/agentes/orquestador-backlog-apts.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'orchestrator_agent'));
 app.get(`${publicIntegrationBasePath}/apts-client.js`, async (req, res) => sendIntegrationArtifact(req, res, 'js_client_commonjs'));
 app.get(`${publicIntegrationBasePath}/apts-client.mjs`, async (req, res) => sendIntegrationArtifact(req, res, 'js_client_esm'));
 

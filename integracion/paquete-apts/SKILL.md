@@ -48,9 +48,9 @@ Nota: en este repositorio se publica como material de integracion en la carpeta 
 
 ## Politica de ejecucion de backlog (obligatoria)
 
-- Para pedidos de ejecucion como "siguiente tarea", "next task", "continuar backlog" o "ejecutar backlog", el punto de entrada debe ser `Orquestador Agent`.
+- Para pedidos de ejecucion como "siguiente tarea", "next task", "continuar backlog" o "ejecutar backlog", el punto de entrada debe ser `Orquestador Backlog APTS`.
 - No ejecutes implementacion directa desde el agente general si corresponde una corrida de backlog.
-- Si `Orquestador Agent` no esta disponible en el proyecto cliente, detiene la operacion y solicita al operador instalar/corregir la plantilla antes de continuar.
+- Si `Orquestador Backlog APTS` no esta disponible en el proyecto cliente, detiene la operacion y solicita al operador instalar/corregir la plantilla antes de continuar.
 
 ## Resultado esperado
 
