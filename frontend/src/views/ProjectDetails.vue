@@ -257,6 +257,13 @@
                   >
                     Editar
                   </button>
+                  <button
+                    @click="hardDeleteBacklogItem(data)"
+                    :disabled="deletingBacklogId === data.id"
+                    class="px-2.5 py-1 bg-rose-500/80 hover:bg-rose-400 disabled:opacity-50 text-rose-950 text-xs font-semibold rounded transition-colors"
+                  >
+                    {{ deletingBacklogId === data.id ? 'Eliminando...' : 'Hard-delete' }}
+                  </button>
                 </div>
               </template>
             </Column>
@@ -437,6 +444,14 @@
           >
             {{ isSavingBacklog ? 'Guardando...' : backlogDialogMode === 'create' ? 'Crear item' : 'Guardar cambios' }}
           </button>
+          <button
+            v-if="backlogDialogMode === 'edit' && editingBacklog.id"
+            @click="hardDeleteBacklogItem(editingBacklog)"
+            :disabled="deletingBacklogId === editingBacklog.id"
+            class="px-4 py-2 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors"
+          >
+            {{ deletingBacklogId === editingBacklog.id ? 'Eliminando...' : 'Eliminar permanentemente' }}
+          </button>
         </div>
       </div>
     </Dialog>
@@ -466,6 +481,7 @@ const backlogError = ref(null);
 const isSavingBacklog = ref(false);
 const isAnalyzingBacklog = ref(false);
 const analyzingBacklogId = ref(null);
+const deletingBacklogId = ref(null);
 const editingBacklog = ref(null);
 const showEditBacklogDialog = ref(false);
 const backlogDialogMode = ref('edit');
@@ -525,6 +541,7 @@ const resetDetails = () => {
   showEditBacklogDialog.value = false;
   isAnalyzingBacklog.value = false;
   analyzingBacklogId.value = null;
+  deletingBacklogId.value = null;
 };
 
 const fetchProjectDetails = async (url) => {
@@ -672,6 +689,45 @@ const analyzeProjectBacklog = async () => {
     console.error('Failed to analyze project backlog', error);
   } finally {
     isAnalyzingBacklog.value = false;
+  }
+};
+
+const hardDeleteBacklogItem = async (item) => {
+  if (!item?.id || !selectedProject.value?.url) {
+    return;
+  }
+
+  const confirmed = window.confirm(`Se eliminará permanentemente "${item.title}". Esta acción no se puede deshacer. ¿Continuar?`);
+  if (!confirmed) {
+    return;
+  }
+
+  deletingBacklogId.value = item.id;
+  backlogError.value = null;
+
+  try {
+    const response = await apiFetch(`/dashboard/backlog/${item.id}`, {
+      method: 'DELETE',
+      credentials: 'include'
+    });
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || 'No se pudo eliminar el backlog item');
+    }
+
+    if (editingBacklog.value?.id === item.id) {
+      showEditBacklogDialog.value = false;
+      editingBacklog.value = null;
+      backlogDialogMode.value = 'edit';
+    }
+
+    await fetchProjectDetails(selectedProject.value.url);
+  } catch (error) {
+    backlogError.value = error.message;
+    console.error('Failed to hard-delete backlog item', error);
+  } finally {
+    deletingBacklogId.value = null;
   }
 };
 
