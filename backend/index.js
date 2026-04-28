@@ -761,10 +761,26 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.8';
+const integrationManifestSchemaVersion = '2.0.10';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.10',
+    date: '2026-04-28',
+    changes: [
+      'Bootstrap guidance now explicitly instructs integrators to remove older ad-hoc APTS wrapper scripts for base contract operations after installing the official client or CLI.',
+      'The artifact sync policy now clarifies that only filenames published by APTS are deleted automatically; custom wrapper cleanup remains a manual migration step unless declared as legacy metadata.'
+    ]
+  },
+  {
+    version: '2.0.9',
+    date: '2026-04-28',
+    changes: [
+      'The public integration package now publishes official CLI entrypoints for CommonJS and ESM so agents can invoke APTS through one stable shell command instead of generating ad-hoc wrapper scripts.',
+      'CLI artifacts now declare the matching reference client artifact they depend on, so integrators keep both files together in the same workspace-local folder.'
+    ]
+  },
   {
     version: '2.0.8',
     date: '2026-04-28',
@@ -959,8 +975,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'SKILL.md'),
     fileName: 'SKILL.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.4',
-    updatedInSchemaVersion: '2.0.4',
+    artifactVersion: '2.0.10',
+    updatedInSchemaVersion: '2.0.10',
     kind: 'skill_package',
     recommended: false,
     syncAction: 'overwrite',
@@ -972,8 +988,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-agent-guidelines.md'),
     fileName: 'apts-agent-guidelines.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.4',
-    updatedInSchemaVersion: '2.0.4',
+    artifactVersion: '2.0.10',
+    updatedInSchemaVersion: '2.0.10',
     kind: 'agent_guidelines',
     recommended: true,
     syncAction: 'overwrite',
@@ -1042,6 +1058,40 @@ const integrationArtifacts = {
     module_system: 'esm',
     selection_rule: 'Use this file when the client project runs Node.js in ESM mode, typically with import/export or type=module in package.json.',
     description: 'Optional JavaScript HTTP client for ESM runtimes.'
+  },
+  js_cli_commonjs: {
+    route: `${publicIntegrationBasePath}/apts-cli.js`,
+    filePath: path.join(integrationRoot, 'paquete-apts', 'apts-cli.js'),
+    fileName: 'apts-cli.js',
+    contentType: 'application/javascript; charset=utf-8',
+    artifactVersion: '2.0.9',
+    updatedInSchemaVersion: '2.0.9',
+    kind: 'reference_cli',
+    recommended: false,
+    optional: true,
+    syncAction: 'overwrite',
+    deprecatedFilenames: [],
+    dependsOnArtifactIds: ['js_client_commonjs'],
+    module_system: 'commonjs',
+    selection_rule: 'Use this file when the runtime prefers shellable Node.js commands over direct module imports and the client project runs in CommonJS mode. Keep it in the same folder as apts-client.js.',
+    description: 'Optional CommonJS CLI wrapper over the official APTS client.'
+  },
+  js_cli_esm: {
+    route: `${publicIntegrationBasePath}/apts-cli.mjs`,
+    filePath: path.join(integrationRoot, 'paquete-apts', 'apts-cli.mjs'),
+    fileName: 'apts-cli.mjs',
+    contentType: 'application/javascript; charset=utf-8',
+    artifactVersion: '2.0.9',
+    updatedInSchemaVersion: '2.0.9',
+    kind: 'reference_cli',
+    recommended: false,
+    optional: true,
+    syncAction: 'overwrite',
+    deprecatedFilenames: [],
+    dependsOnArtifactIds: ['js_client_esm'],
+    module_system: 'esm',
+    selection_rule: 'Use this file when the runtime prefers shellable Node.js commands over direct module imports and the client project runs in ESM mode. Keep it in the same folder as apts-client.mjs.',
+    description: 'Optional ESM CLI wrapper over the official APTS client.'
   }
 };
 
@@ -1103,7 +1153,14 @@ const buildIntegrationManifest = (req) => ({
         'package.json declares type=module',
         'the runtime expects .mjs files or ESM modules'
       ],
-      default_rule: 'If in doubt, inspect package.json and the client project code before choosing an artifact.'
+      choose_cli_when: [
+        'the runtime can invoke shell commands more easily than loading JavaScript modules directly',
+        'you want one stable entrypoint instead of generating ad-hoc wrapper scripts around the APTS client',
+        'the matching reference client artifact is available in the same local folder as the CLI'
+      ],
+      cli_dependency_rule: 'apts-cli.js depends on apts-client.js and apts-cli.mjs depends on apts-client.mjs. Keep each CLI and its matching client artifact together in the same workspace-local folder.',
+      legacy_wrapper_cleanup_rule: 'After installing the official client or CLI, remove older project-local scripts that only wrapped base APTS operations such as register_task, read_project_context, update_task_status, log_agent_progress, report_blocker, or heartbeat. Keep only thin runtime-specific adapters when discovery requires them.',
+      default_rule: 'If in doubt, inspect package.json and the client project code before choosing an artifact. Download the CLI only together with the matching client artifact.'
     },
     artifact_sync_policy: {
       source_of_truth: 'manifest_artifacts',
@@ -1111,6 +1168,7 @@ const buildIntegrationManifest = (req) => ({
       when_version_changes: 'overwrite_local_file',
       delete_known_legacy_files: true,
       legacy_cleanup_targets: buildLegacyCleanupTargets(),
+      manual_cleanup_note: 'Automatic cleanup only applies to filenames explicitly published by APTS in legacy_cleanup_targets. If the client project previously created custom APTS wrapper scripts for base operations, remove them manually during migration unless APTS later publishes those filenames as deprecated.',
       updater_contract: [
         'For each manifest artifact id, compare local metadata with artifact_version from this manifest.',
         'If local version differs from artifact_version, re-download and overwrite the local managed file.',
@@ -1157,6 +1215,7 @@ const buildIntegrationManifest = (req) => ({
       'If APTS_API_KEY is not yet present in the environment, request APTS_API_KEY from the operator and confirm APTS_BASE_URL as well.',
       'Create or update a .env file at the client project root with APTS_BASE_URL and APTS_API_KEY before using protected APIs.',
       'Create a workspace-local integration folder such as .ia/apts, place the APTS contract and HTTP client there, and only then wire runtime-specific adapters if needed.',
+      'If the project previously used ad-hoc APTS wrapper scripts for base operations, remove them once the official client or CLI is installed and keep only thin discovery adapters when the runtime still needs them.',
       'Prepare a local append-only resilience journal, for example at .apts/agent-resilience-log.jsonl, without treating it as a source of truth.',
       'Inspect local files that currently contain backlog, planning, or operational tracking.',
       'Create or update backlog_items in APTS to reflect that initial state.',
@@ -1188,6 +1247,8 @@ const buildIntegrationManifest = (req) => ({
     'Download and install the skills contract first.',
     'Read the base agent guidelines before the first APTS API call.',
     'Choose the reference client that matches the client project module system: apts-client.js for CommonJS or apts-client.mjs for ESM.',
+    'If the runtime prefers shellable command entrypoints over importing JavaScript modules, download the matching CLI as well: apts-cli.js for CommonJS or apts-cli.mjs for ESM, keeping it beside the matching client file.',
+    'After installing the official client or CLI, remove older local APTS wrapper scripts for base operations to avoid drift. Keep only thin runtime-specific discovery adapters when required.',
     'Download the optional agent templates only if your runtime supports custom agents.',
     'Use APTS_BASE_URL with the published /api base path.'
   ],
@@ -1209,6 +1270,7 @@ const buildIntegrationManifest = (req) => ({
     optional: artifact.optional || false,
     module_system: artifact.module_system || null,
     selection_rule: artifact.selection_rule || null,
+    depends_on_artifact_ids: artifact.dependsOnArtifactIds || [],
     media_type: artifact.contentType,
     url: buildAbsoluteUrl(req, artifact.route),
     download_url: `${buildAbsoluteUrl(req, artifact.route)}?download=1`
@@ -1247,6 +1309,8 @@ app.get(`${publicIntegrationBasePath}/agentes/ejecutor-item-backlog-dev-test-com
 app.get(`${publicIntegrationBasePath}/agentes/orquestador-backlog-apts.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'orchestrator_agent'));
 app.get(`${publicIntegrationBasePath}/apts-client.js`, async (req, res) => sendIntegrationArtifact(req, res, 'js_client_commonjs'));
 app.get(`${publicIntegrationBasePath}/apts-client.mjs`, async (req, res) => sendIntegrationArtifact(req, res, 'js_client_esm'));
+app.get(`${publicIntegrationBasePath}/apts-cli.js`, async (req, res) => sendIntegrationArtifact(req, res, 'js_cli_commonjs'));
+app.get(`${publicIntegrationBasePath}/apts-cli.mjs`, async (req, res) => sendIntegrationArtifact(req, res, 'js_cli_esm'));
 
 // --- AGENT API (SKILLS) ---
 

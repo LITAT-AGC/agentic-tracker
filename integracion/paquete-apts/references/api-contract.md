@@ -137,10 +137,13 @@ branch=$(git branch --show-current)
 
 - Usar payload JSON con forma de contrato para cada operacion (contract-first).
 - Para compatibilidad hacia atras, el cliente oficial puede aceptar firmas posicionales legadas en algunas funciones, pero la forma recomendada y estable es siempre objeto JSON.
+- Si el runtime prefiere invocacion por terminal en lugar de imports, usar la CLI oficial (`apts-cli.js` o `apts-cli.mjs`) junto a su cliente gemelo en la misma carpeta (`apts-client.js` o `apts-client.mjs`).
+- Al migrar al cliente o CLI oficial, retirar wrappers o scripts propios viejos que solo proxyeen operaciones base de APTS.
 
 ## Cobertura esperada del cliente oficial
 
 - El cliente oficial de APTS (`apts-client.js` o `apts-client.mjs`) debe cubrir todas las operaciones de integracion publicadas en este contrato y en `apts_skills.json`.
+- La CLI oficial de APTS (`apts-cli.js` o `apts-cli.mjs`) debe exponer esas mismas operaciones como comandos estables sin obligar al proyecto cliente a crear wrappers ad-hoc.
 - Un proyecto cliente integrado no deberia necesitar desarrollar scripts adicionales para cubrir operaciones base de APTS.
 
 ## Validacion minima

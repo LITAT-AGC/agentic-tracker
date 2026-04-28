@@ -7,6 +7,9 @@ Use this content as a baseline for `AGENTS.md` or `.github/copilot-instructions.
 Use a workspace-local installation strategy for APTS integration artifacts:
 
 - Keep the canonical contract and HTTP client under `.ia/apts/`.
+- Keep the canonical contract and the matching HTTP client under `.ia/apts/`.
+- If the runtime prefers shell execution, place `apts-cli.js` beside `apts-client.js` or `apts-cli.mjs` beside `apts-client.mjs` in that same folder.
+- When migrating from older ad-hoc APTS wrappers, remove those local scripts once the official client or CLI is installed. Keep only thin discovery adapters when the runtime still requires them.
 - If a runtime needs its own discovery path, add a thin adapter at `.github/skills/apts/`, `.agents/skills/apts/`, or `.claude/skills/apts/` that delegates to `.ia/apts/`.
 - Avoid user-global skill installation for project integrations to prevent cross-project config leakage and version drift.
 
@@ -29,6 +32,7 @@ APTS_API_KEY=place-your-api-key-here
 If the project uses a secret manager instead of `.env`, it must expose the same runtime variable names (`APTS_BASE_URL` and `APTS_API_KEY`).
 
 Keep APTS integration artifacts in a workspace-local folder such as `.ia/apts/`.
+If your runtime prefers shell execution over importing modules directly, keep the matching CLI beside the matching client in that folder.
 If your runtime requires a specific discovery path, add a thin adapter in `.github/skills/apts/`, `.agents/skills/apts/`, or `.claude/skills/apts/` that delegates to `.ia/apts/`.
 Do not rely on user-global skill installation for project integrations.
 
@@ -46,7 +50,7 @@ Before using any skill, resolve from the local Git environment:
 
 Mandatory rules:
 0. If the user asks for "next task", "continue backlog", "run backlog", or equivalent requests, you must invoke `APTS Backlog Orchestrator` first and not run direct implementation from the general agent.
-0.1. Use the official APTS client (`apts-client.js` or `apts-client.mjs`) as the integration layer; do not build parallel scripts for base contract operations.
+0.1. Use the official APTS client or CLI (`apts-client.js`, `apts-client.mjs`, `apts-cli.js`, or `apts-cli.mjs`) as the integration layer; do not build parallel scripts for base contract operations, and retire older local wrappers for those operations during migration.
 0.2. Invoke APTS operations using contract-first JSON object payloads (for example `{"task_id":"...","status":"review",...}`), even when a legacy positional signature is still supported for backward compatibility.
 1. Read the project backlog with `list_backlog_items` and select an item suitable for execution.
 2. If you do not have `task_id`, use `register_task` and include `backlog_item_id` when available.

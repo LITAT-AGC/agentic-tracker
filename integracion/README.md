@@ -7,18 +7,20 @@ Se mantiene fuera de `.github/` para evitar que VS Code/Copilot lo trate como cu
 ## Estructura
 
 - `plantillas-agentes/`: plantillas de agentes para orquestacion y ejecucion contra APTS, incluyendo `orquestador-backlog-apts.agent.md` y `ejecutor-item-backlog-dev-test-commit.agent.md`.
-- `paquete-apts/`: paquete exportable con contrato JSON, clientes HTTP para CommonJS y ESM, guia operativa y referencia de API.
+- `paquete-apts/`: paquete exportable con contrato JSON, clientes HTTP para CommonJS y ESM, CLI oficial para CommonJS y ESM, guia operativa y referencia de API.
 
 ## Uso recomendado
 
-1. Toma desde `paquete-apts/` el contrato JSON, el cliente HTTP adecuado para CommonJS o ESM, o la guia que necesite tu proyecto integrador.
+1. Toma desde `paquete-apts/` el contrato JSON, el cliente HTTP adecuado para CommonJS o ESM, y si tu runtime prefiere invocacion por terminal, la CLI oficial del mismo modulo.
 2. Copia desde `plantillas-agentes/` las plantillas de agentes si quieres un flujo orquestador/ejecutor apoyado en backlog de APTS.
 3. Instala esos archivos en el proyecto cliente dentro de las ubicaciones que su runtime de agentes soporte.
 
 ## Regla de cobertura del cliente exportable
 
 - El cliente HTTP oficial que APTS distribuye (`apts-client.js` y `apts-client.mjs`) debe cubrir todas las funcionalidades de integracion publicadas en `apts_skills.json`.
+- La CLI oficial (`apts-cli.js` y `apts-cli.mjs`) es una entrada de ejecucion estable sobre ese cliente; no reemplaza al cliente y debe vivir junto a su variante correspondiente.
 - El proyecto cliente no deberia tener que desarrollar scripts extra para completar operaciones base de integracion (por ejemplo listado, alta, actualizacion y soft-delete de backlog).
+- Al migrar al cliente o CLI oficial, elimina wrappers o scripts locales viejos de APTS que solo deleguen operaciones base. Conserva unicamente adapters finos de discovery si el runtime los necesita.
 - Si aparece una brecha funcional, se corrige primero en el paquete oficial de APTS y luego se consume la version actualizada desde el proyecto cliente.
 
 ## Troubleshooting rapido de agentes (VS Code)
@@ -35,9 +37,13 @@ Recomendacion: manten `Orquestador Backlog APTS` y `Ejecutor Item Backlog Dev Te
 
 Si modificas el cliente HTTP exportable, replica el cambio tanto en `paquete-apts/apts-client.js` como en `paquete-apts/apts-client.mjs` para mantener alineadas las variantes CommonJS y ESM.
 
+Si modificas la CLI oficial, replica el cambio tanto en `paquete-apts/apts-cli.js` como en `paquete-apts/apts-cli.mjs` y confirma que siga delegando a la variante de cliente que le corresponde.
+
 Si modificas el manifiesto publico de integracion expuesto por APTS en `/api/public/integrar`, tambien debes subir `schema_version` y registrar una nota nueva en `bootstrap.manifest_updates.notes` para que los proyectos cliente puedan entender el cambio y reaccionar a tiempo. El historial es append-only: no se deben borrar ni reemplazar notas previas al agregar una version nueva.
 
 El manifiesto expone metadatos de sincronizacion por artefacto (`artifact_version`, `updated_in_schema_version`, `sync_action`, `deprecated_filenames`) y una politica global (`bootstrap.artifact_sync_policy`). Los actualizadores locales deben usar esos campos para decidir que sobreescribir y que archivos legacy eliminar durante la actualizacion.
+
+Importante: esa limpieza automatica solo aplica a nombres legacy publicados por APTS. Si el proyecto cliente tenia wrappers propios viejos para operaciones base, deben retirarse manualmente al migrar al cliente o CLI oficial.
 
 ## Nota
 
