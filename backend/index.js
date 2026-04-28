@@ -761,10 +761,18 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.7';
+const integrationManifestSchemaVersion = '2.0.8';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.8',
+    date: '2026-04-28',
+    changes: [
+      'The public integration manifest now publishes explicit artifact_version metadata for scripts and agent templates.',
+      'A new artifact synchronization policy now instructs local updaters to overwrite managed files on version change and remove known legacy filenames.'
+    ]
+  },
   {
     version: '2.0.7',
     date: '2026-04-28',
@@ -938,8 +946,12 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts_skills.json'),
     fileName: 'apts_skills.json',
     contentType: 'application/json; charset=utf-8',
+    artifactVersion: '2.0.6',
+    updatedInSchemaVersion: '2.0.6',
     kind: 'skills_contract',
     recommended: true,
+    syncAction: 'overwrite',
+    deprecatedFilenames: [],
     description: 'Machine-readable tool contract for APTS integration.'
   },
   skill_markdown: {
@@ -947,8 +959,12 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'SKILL.md'),
     fileName: 'SKILL.md',
     contentType: 'text/markdown; charset=utf-8',
+    artifactVersion: '2.0.4',
+    updatedInSchemaVersion: '2.0.4',
     kind: 'skill_package',
     recommended: false,
+    syncAction: 'overwrite',
+    deprecatedFilenames: [],
     description: 'Copilot skill packaging guide for APTS integration.'
   },
   agent_guidelines: {
@@ -956,8 +972,12 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-agent-guidelines.md'),
     fileName: 'apts-agent-guidelines.md',
     contentType: 'text/markdown; charset=utf-8',
+    artifactVersion: '2.0.4',
+    updatedInSchemaVersion: '2.0.4',
     kind: 'agent_guidelines',
     recommended: true,
+    syncAction: 'overwrite',
+    deprecatedFilenames: [],
     description: 'Base operating rules for any agent that reports work to APTS.'
   },
   executor_agent: {
@@ -965,8 +985,14 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'plantillas-agentes', 'ejecutor-item-backlog-dev-test-commit.agent.md'),
     fileName: 'ejecutor-item-backlog-dev-test-commit.agent.md',
     contentType: 'text/markdown; charset=utf-8',
+    artifactVersion: '2.0.0',
+    updatedInSchemaVersion: '2.0.0',
     kind: 'agent_template',
     recommended: false,
+    syncAction: 'overwrite',
+    deprecatedFilenames: [
+      'ejecutor-dev-test-commit.agent.md'
+    ],
     description: 'Worker agent template for one backlog item end-to-end.'
   },
   orchestrator_agent: {
@@ -974,8 +1000,15 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'plantillas-agentes', 'orquestador-backlog-apts.agent.md'),
     fileName: 'orquestador-backlog-apts.agent.md',
     contentType: 'text/markdown; charset=utf-8',
+    artifactVersion: '2.0.0',
+    updatedInSchemaVersion: '2.0.0',
     kind: 'agent_template',
     recommended: false,
+    syncAction: 'overwrite',
+    deprecatedFilenames: [
+      'orquestador.agent.md',
+      'orquestador-agent.md'
+    ],
     description: 'Orchestrator agent template that pulls ready backlog items from APTS.'
   },
   js_client_commonjs: {
@@ -983,9 +1016,13 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-client.js'),
     fileName: 'apts-client.js',
     contentType: 'application/javascript; charset=utf-8',
+    artifactVersion: '2.0.7',
+    updatedInSchemaVersion: '2.0.7',
     kind: 'reference_client',
     recommended: false,
     optional: true,
+    syncAction: 'overwrite',
+    deprecatedFilenames: [],
     module_system: 'commonjs',
     selection_rule: 'Use this file when the client project runs Node.js in CommonJS mode, typically with require(...) and without type=module in package.json.',
     description: 'Optional JavaScript HTTP client for CommonJS runtimes.'
@@ -995,9 +1032,13 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-client.mjs'),
     fileName: 'apts-client.mjs',
     contentType: 'application/javascript; charset=utf-8',
+    artifactVersion: '2.0.7',
+    updatedInSchemaVersion: '2.0.7',
     kind: 'reference_client',
     recommended: false,
     optional: true,
+    syncAction: 'overwrite',
+    deprecatedFilenames: [],
     module_system: 'esm',
     selection_rule: 'Use this file when the client project runs Node.js in ESM mode, typically with import/export or type=module in package.json.',
     description: 'Optional JavaScript HTTP client for ESM runtimes.'
@@ -1005,6 +1046,12 @@ const integrationArtifacts = {
 };
 
 const buildAbsoluteUrl = (req, route) => `${req.protocol}://${req.get('host')}${route}`;
+
+const buildLegacyCleanupTargets = () => Object.entries(integrationArtifacts)
+  .flatMap(([id, artifact]) => (artifact.deprecatedFilenames || []).map((fileName) => ({
+    artifact_id: id,
+    file_name: fileName
+  })));
 
 const buildIntegrationManifest = (req) => ({
   service: 'APTS',
@@ -1057,6 +1104,18 @@ const buildIntegrationManifest = (req) => ({
         'the runtime expects .mjs files or ESM modules'
       ],
       default_rule: 'If in doubt, inspect package.json and the client project code before choosing an artifact.'
+    },
+    artifact_sync_policy: {
+      source_of_truth: 'manifest_artifacts',
+      compare_strategy: 'by_artifact_id_and_artifact_version',
+      when_version_changes: 'overwrite_local_file',
+      delete_known_legacy_files: true,
+      legacy_cleanup_targets: buildLegacyCleanupTargets(),
+      updater_contract: [
+        'For each manifest artifact id, compare local metadata with artifact_version from this manifest.',
+        'If local version differs from artifact_version, re-download and overwrite the local managed file.',
+        'If delete_known_legacy_files is true, remove local files listed under legacy_cleanup_targets before finishing sync.'
+      ]
     },
     skill_installation_paths: {
       preferred_scope: 'workspace_local',
@@ -1141,6 +1200,10 @@ const buildIntegrationManifest = (req) => ({
   artifacts: Object.entries(integrationArtifacts).map(([id, artifact]) => ({
     id,
     kind: artifact.kind,
+    artifact_version: artifact.artifactVersion,
+    updated_in_schema_version: artifact.updatedInSchemaVersion,
+    sync_action: artifact.syncAction,
+    deprecated_filenames: artifact.deprecatedFilenames || [],
     description: artifact.description,
     recommended: artifact.recommended,
     optional: artifact.optional || false,
