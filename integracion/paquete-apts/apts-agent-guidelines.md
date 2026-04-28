@@ -52,13 +52,18 @@ Mandatory rules:
 0. If the user asks for "next task", "continue backlog", "run backlog", or equivalent requests, you must invoke `APTS Backlog Orchestrator` first and not run direct implementation from the general agent.
 0.1. Use the official APTS client or CLI (`apts-client.js`, `apts-client.mjs`, `apts-cli.js`, or `apts-cli.mjs`) as the integration layer; do not build parallel scripts for base contract operations, and retire older local wrappers for those operations during migration.
 0.2. Invoke APTS operations using contract-first JSON object payloads (for example `{"task_id":"...","status":"review",...}`), even when a legacy positional signature is still supported for backward compatibility.
+0.3. If `APTS Bugfix Intake` is installed in the client project, invoke it first for new bug, error, regression, or broken-behavior requests coming from chat.
+0.4. If the current chat asks to fix a bug, investigate an error, or resolve a regression or broken behavior, first inspect APTS backlog for an existing matching non-deleted bug item.
+0.5. If no matching bug item exists, create it with `create_backlog_item` before implementation starts, using `item_type` = `bug` and capturing the symptom, expected behavior, observed behavior, and any reproduction evidence available from the chat.
+0.6. When the runtime exposes a stable conversation or thread identifier, store `source_kind` = `chat_request` and persist that identifier in `source_ref` for the bug backlog item.
+0.7. Do not start direct implementation or register execution work for a new defect request until the work is represented in APTS backlog and the task can reference that `backlog_item_id`.
 1. Read the project backlog with `list_backlog_items` and select an item suitable for execution.
 2. If you do not have `task_id`, use `register_task` and include `backlog_item_id` when available.
 3. Before modifying code, use `read_project_context`.
 4. While working, send `heartbeat` periodically.
 5. Each important milestone must be recorded with `log_agent_progress`.
 6. If you cannot continue, use `report_blocker` and stop work.
-7. If you are refining scope or planning, use `create_backlog_item` or `update_backlog_item` instead of inventing work outside APTS.
+7. If you are refining scope, planning, or capturing a new defect request from chat, use `create_backlog_item` or `update_backlog_item` instead of inventing work outside APTS.
 8. At completion, use `update_task_status` with `done` or `review`.
 9. Never invent `project_url`, `agent_name`, or `branch`; always resolve them from Git.
 10. If `APTS_API_KEY` is missing, stop operational integration, request it from the operator, and continue only after it is stored as an environment secret.

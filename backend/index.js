@@ -761,10 +761,26 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.10';
+const integrationManifestSchemaVersion = '2.0.12';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.12',
+    date: '2026-04-29',
+    changes: [
+      'The public integration package now publishes a dedicated APTS Bugfix Intake agent template for chat-triggered bug, error, and regression requests.',
+      'Bootstrap metadata and base guidance now recommend using that agent as the first entrypoint for defect intake when the client runtime supports custom agents.'
+    ]
+  },
+  {
+    version: '2.0.11',
+    date: '2026-04-28',
+    changes: [
+      'The public integration guidance now requires chat-triggered bugfix, error, and regression requests to be represented in APTS backlog before implementation starts.',
+      'Bootstrap metadata, the skills contract, and the base agent guidelines now instruct integrators to reuse an existing tracked bug when possible or create a new backlog item with item_type=bug before registering execution work.'
+    ]
+  },
   {
     version: '2.0.10',
     date: '2026-04-28',
@@ -962,8 +978,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts_skills.json'),
     fileName: 'apts_skills.json',
     contentType: 'application/json; charset=utf-8',
-    artifactVersion: '2.0.6',
-    updatedInSchemaVersion: '2.0.6',
+    artifactVersion: '2.0.11',
+    updatedInSchemaVersion: '2.0.11',
     kind: 'skills_contract',
     recommended: true,
     syncAction: 'overwrite',
@@ -975,8 +991,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'SKILL.md'),
     fileName: 'SKILL.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.10',
-    updatedInSchemaVersion: '2.0.10',
+    artifactVersion: '2.0.12',
+    updatedInSchemaVersion: '2.0.12',
     kind: 'skill_package',
     recommended: false,
     syncAction: 'overwrite',
@@ -988,8 +1004,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-agent-guidelines.md'),
     fileName: 'apts-agent-guidelines.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.10',
-    updatedInSchemaVersion: '2.0.10',
+    artifactVersion: '2.0.12',
+    updatedInSchemaVersion: '2.0.12',
     kind: 'agent_guidelines',
     recommended: true,
     syncAction: 'overwrite',
@@ -1026,6 +1042,19 @@ const integrationArtifacts = {
       'orquestador-agent.md'
     ],
     description: 'Orchestrator agent template that pulls ready backlog items from APTS.'
+  },
+  bugfix_intake_agent: {
+    route: `${publicIntegrationBasePath}/agentes/intake-bugfix-apts.agent.md`,
+    filePath: path.join(integrationRoot, 'plantillas-agentes', 'intake-bugfix-apts.agent.md'),
+    fileName: 'intake-bugfix-apts.agent.md',
+    contentType: 'text/markdown; charset=utf-8',
+    artifactVersion: '2.0.12',
+    updatedInSchemaVersion: '2.0.12',
+    kind: 'agent_template',
+    recommended: false,
+    syncAction: 'overwrite',
+    deprecatedFilenames: [],
+    description: 'Bug intake agent template that creates or reuses a tracked APTS bug item before implementation starts.'
   },
   js_client_commonjs: {
     route: `${publicIntegrationBasePath}/apts-client.js`,
@@ -1125,6 +1154,27 @@ const buildIntegrationManifest = (req) => ({
       'todo lists or historical tracking mirrors',
       'existing scope documents or acceptance criteria'
     ],
+    chat_request_triage: {
+      bugfix_intake_required: true,
+      recommended_agent_entrypoint: 'APTS Bugfix Intake',
+      detect_as_bugfix_when_request_mentions: [
+        'bug fixes',
+        'errors or exceptions',
+        'failing behavior caused by an existing defect',
+        'regressions',
+        'incidents where existing functionality is broken'
+      ],
+      required_backlog_item_type: 'bug',
+      existing_item_policy: 'Before creating a new defect entry, inspect APTS backlog and reuse an existing non-deleted bug item when it already tracks the same symptom, scope, or failure.',
+      new_item_policy: 'If no matching bug item exists, create one in APTS before implementation starts and capture the symptom, expected behavior, observed behavior, and any reproduction evidence available from the chat.',
+      task_link_policy: 'Only register or continue execution work after the task can reference that backlog_item_id.',
+      source_tracking: {
+        source_kind: 'chat_request',
+        source_ref_rule: 'Persist a stable conversation or thread identifier in source_ref when the runtime exposes one; otherwise omit source_ref.'
+      },
+      custom_agent_policy: 'If the client runtime supports custom agents and APTS Bugfix Intake is installed, invoke it first for new defect requests from chat. Otherwise follow the same backlog-first policy manually.',
+      bypass_rule: 'Do not jump directly into code changes for a new untracked bug report, error-fix request, or regression repair.'
+    },
     access_model: {
       bootstrap: 'public',
       agent_api: 'bearer_token_required'
@@ -1218,10 +1268,11 @@ const buildIntegrationManifest = (req) => ({
       'If the project previously used ad-hoc APTS wrapper scripts for base operations, remove them once the official client or CLI is installed and keep only thin discovery adapters when the runtime still needs them.',
       'Prepare a local append-only resilience journal, for example at .apts/agent-resilience-log.jsonl, without treating it as a source of truth.',
       'Inspect local files that currently contain backlog, planning, or operational tracking.',
+      'If the current chat request is a new bugfix, error investigation, or regression report, inspect APTS backlog for a matching bug item or create one with item_type=bug before implementation starts.',
       'Create or update backlog_items in APTS to reflect that initial state.',
       'From that point onward, use APTS as the primary tracking system and do not invent work outside APTS.'
     ],
-    operator_prompt_template: 'Read this public manifest, understand that APTS is the tracking source of truth, request APTS_BASE_URL and APTS_API_KEY from the operator if missing, store them in a .env file at the client project root (or equivalent secret store), prepare a local append-only resilience journal, and then review local backlog files to migrate or synchronize those items into APTS before normal execution continues.'
+    operator_prompt_template: 'Read this public manifest, understand that APTS is the tracking source of truth, request APTS_BASE_URL and APTS_API_KEY from the operator if missing, store them in a .env file at the client project root (or equivalent secret store), prepare a local append-only resilience journal, and if the current user request is a new bug, error, or regression from chat, first ensure there is a corresponding APTS backlog item with item_type=bug before implementation starts.'
   },
   entrypoint: buildAbsoluteUrl(req, publicIntegrationBasePath),
   api_base_url: buildAbsoluteUrl(req, '/api'),
@@ -1246,6 +1297,8 @@ const buildIntegrationManifest = (req) => ({
     'Maintain the local resilience log described in the bootstrap section; it is append-only and must not replace APTS as the source of truth.',
     'Download and install the skills contract first.',
     'Read the base agent guidelines before the first APTS API call.',
+    'If the current chat introduces a new bug, error, or regression request, ensure it is represented in APTS backlog as a bug item before registering execution work or starting implementation.',
+    'If the runtime supports custom agents, install and use APTS Bugfix Intake as the first entrypoint for chat-triggered defect intake.',
     'Choose the reference client that matches the client project module system: apts-client.js for CommonJS or apts-client.mjs for ESM.',
     'If the runtime prefers shellable command entrypoints over importing JavaScript modules, download the matching CLI as well: apts-cli.js for CommonJS or apts-cli.mjs for ESM, keeping it beside the matching client file.',
     'After installing the official client or CLI, remove older local APTS wrapper scripts for base operations to avoid drift. Keep only thin runtime-specific discovery adapters when required.',
@@ -1307,6 +1360,7 @@ app.get(`${publicIntegrationBasePath}/skill.md`, async (req, res) => sendIntegra
 app.get(`${publicIntegrationBasePath}/agent-guidelines.md`, async (req, res) => sendIntegrationArtifact(req, res, 'agent_guidelines'));
 app.get(`${publicIntegrationBasePath}/agentes/ejecutor-item-backlog-dev-test-commit.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'executor_agent'));
 app.get(`${publicIntegrationBasePath}/agentes/orquestador-backlog-apts.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'orchestrator_agent'));
+app.get(`${publicIntegrationBasePath}/agentes/intake-bugfix-apts.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'bugfix_intake_agent'));
 app.get(`${publicIntegrationBasePath}/apts-client.js`, async (req, res) => sendIntegrationArtifact(req, res, 'js_client_commonjs'));
 app.get(`${publicIntegrationBasePath}/apts-client.mjs`, async (req, res) => sendIntegrationArtifact(req, res, 'js_client_esm'));
 app.get(`${publicIntegrationBasePath}/apts-cli.js`, async (req, res) => sendIntegrationArtifact(req, res, 'js_cli_commonjs'));

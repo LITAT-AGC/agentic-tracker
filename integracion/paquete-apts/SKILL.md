@@ -68,10 +68,21 @@ Note: in this repository, it is published as integration material under the repo
 - Do not execute direct implementation from the general agent when a backlog run applies.
 - If `APTS Backlog Orchestrator` is not available in the client project, stop the operation and ask the operator to install/fix the template before continuing.
 
+## Bugfix intake policy (mandatory)
+
+- If a user chat asks to fix a bug, investigate an error, or resolve a regression or broken behavior, first inspect APTS backlog for an existing matching non-deleted bug item.
+- If the client runtime supports custom agents, install and invoke `APTS Bugfix Intake` as the first entrypoint for those defect requests.
+- If a matching bug item already exists, reuse it instead of creating a duplicate defect entry.
+- If no matching bug item exists, create it in APTS before implementation starts using `create_backlog_item` with `item_type: "bug"`.
+- Capture the symptom, expected behavior, observed behavior, and any reproduction evidence available from the chat in that backlog item.
+- When the runtime exposes a stable conversation or thread identifier, store `source_kind: "chat_request"` and persist that identifier in `source_ref`.
+- If `APTS Bugfix Intake` is not installed, apply the same backlog-first defect intake policy manually from the general agent.
+- Do not begin direct implementation until the execution task can reference the tracked bug backlog item.
+
 ## Expected result
 
 The client project ends up with:
 
 - a consistent tools contract for APTS,
 - a reusable HTTP layer and optional shell entrypoint,
-- and an operational instruction so agents report work consistently.
+- and an operational instruction so agents report work consistently, including creating or reusing bug backlog items before implementing chat-triggered defect fixes.

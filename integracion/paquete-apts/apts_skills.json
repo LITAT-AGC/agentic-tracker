@@ -2,7 +2,7 @@
   "skills": [
     {
       "name": "register_task",
-      "description": "Create a new task in the project. Necessary when an agent starts from scratch and doesn't have a task_id.",
+      "description": "Create a new task in the project. Necessary when an agent starts from scratch and doesn't have a task_id, after the relevant backlog item is already identified or created when applicable.",
       "parameters": {
         "oneOf": [
           {
@@ -104,7 +104,7 @@
     },
     {
       "name": "list_backlog_items",
-      "description": "List backlog items for a project ordered by priority and sort order.",
+      "description": "List backlog items for a project ordered by priority and sort order. Use this before direct implementation to detect whether a reported bug, error, or regression is already tracked.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -136,7 +136,7 @@
     },
     {
       "name": "create_backlog_item",
-      "description": "Create a managed backlog item for a project.",
+      "description": "Create a managed backlog item for a project. Mandatory before direct implementation when a chat introduces a new bug, error, or regression not yet tracked in APTS; use item_type 'bug' for defect intake.",
       "parameters": {
         "oneOf": [
           {
@@ -258,7 +258,7 @@
     },
     {
       "name": "update_backlog_item",
-      "description": "Update the state, priority or content of an existing backlog item.",
+      "description": "Update the state, priority or content of an existing backlog item. Use this to enrich an existing bug item instead of creating duplicate defect entries.",
       "parameters": {
         "oneOf": [
           {

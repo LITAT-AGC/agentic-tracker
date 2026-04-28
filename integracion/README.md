@@ -6,13 +6,13 @@ Se mantiene fuera de `.github/` para evitar que VS Code/Copilot lo trate como cu
 
 ## Estructura
 
-- `plantillas-agentes/`: plantillas de agentes para orquestacion y ejecucion contra APTS, incluyendo `orquestador-backlog-apts.agent.md` y `ejecutor-item-backlog-dev-test-commit.agent.md`.
+- `plantillas-agentes/`: plantillas de agentes para intake de bugs, orquestacion y ejecucion contra APTS, incluyendo `intake-bugfix-apts.agent.md`, `orquestador-backlog-apts.agent.md` y `ejecutor-item-backlog-dev-test-commit.agent.md`.
 - `paquete-apts/`: paquete exportable con contrato JSON, clientes HTTP para CommonJS y ESM, CLI oficial para CommonJS y ESM, guia operativa y referencia de API.
 
 ## Uso recomendado
 
 1. Toma desde `paquete-apts/` el contrato JSON, el cliente HTTP adecuado para CommonJS o ESM, y si tu runtime prefiere invocacion por terminal, la CLI oficial del mismo modulo.
-2. Copia desde `plantillas-agentes/` las plantillas de agentes si quieres un flujo orquestador/ejecutor apoyado en backlog de APTS.
+2. Copia desde `plantillas-agentes/` las plantillas de agentes si quieres un flujo de intake de bugs y/o un flujo orquestador/ejecutor apoyado en backlog de APTS.
 3. Instala esos archivos en el proyecto cliente dentro de las ubicaciones que su runtime de agentes soporte.
 
 ## Regla de cobertura del cliente exportable
@@ -33,7 +33,7 @@ Si una plantilla de agente no aparece en VS Code/Copilot, valida este checklist:
 4. Tipo de artefacto: `apts_skills.json` define tools/skills HTTP, no crea agentes por si solo.
 5. Recarga del editor: tras copiar agentes nuevos, ejecuta `Developer: Reload Window`.
 
-Recomendacion: manten `Orquestador Backlog APTS` y `Ejecutor Item Backlog Dev Test Commit` en la misma carpeta `.github/agents/` para asegurar que la referencia del orquestador al subagente funcione.
+Recomendacion: manten `APTS Bugfix Intake`, `Orquestador Backlog APTS` y `Ejecutor Item Backlog Dev Test Commit` en la misma carpeta `.github/agents/` para asegurar discovery consistente y que el flujo de intake previo a la ejecucion quede disponible cuando el runtime soporte agentes custom.
 
 Si modificas el cliente HTTP exportable, replica el cambio tanto en `paquete-apts/apts-client.js` como en `paquete-apts/apts-client.mjs` para mantener alineadas las variantes CommonJS y ESM.
 
