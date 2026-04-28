@@ -1,7 +1,58 @@
 
+const fs = require('node:fs');
+const path = require('node:path');
 
+function parseEnvLine(rawLine) {
+  const line = rawLine.trim();
+  if (!line || line.startsWith('#')) return null;
+
+  const normalized = line.startsWith('export ') ? line.slice(7).trim() : line;
+  const separator = normalized.indexOf('=');
+  if (separator <= 0) return null;
+
+  const key = normalized.slice(0, separator).trim();
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) return null;
+
+  let value = normalized.slice(separator + 1).trim();
+  const isDoubleQuoted = value.startsWith('"') && value.endsWith('"');
+  const isSingleQuoted = value.startsWith("'") && value.endsWith("'");
+
+  if (isDoubleQuoted || isSingleQuoted) {
+    value = value.slice(1, -1);
+  } else {
+    value = value.replace(/\s+#.*$/, '').trim();
+  }
+
+  return [key, value];
+}
+
+function loadEnvFromCwd() {
+  const envPath = path.join(process.cwd(), '.env');
+  if (!fs.existsSync(envPath) || !fs.statSync(envPath).isFile()) {
+    return envPath;
+  }
+
+  const contents = fs.readFileSync(envPath, 'utf8');
+  for (const line of contents.split(/\r?\n/)) {
+    const parsed = parseEnvLine(line);
+    if (!parsed) continue;
+
+    const [key, value] = parsed;
+    if (process.env[key] === undefined) {
+      process.env[key] = value;
+    }
+  }
+
+  return envPath;
+}
+
+const expectedEnvPath = loadEnvFromCwd();
 const API_KEY = process.env.APTS_API_KEY || 'default-dev-key';
-const BASE_URL = 'http://localhost:47301/api';
+const BASE_URL = process.env.APTS_BASE_URL || 'http://localhost:47301/api';
+
+if (!process.env.APTS_API_KEY) {
+  console.warn(`[APTS] Missing APTS_API_KEY. Checked process.env and ${expectedEnvPath}. Using fallback default-dev-key for local smoke test. Run this script from the project root containing .env or export APTS_API_KEY.`);
+}
 
 const headers = {
   'Content-Type': 'application/json',
