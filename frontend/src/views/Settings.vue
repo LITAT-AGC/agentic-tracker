@@ -112,7 +112,7 @@
           <div class="flex flex-wrap items-center gap-3 pt-2">
             <button
               @click="saveSettings"
-              :disabled="isSaving || !selectedModel || !apiKeyConfigured"
+              :disabled="isSaving || !selectedModelId || !apiKeyConfigured"
               class="rounded-2xl bg-cyan-500 px-4 py-2.5 text-sm font-semibold text-slate-950 transition hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {{ isSaving ? 'Guardando...' : 'Guardar modelo' }}
@@ -328,8 +328,10 @@ const saveSettings = async () => {
       throw new Error(data.error || 'No se pudo guardar el modelo seleccionado');
     }
 
-    effectiveModel.value = data.openrouter?.effective_model || selectedModelId.value;
-    modelQuery.value = selectedModelId.value;
+    const persistedModel = data.openrouter?.selected_model || selectedModelId.value;
+    selectedModelId.value = persistedModel;
+    effectiveModel.value = data.openrouter?.effective_model || persistedModel;
+    modelQuery.value = persistedModel;
     saveMessage.value = 'Configuración guardada.';
   } catch (error) {
     loadError.value = error.message;
