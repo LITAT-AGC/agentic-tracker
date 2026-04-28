@@ -90,7 +90,5 @@ test.describe('Dashboard Interactive Elements', () => {
     await expect(modalHeader).not.toBeVisible();
     expect(resolveCalled).toBe(true);
 
-    // Capture screenshot of the interaction for documentation
-    await page.screenshot({ path: 'e2e/screenshots/interactions_tested.png' });
   });
 });

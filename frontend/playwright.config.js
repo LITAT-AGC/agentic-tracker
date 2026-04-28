@@ -6,11 +6,14 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
-  reporter: 'html',
+  reporter: 'list',
+  preserveOutput: 'never',
   use: {
     channel: 'chrome', // Usa el Chrome local instalado en la máquina
-    baseURL: 'http://localhost:46101',
-    trace: 'on-first-retry',
+    baseURL: 'http://localhost:47302',
+    trace: 'off',
+    screenshot: 'off',
+    video: 'off',
   },
   projects: [
     {
@@ -20,7 +23,7 @@ export default defineConfig({
   ],
   webServer: {
     command: 'npm run dev',
-    url: 'http://localhost:46101',
+    url: 'http://localhost:47302',
     reuseExistingServer: !process.env.CI,
   },
 });

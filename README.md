@@ -135,8 +135,8 @@ npm run install:all
 Crear o ajustar `backend/.env` con valores equivalentes a estos:
 
 ```env
-PORT=46100
-CORS_ORIGIN=http://localhost:46101,http://localhost:5173
+PORT=47301
+CORS_ORIGIN=http://localhost:47302,http://localhost:5173
 SESSION_SECRET=replace-with-a-secure-secret
 APTS_API_KEY=replace-with-a-secure-api-key
 DASHBOARD_PASSWORD=replace-with-a-strong-password
@@ -167,8 +167,8 @@ npm run dev
 
 Servicios por defecto:
 
-- Backend: `http://localhost:46100`
-- Frontend: `http://localhost:46101`
+- Backend: `http://localhost:47301`
+- Frontend: `http://localhost:47302`
 
 ## Ejecucion por partes
 
@@ -248,7 +248,7 @@ Esta es la parte importante si quieres que otros repositorios reporten actividad
 En el proyecto cliente define al menos estas variables de entorno en tu runtime de agentes, CI o wrapper local:
 
 ```env
-APTS_BASE_URL=http://localhost:46100/api
+APTS_BASE_URL=http://localhost:47301/api
 APTS_API_KEY=replace-with-the-shared-api-key
 ```
 

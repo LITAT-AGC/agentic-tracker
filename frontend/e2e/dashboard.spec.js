@@ -31,7 +31,5 @@ test.describe('Dashboard E2E Flow', () => {
     // Verify Live Feed is present
     await expect(page.locator('text=Actividad en Vivo de Agentes')).toBeVisible();
 
-    // Take a screenshot to capture the beautiful dark theme state
-    await page.screenshot({ path: 'e2e/screenshots/dashboard_overview.png' });
   });
 });

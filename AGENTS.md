@@ -25,7 +25,7 @@ node index.js
 - **No Browser Downloads:** Playwright must be installed without its bundled browsers. It is configured to use the local Windows Google Chrome installation via `channel: 'chrome'`. Do not run `npx playwright install`.
 - **No Video Evidence:** Do not configure Playwright to capture video recordings of the test execution. Screenshots are allowed for verifying static state, but videos are strictly prohibited.
 
-With the backend running in test mode on port 46100, you can now run the frontend tests. Playwright is configured to automatically launch the Vite dev server on port 46101 during the test run.
+With the backend running in test mode on port 47301, you can now run the frontend tests. Playwright is configured to automatically launch the Vite dev server on port 47302 during the test run.
 
 ```bash
 # Terminal 2: Run Playwright tests
