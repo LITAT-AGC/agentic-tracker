@@ -115,7 +115,7 @@ app.use((req, res, next) => {
 
 const allowedOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',')
-  : ['http://localhost:5173', 'http://localhost:46101'];
+  : ['http://localhost:5173', 'http://localhost:47302'];
 
 app.use(cors({
   origin: allowedOrigins,
@@ -645,10 +645,18 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.4';
+const integrationManifestSchemaVersion = '2.0.5';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.5',
+    date: '2026-04-28',
+    changes: [
+      'Official integration clients now accept contract-first JSON object inputs for update_task_status, log_agent_progress, heartbeat, update_backlog_item, and delete_backlog_item while remaining backward compatible with previous positional signatures.',
+      'Official integration guidance now defines an anti-loop retry policy that distinguishes non-retriable contract/auth/not-found errors from retriable network/rate-limit/server failures.'
+    ]
+  },
   {
     version: '2.0.4',
     date: '2026-04-28',
@@ -1748,7 +1756,7 @@ app.post('/api/tasks/:id/resolve', requireAuth, async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 46100;
+const PORT = process.env.PORT || 47301;
 
 const startBackgroundJobs = () => {
   setInterval(async () => {

@@ -1,7 +1,7 @@
 
 
 const API_KEY = process.env.APTS_API_KEY || 'default-dev-key';
-const BASE_URL = 'http://localhost:46100/api';
+const BASE_URL = 'http://localhost:47301/api';
 
 const headers = {
   'Content-Type': 'application/json',

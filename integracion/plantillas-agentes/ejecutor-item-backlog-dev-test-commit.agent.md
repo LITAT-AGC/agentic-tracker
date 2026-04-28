@@ -39,6 +39,14 @@ The orchestrator should pass at least:
 - Send `heartbeat` while executing longer tasks.
 - If blocked, use `report_blocker` before returning `BLOCKED`.
 - If successful, use `update_task_status` with `review` or `done` depending on the repository policy.
+- Invoke APTS operations with contract-first JSON object payloads (for example `{"task_id":"...","status":"in_progress",...}`) to avoid parameter-shape confusion.
+
+## APTS Retry Policy (anti-loop)
+- Do not retry on `400`, `401`, `403`, or `404`. These are non-retriable contract/auth/existence errors.
+- Retry only on network failures, `429`, and `5xx`.
+- Maximum retries per APTS action: 2.
+- Use short incremental backoff between retries (for example 1s, then 2s).
+- If retries are exhausted, call `report_blocker`, log the failure in the local resilience journal, and return `BLOCKED`.
 
 ## Local Resilience Log
 - Keep a local append-only resilience log, for example at `.apts/agent-resilience-log.jsonl`.

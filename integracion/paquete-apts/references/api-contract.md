@@ -3,7 +3,7 @@
 ## Variables de entorno requeridas
 
 ```env
-APTS_BASE_URL=http://localhost:46100/api
+APTS_BASE_URL=http://localhost:47301/api
 APTS_API_KEY=replace-with-the-shared-api-key
 ```
 
@@ -108,6 +108,18 @@ branch=$(git branch --show-current)
 6. Enviar heartbeat mientras la tarea siga activa.
 7. Reportar blocker si el agente queda detenido.
 8. Cerrar la tarea con `done` o `review`.
+
+## Politica anti-loop de reintentos
+
+- No reintentar en `400`, `401`, `403` o `404`.
+- Reintentar solo ante errores de red, `429` y `5xx`.
+- Limitar a 2 reintentos por operacion.
+- Si tras los reintentos sigue fallando, reportar blocker y detener ejecucion.
+
+## Regla de invocacion del cliente oficial
+
+- Usar payload JSON con forma de contrato para cada operacion (contract-first).
+- Para compatibilidad hacia atras, el cliente oficial puede aceptar firmas posicionales legadas en algunas funciones, pero la forma recomendada y estable es siempre objeto JSON.
 
 ## Cobertura esperada del cliente oficial
 

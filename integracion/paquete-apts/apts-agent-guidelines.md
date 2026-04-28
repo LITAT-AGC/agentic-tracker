@@ -47,6 +47,7 @@ Before using any skill, resolve from the local Git environment:
 Mandatory rules:
 0. If the user asks for "next task", "continue backlog", "run backlog", or equivalent requests, you must invoke `APTS Backlog Orchestrator` first and not run direct implementation from the general agent.
 0.1. Use the official APTS client (`apts-client.js` or `apts-client.mjs`) as the integration layer; do not build parallel scripts for base contract operations.
+0.2. Invoke APTS operations using contract-first JSON object payloads (for example `{"task_id":"...","status":"review",...}`), even when a legacy positional signature is still supported for backward compatibility.
 1. Read the project backlog with `list_backlog_items` and select an item suitable for execution.
 2. If you do not have `task_id`, use `register_task` and include `backlog_item_id` when available.
 3. Before modifying code, use `read_project_context`.
@@ -59,4 +60,8 @@ Mandatory rules:
 10. If `APTS_API_KEY` is missing, stop operational integration, request it from the operator, and continue only after it is stored as an environment secret.
 11. Keep a local append-only resilience journal, but never use it to replace APTS as official tracking.
 12. If `APTS Backlog Orchestrator` is not installed or cannot be invoked, stop task execution and ask the operator to install/fix it; do not proceed with an alternative flow without the orchestrator.
+13. Apply anti-loop retry policy for APTS calls:
+	- Do not retry on `400`, `401`, `403`, or `404`. Treat as contract/auth/existence errors, record context, and request operator clarification.
+	- Retry only on network errors, `429`, and `5xx`, with at most 2 retries and short backoff.
+	- If still failing after retries, report blocker and stop instead of attempting unbounded payload variations.
 ```
