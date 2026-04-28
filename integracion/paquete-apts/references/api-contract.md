@@ -24,10 +24,18 @@ branch=$(git branch --show-current)
 
 ## Endpoints
 
+### Modo batch (nuevo)
+
+- En operaciones mutantes, APTS acepta un objeto JSON unico o un array JSON no vacio de objetos.
+- Cuando se envia un array, la respuesta devuelve resultados por item.
+- Si hay mezcla de exitos y errores en batch, el servidor puede responder `207 Multi-Status` con detalle por indice.
+- Modo estricto opcional: agregar `?strict=true` en la ruta batch para ejecutar all-or-nothing con rollback total ante el primer fallo.
+
 ### 1. register_task
 
 - Metodo: `POST`
 - Ruta: `/projects/tasks`
+- Body: objeto unico o array de objetos `register_task`
 - Body minimo:
 
 ```json
@@ -56,6 +64,7 @@ branch=$(git branch --show-current)
 
 - Metodo: `POST`
 - Ruta: `/projects/backlog`
+- Body: objeto unico o array de objetos `create_backlog_item`
 - Body minimo:
 
 ```json
@@ -68,35 +77,43 @@ branch=$(git branch --show-current)
 ### 2d. update_backlog_item
 
 - Metodo: `PATCH`
-- Ruta: `/backlog/:id`
+- Ruta single: `/backlog/:id`
+- Ruta batch: `/backlog`
+- Body batch: objetos con `backlog_item_id` y campos a actualizar.
 
 ### 2e. delete_backlog_item (soft-delete)
 
 - Metodo: `DELETE`
-- Ruta: `/backlog/:id`
+- Ruta single: `/backlog/:id`
+- Ruta batch: `/backlog`
+- Body batch: objetos con `backlog_item_id`.
 - Comportamiento: marca el item como eliminado logicamente. Por defecto no aparece en listados salvo que se pida `include_deleted=true`.
 
 ### 3. update_task_status
 
 - Metodo: `PATCH`
-- Ruta: `/tasks/:id/status`
+- Ruta single: `/tasks/:id/status`
+- Ruta batch: `/tasks/status`
 - Estados soportados: `todo`, `in_progress`, `review`, `done`, `stalled`
 
 ### 4. log_agent_progress
 
 - Metodo: `POST`
-- Ruta: `/tasks/:id/logs`
+- Ruta single: `/tasks/:id/logs`
+- Ruta batch: `/tasks/logs`
 - `technical_details` puede incluir `files_modified`, `commands_run` y `outcome`
 
 ### 5. report_blocker
 
 - Metodo: `POST`
 - Ruta: `/projects/blockers`
+- Body: objeto unico o array de objetos `report_blocker`
 
 ### 6. heartbeat
 
 - Metodo: `POST`
-- Ruta: `/tasks/:id/heartbeat`
+- Ruta single: `/tasks/:id/heartbeat`
+- Ruta batch: `/tasks/heartbeat`
 
 ## Flujo operativo recomendado
 

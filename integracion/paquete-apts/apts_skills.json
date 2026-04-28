@@ -4,32 +4,69 @@
       "name": "register_task",
       "description": "Create a new task in the project. Necessary when an agent starts from scratch and doesn't have a task_id.",
       "parameters": {
-        "type": "object",
-        "properties": {
-          "project_url": {
-            "type": "string"
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "project_url": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "agent_name": {
+                "type": "string"
+              },
+              "agent_email": {
+                "type": "string"
+              },
+              "context": {
+                "type": "string"
+              },
+              "backlog_item_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "project_url",
+              "title",
+              "agent_name",
+              "agent_email"
+            ]
           },
-          "title": {
-            "type": "string"
-          },
-          "agent_name": {
-            "type": "string"
-          },
-          "agent_email": {
-            "type": "string"
-          },
-          "context": {
-            "type": "string"
-          },
-          "backlog_item_id": {
-            "type": "string"
+          {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "project_url": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "agent_name": {
+                  "type": "string"
+                },
+                "agent_email": {
+                  "type": "string"
+                },
+                "context": {
+                  "type": "string"
+                },
+                "backlog_item_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "project_url",
+                "title",
+                "agent_name",
+                "agent_email"
+              ]
+            }
           }
-        },
-        "required": [
-          "project_url",
-          "title",
-          "agent_name",
-          "agent_email"
         ]
       }
     },
@@ -101,58 +138,121 @@
       "name": "create_backlog_item",
       "description": "Create a managed backlog item for a project.",
       "parameters": {
-        "type": "object",
-        "properties": {
-          "project_url": {
-            "type": "string"
-          },
-          "title": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "acceptance_criteria": {
-            "type": "string"
-          },
-          "item_type": {
-            "type": "string",
-            "enum": [
-              "feature",
-              "bug",
-              "chore",
-              "research"
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "project_url": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "acceptance_criteria": {
+                "type": "string"
+              },
+              "item_type": {
+                "type": "string",
+                "enum": [
+                  "feature",
+                  "bug",
+                  "chore",
+                  "research"
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "draft",
+                  "needs_details",
+                  "ready",
+                  "in_progress",
+                  "review",
+                  "blocked",
+                  "done",
+                  "archived"
+                ]
+              },
+              "priority": {
+                "type": "number"
+              },
+              "sort_order": {
+                "type": "number"
+              },
+              "source_kind": {
+                "type": "string"
+              },
+              "source_ref": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "project_url",
+              "title"
             ]
           },
-          "status": {
-            "type": "string",
-            "enum": [
-              "draft",
-              "needs_details",
-              "ready",
-              "in_progress",
-              "review",
-              "blocked",
-              "done",
-              "archived"
-            ]
-          },
-          "priority": {
-            "type": "number"
-          },
-          "sort_order": {
-            "type": "number"
-          },
-          "source_kind": {
-            "type": "string"
-          },
-          "source_ref": {
-            "type": "string"
+          {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "project_url": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "acceptance_criteria": {
+                  "type": "string"
+                },
+                "item_type": {
+                  "type": "string",
+                  "enum": [
+                    "feature",
+                    "bug",
+                    "chore",
+                    "research"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "draft",
+                    "needs_details",
+                    "ready",
+                    "in_progress",
+                    "review",
+                    "blocked",
+                    "done",
+                    "archived"
+                  ]
+                },
+                "priority": {
+                  "type": "number"
+                },
+                "sort_order": {
+                  "type": "number"
+                },
+                "source_kind": {
+                  "type": "string"
+                },
+                "source_ref": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "project_url",
+                "title"
+              ]
+            }
           }
-        },
-        "required": [
-          "project_url",
-          "title"
         ]
       }
     },
@@ -160,60 +260,125 @@
       "name": "update_backlog_item",
       "description": "Update the state, priority or content of an existing backlog item.",
       "parameters": {
-        "type": "object",
-        "properties": {
-          "backlog_item_id": {
-            "type": "string"
-          },
-          "title": {
-            "type": "string"
-          },
-          "description": {
-            "type": "string"
-          },
-          "acceptance_criteria": {
-            "type": "string"
-          },
-          "item_type": {
-            "type": "string",
-            "enum": [
-              "feature",
-              "bug",
-              "chore",
-              "research"
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "backlog_item_id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "acceptance_criteria": {
+                "type": "string"
+              },
+              "item_type": {
+                "type": "string",
+                "enum": [
+                  "feature",
+                  "bug",
+                  "chore",
+                  "research"
+                ]
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "draft",
+                  "needs_details",
+                  "ready",
+                  "in_progress",
+                  "review",
+                  "blocked",
+                  "done",
+                  "archived"
+                ]
+              },
+              "priority": {
+                "type": "number"
+              },
+              "sort_order": {
+                "type": "number"
+              },
+              "source_kind": {
+                "type": "string"
+              },
+              "source_ref": {
+                "type": "string"
+              },
+              "active_task_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "backlog_item_id"
             ]
           },
-          "status": {
-            "type": "string",
-            "enum": [
-              "draft",
-              "needs_details",
-              "ready",
-              "in_progress",
-              "review",
-              "blocked",
-              "done",
-              "archived"
-            ]
-          },
-          "priority": {
-            "type": "number"
-          },
-          "sort_order": {
-            "type": "number"
-          },
-          "source_kind": {
-            "type": "string"
-          },
-          "source_ref": {
-            "type": "string"
-          },
-          "active_task_id": {
-            "type": "string"
+          {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "backlog_item_id": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                },
+                "acceptance_criteria": {
+                  "type": "string"
+                },
+                "item_type": {
+                  "type": "string",
+                  "enum": [
+                    "feature",
+                    "bug",
+                    "chore",
+                    "research"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "draft",
+                    "needs_details",
+                    "ready",
+                    "in_progress",
+                    "review",
+                    "blocked",
+                    "done",
+                    "archived"
+                  ]
+                },
+                "priority": {
+                  "type": "number"
+                },
+                "sort_order": {
+                  "type": "number"
+                },
+                "source_kind": {
+                  "type": "string"
+                },
+                "source_ref": {
+                  "type": "string"
+                },
+                "active_task_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "backlog_item_id"
+              ]
+            }
           }
-        },
-        "required": [
-          "backlog_item_id"
         ]
       }
     },
@@ -221,14 +386,33 @@
       "name": "delete_backlog_item",
       "description": "Soft-delete a backlog item. It will be hidden from listings unless include_deleted=true is requested.",
       "parameters": {
-        "type": "object",
-        "properties": {
-          "backlog_item_id": {
-            "type": "string"
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "backlog_item_id": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "backlog_item_id"
+            ]
+          },
+          {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "backlog_item_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "backlog_item_id"
+              ]
+            }
           }
-        },
-        "required": [
-          "backlog_item_id"
         ]
       }
     },
@@ -236,37 +420,79 @@
       "name": "update_task_status",
       "description": "Update the status of a task.",
       "parameters": {
-        "type": "object",
-        "properties": {
-          "task_id": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "todo",
-              "in_progress",
-              "review",
-              "done",
-              "stalled"
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "task_id": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "todo",
+                  "in_progress",
+                  "review",
+                  "done",
+                  "stalled"
+                ]
+              },
+              "project_url": {
+                "type": "string"
+              },
+              "agent_name": {
+                "type": "string"
+              },
+              "agent_email": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "task_id",
+              "status",
+              "project_url",
+              "agent_name",
+              "agent_email"
             ]
           },
-          "project_url": {
-            "type": "string"
-          },
-          "agent_name": {
-            "type": "string"
-          },
-          "agent_email": {
-            "type": "string"
+          {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "task_id": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "todo",
+                    "in_progress",
+                    "review",
+                    "done",
+                    "stalled"
+                  ]
+                },
+                "project_url": {
+                  "type": "string"
+                },
+                "agent_name": {
+                  "type": "string"
+                },
+                "agent_email": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "task_id",
+                "status",
+                "project_url",
+                "agent_name",
+                "agent_email"
+              ]
+            }
           }
-        },
-        "required": [
-          "task_id",
-          "status",
-          "project_url",
-          "agent_name",
-          "agent_email"
         ]
       }
     },
@@ -274,54 +500,113 @@
       "name": "log_agent_progress",
       "description": "Log agent progress, bugs fixed, architectural decisions.",
       "parameters": {
-        "type": "object",
-        "properties": {
-          "task_id": {
-            "type": "string"
-          },
-          "project_url": {
-            "type": "string"
-          },
-          "agent_name": {
-            "type": "string"
-          },
-          "branch": {
-            "type": "string"
-          },
-          "message": {
-            "type": "string"
-          },
-          "technical_details": {
+        "oneOf": [
+          {
             "type": "object",
             "properties": {
-              "files_modified": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
+              "task_id": {
+                "type": "string"
               },
-              "commands_run": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
+              "project_url": {
+                "type": "string"
               },
-              "outcome": {
-                "type": "string",
-                "enum": [
-                  "success",
-                  "failure"
-                ]
+              "agent_name": {
+                "type": "string"
+              },
+              "branch": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "technical_details": {
+                "type": "object",
+                "properties": {
+                  "files_modified": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "commands_run": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "outcome": {
+                    "type": "string",
+                    "enum": [
+                      "success",
+                      "failure"
+                    ]
+                  }
+                }
               }
+            },
+            "required": [
+              "task_id",
+              "project_url",
+              "agent_name",
+              "branch",
+              "message"
+            ]
+          },
+          {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "task_id": {
+                  "type": "string"
+                },
+                "project_url": {
+                  "type": "string"
+                },
+                "agent_name": {
+                  "type": "string"
+                },
+                "branch": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "technical_details": {
+                  "type": "object",
+                  "properties": {
+                    "files_modified": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "commands_run": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "outcome": {
+                      "type": "string",
+                      "enum": [
+                        "success",
+                        "failure"
+                      ]
+                    }
+                  }
+                }
+              },
+              "required": [
+                "task_id",
+                "project_url",
+                "agent_name",
+                "branch",
+                "message"
+              ]
             }
           }
-        },
-        "required": [
-          "task_id",
-          "project_url",
-          "agent_name",
-          "branch",
-          "message"
         ]
       }
     },
@@ -329,26 +614,57 @@
       "name": "report_blocker",
       "description": "Emergency skill to use when blocked.",
       "parameters": {
-        "type": "object",
-        "properties": {
-          "project_url": {
-            "type": "string"
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "project_url": {
+                "type": "string"
+              },
+              "task_id": {
+                "type": "string"
+              },
+              "error_message": {
+                "type": "string"
+              },
+              "agent_name": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "project_url",
+              "task_id",
+              "error_message",
+              "agent_name"
+            ]
           },
-          "task_id": {
-            "type": "string"
-          },
-          "error_message": {
-            "type": "string"
-          },
-          "agent_name": {
-            "type": "string"
+          {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "project_url": {
+                  "type": "string"
+                },
+                "task_id": {
+                  "type": "string"
+                },
+                "error_message": {
+                  "type": "string"
+                },
+                "agent_name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "project_url",
+                "task_id",
+                "error_message",
+                "agent_name"
+              ]
+            }
           }
-        },
-        "required": [
-          "project_url",
-          "task_id",
-          "error_message",
-          "agent_name"
         ]
       }
     },
@@ -356,22 +672,49 @@
       "name": "heartbeat",
       "description": "Periodic life signal sent every 5 minutes.",
       "parameters": {
-        "type": "object",
-        "properties": {
-          "task_id": {
-            "type": "string"
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "task_id": {
+                "type": "string"
+              },
+              "agent_name": {
+                "type": "string"
+              },
+              "project_url": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "task_id",
+              "agent_name",
+              "project_url"
+            ]
           },
-          "agent_name": {
-            "type": "string"
-          },
-          "project_url": {
-            "type": "string"
+          {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "properties": {
+                "task_id": {
+                  "type": "string"
+                },
+                "agent_name": {
+                  "type": "string"
+                },
+                "project_url": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "task_id",
+                "agent_name",
+                "project_url"
+              ]
+            }
           }
-        },
-        "required": [
-          "task_id",
-          "agent_name",
-          "project_url"
         ]
       }
     }

@@ -159,6 +159,7 @@ const CONFIG_KEYS = {
   openrouterModel: 'openrouter_model'
 };
 const AUTO_TRIAGE_BACKLOG_STATUSES = new Set(['draft', 'needs_details', 'ready']);
+const MAX_BATCH_SIZE = 100;
 
 const parseJsonArray = (value) => {
   if (!value) return [];
@@ -221,6 +222,100 @@ const normalizeSchemaInputString = (value, options = {}) => {
 };
 
 const zodErrorMessage = (validationError) => validationError.issues?.[0]?.message || 'Invalid request payload';
+
+const createHttpError = (statusCode, message) => {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+};
+
+const normalizeBatchRequestBody = (body) => {
+  if (Array.isArray(body)) {
+    if (body.length === 0) {
+      return { error: 'Batch payload must include at least one item' };
+    }
+
+    if (body.length > MAX_BATCH_SIZE) {
+      return { error: `Batch payload exceeds maximum size of ${MAX_BATCH_SIZE} items` };
+    }
+
+    return { isBatch: true, items: body };
+  }
+
+  return { isBatch: false, items: [body || {}] };
+};
+
+const executeBatchOperation = async (items, handler) => {
+  const results = [];
+
+  for (let index = 0; index < items.length; index += 1) {
+    try {
+      const data = await handler(items[index], index);
+      results.push({ index, success: true, data });
+    } catch (error) {
+      results.push({
+        index,
+        success: false,
+        error: error.message,
+        status_code: Number.isInteger(error.statusCode) ? error.statusCode : 500
+      });
+    }
+  }
+
+  return results;
+};
+
+const executeStrictBatchOperation = async (items, handler) => {
+  const deferredWebhooks = [];
+
+  const results = await db.transaction(async (transaction) => {
+    const strictResults = [];
+
+    for (let index = 0; index < items.length; index += 1) {
+      try {
+        const data = await handler(items[index], index, {
+          connection: transaction,
+          deferredWebhooks
+        });
+        strictResults.push({ index, success: true, data });
+      } catch (error) {
+        const strictError = createHttpError(
+          Number.isInteger(error.statusCode) ? error.statusCode : 500,
+          error.message
+        );
+        strictError.failedIndex = index;
+        strictError.processed = index;
+        throw strictError;
+      }
+    }
+
+    return strictResults;
+  });
+
+  for (const event of deferredWebhooks) {
+    await notifyWebhook(event.project_url, event.payload);
+  }
+
+  return results;
+};
+
+const shouldUseStrictBatchMode = (req, isBatch) => {
+  if (!isBatch) return false;
+  return parseBooleanFlag(req.query.strict);
+};
+
+const sendBatchOperationResponse = (res, results, { successStatus = 200 } = {}) => {
+  const failed = results.filter((item) => !item.success).length;
+  const succeeded = results.length - failed;
+
+  return res.status(failed > 0 ? 207 : successStatus).json({
+    success: failed === 0,
+    processed: results.length,
+    succeeded,
+    failed,
+    results
+  });
+};
 
 const nonEmptyStringSchema = (
   requiredMessage,
@@ -334,6 +429,10 @@ const taskStatusUpdateBodySchema = z.object({
   agent_name: optionalStringSchema('Agent name must be a string')
 });
 
+const taskStatusUpdateBatchBodySchema = taskStatusUpdateBodySchema.extend({
+  task_id: uuidFieldSchema('Task id must be a valid UUID')
+});
+
 const logAgentProgressBodySchema = z.object({
   agent_name: optionalStringSchema('Agent name must be a string'),
   branch: optionalStringSchema('Branch must be a string', { unwrapQuotes: true }),
@@ -341,11 +440,28 @@ const logAgentProgressBodySchema = z.object({
   technical_details: z.unknown().optional()
 });
 
+const logAgentProgressBatchBodySchema = logAgentProgressBodySchema.extend({
+  task_id: uuidFieldSchema('Task id must be a valid UUID')
+});
+
 const reportBlockerBodySchema = z.object({
   project_url: nonEmptyStringSchema('Project url is required', 'Project url is required', { unwrapQuotes: true }),
   task_id: uuidFieldSchema('Task id must be a valid UUID'),
   error_message: nonEmptyStringSchema('Error message is required', 'Error message must be a string'),
   agent_name: optionalStringSchema('Agent name must be a string')
+});
+
+const heartbeatBodySchema = z.object({
+  agent_name: optionalStringSchema('Agent name must be a string'),
+  project_url: optionalStringSchema('Project url must be a string', { unwrapQuotes: true })
+});
+
+const heartbeatBatchBodySchema = heartbeatBodySchema.extend({
+  task_id: uuidFieldSchema('Task id must be a valid UUID')
+});
+
+const backlogIdBodySchema = z.object({
+  backlog_item_id: uuidFieldSchema('Backlog item id must be a valid UUID')
 });
 
 const resolveTaskBodySchema = z.object({
@@ -594,8 +710,8 @@ const normalizeUrl = (url) => {
   return cleanUrl;
 };
 
-const ensureProjectExists = async (url) => {
-  await db('projects').insert({ url, name: url.split('/').pop() })
+const ensureProjectExists = async (url, { connection = db } = {}) => {
+  await connection('projects').insert({ url, name: url.split('/').pop() })
     .onConflict('url').merge();
 };
 
@@ -645,10 +761,26 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.5';
+const integrationManifestSchemaVersion = '2.0.7';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.7',
+    date: '2026-04-28',
+    changes: [
+      'Batch mutating endpoints now support optional strict all-or-nothing execution via query parameter strict=true.',
+      'When strict mode is enabled, batch mutations run in a single transaction and rollback entirely on the first failing item.'
+    ]
+  },
+  {
+    version: '2.0.6',
+    date: '2026-04-28',
+    changes: [
+      'Agent API mutating endpoints now support batch payloads by accepting either a single JSON object or a non-empty JSON array of objects.',
+      'Official integration clients and skills contract now support object-or-array payloads for batch operations, including dedicated batch routes for backlog/status/log/heartbeat updates.'
+    ]
+  },
   {
     version: '2.0.5',
     date: '2026-04-28',
@@ -1070,6 +1202,267 @@ const notifyWebhook = async (project_url, payload) => {
   }
 };
 
+const queueWebhookNotification = async (projectUrl, payload, { deferredWebhooks } = {}) => {
+  const normalizedProjectUrl = normalizeUrl(projectUrl || '');
+  if (!normalizedProjectUrl) return;
+
+  if (Array.isArray(deferredWebhooks)) {
+    deferredWebhooks.push({ project_url: normalizedProjectUrl, payload });
+    return;
+  }
+
+  await notifyWebhook(normalizedProjectUrl, payload);
+};
+
+const registerTaskInternal = async (payload, { connection = db } = {}) => {
+  const {
+    project_url: projectUrl,
+    title,
+    agent_name: agentName,
+    agent_email: agentEmail,
+    context,
+    backlog_item_id: backlogItemId
+  } = payload;
+  const url = normalizeUrl(projectUrl || '');
+
+  if (!url) {
+    throw createHttpError(400, 'Project url is required');
+  }
+
+  if (backlogItemId) {
+    const linkedBacklogItem = await connection('backlog_items')
+      .where({ id: backlogItemId, project_url: url })
+      .whereNull('deleted_at')
+      .first();
+
+    if (!linkedBacklogItem) {
+      throw createHttpError(400, 'Backlog item id is not valid for project url');
+    }
+  }
+
+  await ensureProjectExists(url, { connection });
+
+  const [task] = await connection('tasks').insert({
+    project_url: url,
+    title,
+    agent_name: agentName || null,
+    agent_email: agentEmail || null,
+    context: context ?? null,
+    status: 'in_progress'
+  }).returning('*');
+
+  if (backlogItemId) {
+    await connection('backlog_items')
+      .where({ id: backlogItemId, project_url: url })
+      .update({
+        status: 'in_progress',
+        active_task_id: task.id,
+        updated_at: connection.fn.now()
+      });
+  }
+
+  return { task_id: task.id, status: task.status, backlog_item_id: backlogItemId || null };
+};
+
+const createBacklogItemInternal = async (body, { connection = db } = {}) => {
+  const project_url = normalizeInputString(body?.project_url, { unwrapQuotes: true });
+  const url = normalizeUrl(project_url);
+  const { payload, error } = getBacklogPayload(body);
+
+  if (!url) {
+    throw createHttpError(400, 'Project url is required');
+  }
+
+  if (error) {
+    throw createHttpError(400, error);
+  }
+
+  await ensureProjectExists(url, { connection });
+
+  const [backlogItem] = await connection('backlog_items').insert({
+    project_url: url,
+    priority: 100,
+    sort_order: 0,
+    ...payload
+  }).returning('*');
+
+  return { backlog_item: mapBacklogItemRecord(backlogItem) };
+};
+
+const updateBacklogItemInternal = async (backlogItemId, body, { connection = db } = {}) => {
+  if (!isUuid(backlogItemId)) {
+    throw createHttpError(400, 'Backlog item id must be a valid UUID');
+  }
+
+  const { payload, error } = getBacklogPayload(body, { partial: true });
+  if (error) {
+    throw createHttpError(400, error);
+  }
+
+  if (!Object.keys(payload).length) {
+    throw createHttpError(400, 'No backlog fields to update');
+  }
+
+  const [backlogItem] = await connection('backlog_items')
+    .where({ id: backlogItemId })
+    .whereNull('deleted_at')
+    .update({
+      ...payload,
+      updated_at: connection.fn.now()
+    })
+    .returning('*');
+
+  if (!backlogItem) {
+    throw createHttpError(404, 'Backlog item not found');
+  }
+
+  return { backlog_item: mapBacklogItemRecord(backlogItem) };
+};
+
+const deleteBacklogItemInternal = async (backlogItemId, { connection = db } = {}) => {
+  if (!isUuid(backlogItemId)) {
+    throw createHttpError(400, 'Backlog item id must be a valid UUID');
+  }
+
+  const [backlogItem] = await connection('backlog_items')
+    .where({ id: backlogItemId })
+    .whereNull('deleted_at')
+    .update({
+      status: 'archived',
+      active_task_id: null,
+      deleted_at: connection.fn.now(),
+      updated_at: connection.fn.now()
+    })
+    .returning('*');
+
+  if (!backlogItem) {
+    throw createHttpError(404, 'Backlog item not found');
+  }
+
+  return { success: true, backlog_item: mapBacklogItemRecord(backlogItem) };
+};
+
+const updateTaskStatusInternal = async (taskId, payload, { connection = db, deferredWebhooks } = {}) => {
+  const { status, project_url: projectUrl, agent_name: agentName } = payload;
+  const task = await connection('tasks').where({ id: taskId }).first();
+
+  if (!task) {
+    throw createHttpError(404, 'Task not found');
+  }
+
+  await connection('tasks').where({ id: taskId }).update({ status });
+
+  const linkedBacklogStatus = mapTaskStatusToBacklogStatus(status);
+  if (linkedBacklogStatus) {
+    const backlogUpdate = {
+      status: linkedBacklogStatus,
+      updated_at: connection.fn.now()
+    };
+
+    if (status === 'done') {
+      backlogUpdate.active_task_id = null;
+    }
+
+    await connection('backlog_items')
+      .where({ active_task_id: taskId })
+      .update(backlogUpdate);
+  }
+
+  await queueWebhookNotification(projectUrl || task.project_url || '', {
+    event: 'task_status_updated',
+    task_id: taskId,
+    status,
+    agent_name: agentName
+  }, {
+    deferredWebhooks
+  });
+
+  return { success: true, task_id: taskId, status };
+};
+
+const logAgentProgressInternal = async (taskId, payload, { connection = db } = {}) => {
+  const {
+    agent_name: agentName,
+    branch,
+    message,
+    technical_details: technicalDetails
+  } = payload;
+  const hasTechnicalDetails = Object.prototype.hasOwnProperty.call(payload, 'technical_details');
+
+  let serializedTechnicalDetails = null;
+  if (hasTechnicalDetails && technicalDetails != null) {
+    try {
+      serializedTechnicalDetails = JSON.stringify(technicalDetails);
+    } catch (_error) {
+      throw createHttpError(400, 'Technical details must be valid JSON data');
+    }
+  }
+
+  const task = await connection('tasks').where({ id: taskId }).first();
+  if (!task) {
+    throw createHttpError(404, 'Task not found');
+  }
+
+  const [log] = await connection('agent_logs').insert({
+    task_id: taskId,
+    agent_name: agentName || null,
+    branch,
+    message,
+    technical_details: serializedTechnicalDetails
+  }).returning('*');
+
+  return { success: true, log };
+};
+
+const reportBlockerInternal = async (payload, { connection = db, deferredWebhooks } = {}) => {
+  const {
+    project_url: projectUrl,
+    task_id: taskId,
+    error_message: errorMessage,
+    agent_name: agentName
+  } = payload;
+  const url = normalizeUrl(projectUrl || '');
+
+  if (!url) {
+    throw createHttpError(400, 'Project url is required');
+  }
+
+  const task = await connection('tasks').where({ id: taskId }).first();
+  if (!task) {
+    throw createHttpError(404, 'Task not found');
+  }
+
+  await connection('projects').where({ url }).update({ status: 'blocked' });
+  await connection('backlog_items')
+    .where({ active_task_id: taskId })
+    .update({ status: 'blocked', updated_at: connection.fn.now() });
+  await connection('agent_logs').insert({
+    task_id: taskId,
+    agent_name: agentName || null,
+    message: 'BLOCKER REPORTED: ' + errorMessage,
+    action_type: 'error'
+  });
+  await queueWebhookNotification(url, {
+    event: 'project_blocked',
+    task_id: taskId,
+    error_message: errorMessage,
+    agent_name: agentName
+  }, {
+    deferredWebhooks
+  });
+
+  return { success: true, task_id: taskId };
+};
+
+const heartbeatInternal = async (taskId, { connection = db } = {}) => {
+  const updated = await connection('tasks').where({ id: taskId }).update({ last_heartbeat: connection.fn.now() });
+  if (!updated) {
+    throw createHttpError(404, 'Task not found');
+  }
+
+  return { success: true, task_id: taskId };
+};
+
 app.get('/api/health', async (_req, res) => {
   try {
     await db.raw('select 1');
@@ -1088,61 +1481,43 @@ app.get('/api/health', async (_req, res) => {
 
 // Skill 0: register_task
 app.post('/api/projects/tasks', apiLimiter, authenticateAgent, async (req, res) => {
-  const parsedBody = registerTaskBodySchema.safeParse(req.body || {});
-  if (!parsedBody.success) {
-    return res.status(400).json({ error: zodErrorMessage(parsedBody.error) });
+  const { isBatch, items, error } = normalizeBatchRequestBody(req.body);
+  if (error) {
+    return res.status(400).json({ error });
   }
+  const useStrictBatchMode = shouldUseStrictBatchMode(req, isBatch);
 
-  const {
-    project_url: projectUrl,
-    title,
-    agent_name: agentName,
-    agent_email: agentEmail,
-    context,
-    backlog_item_id: backlogItemId
-  } = parsedBody.data;
-  const url = normalizeUrl(projectUrl || '');
-
-  if (!url) {
-    return res.status(400).json({ error: 'Project url is required' });
+  const parsedItems = [];
+  for (let index = 0; index < items.length; index += 1) {
+    const parsedBody = registerTaskBodySchema.safeParse(items[index] || {});
+    if (!parsedBody.success) {
+      return res.status(400).json({ error: `Invalid payload at index ${index}: ${zodErrorMessage(parsedBody.error)}` });
+    }
+    parsedItems.push(parsedBody.data);
   }
 
   try {
-    if (backlogItemId) {
-      const linkedBacklogItem = await db('backlog_items')
-        .where({ id: backlogItemId, project_url: url })
-        .whereNull('deleted_at')
-        .first();
-
-      if (!linkedBacklogItem) {
-        return res.status(400).json({ error: 'Backlog item id is not valid for project url' });
-      }
+    if (!isBatch) {
+      const createdTask = await registerTaskInternal(parsedItems[0]);
+      return res.json(createdTask);
     }
 
-    await ensureProjectExists(url);
-
-    const [task] = await db('tasks').insert({
-      project_url: url,
-      title,
-      agent_name: agentName || null,
-      agent_email: agentEmail || null,
-      context: context ?? null,
-      status: 'in_progress'
-    }).returning('*');
-
-    if (backlogItemId) {
-      await db('backlog_items')
-        .where({ id: backlogItemId, project_url: url })
-        .update({
-          status: 'in_progress',
-          active_task_id: task.id,
-          updated_at: db.fn.now()
-        });
+    if (useStrictBatchMode) {
+      const results = await executeStrictBatchOperation(parsedItems, async (payload, _index, options) => registerTaskInternal(payload, options));
+      return sendBatchOperationResponse(res, results);
     }
 
-    res.json({ task_id: task.id, status: task.status, backlog_item_id: backlogItemId || null });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    const results = await executeBatchOperation(parsedItems, async (payload) => registerTaskInternal(payload));
+    return sendBatchOperationResponse(res, results);
+  } catch (routeError) {
+    if (useStrictBatchMode) {
+      return res.status(routeError.statusCode || 500).json({
+        error: routeError.message,
+        strict: true,
+        failed_index: routeError.failedIndex
+      });
+    }
+    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
   }
 });
 
@@ -1191,86 +1566,140 @@ app.get('/api/projects/backlog', apiLimiter, authenticateAgent, async (req, res)
 
 // Skill 1c: create_backlog_item
 app.post('/api/projects/backlog', apiLimiter, authenticateAgent, async (req, res) => {
-  const project_url = normalizeInputString(req.body?.project_url, { unwrapQuotes: true });
-  const url = normalizeUrl(project_url);
-  const { payload, error } = getBacklogPayload(req.body);
-
-  if (!url) {
-    return res.status(400).json({ error: 'Project url is required' });
-  }
-
+  const { isBatch, items, error } = normalizeBatchRequestBody(req.body);
   if (error) {
     return res.status(400).json({ error });
   }
+  const useStrictBatchMode = shouldUseStrictBatchMode(req, isBatch);
 
   try {
-    await ensureProjectExists(url);
+    if (!isBatch) {
+      const created = await createBacklogItemInternal(items[0]);
+      return res.status(201).json(created);
+    }
 
-    const [backlogItem] = await db('backlog_items').insert({
-      project_url: url,
-      priority: 100,
-      sort_order: 0,
-      ...payload
-    }).returning('*');
+    if (useStrictBatchMode) {
+      const results = await executeStrictBatchOperation(items, async (payload, _index, options) => createBacklogItemInternal(payload, options));
+      return sendBatchOperationResponse(res, results, { successStatus: 201 });
+    }
 
-    res.status(201).json({ backlog_item: backlogItem });
+    const results = await executeBatchOperation(items, async (payload) => createBacklogItemInternal(payload));
+    return sendBatchOperationResponse(res, results, { successStatus: 201 });
   } catch (routeError) {
-    res.status(500).json({ error: routeError.message });
+    if (useStrictBatchMode) {
+      return res.status(routeError.statusCode || 500).json({
+        error: routeError.message,
+        strict: true,
+        failed_index: routeError.failedIndex
+      });
+    }
+    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
   }
 });
 
 // Skill 1d: update_backlog_item
 app.patch('/api/backlog/:id', apiLimiter, authenticateAgent, async (req, res) => {
-  const { payload, error } = getBacklogPayload(req.body, { partial: true });
-
-  if (error) {
-    return res.status(400).json({ error });
-  }
-
-  if (!Object.keys(payload).length) {
-    return res.status(400).json({ error: 'No backlog fields to update' });
-  }
-
   try {
-    const [backlogItem] = await db('backlog_items')
-      .where({ id: req.params.id })
-      .whereNull('deleted_at')
-      .update({
-        ...payload,
-        updated_at: db.fn.now()
-      })
-      .returning('*');
-
-    if (!backlogItem) {
-      return res.status(404).json({ error: 'Backlog item not found' });
-    }
-
-    res.json({ backlog_item: backlogItem });
+    const updated = await updateBacklogItemInternal(req.params.id, req.body);
+    return res.json(updated);
   } catch (routeError) {
-    res.status(500).json({ error: routeError.message });
+    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
   }
 });
 
 app.delete('/api/backlog/:id', apiLimiter, authenticateAgent, async (req, res) => {
   try {
-    const [backlogItem] = await db('backlog_items')
-      .where({ id: req.params.id })
-      .whereNull('deleted_at')
-      .update({
-        status: 'archived',
-        active_task_id: null,
-        deleted_at: db.fn.now(),
-        updated_at: db.fn.now()
-      })
-      .returning('*');
+    const deleted = await deleteBacklogItemInternal(req.params.id);
+    return res.json(deleted);
+  } catch (routeError) {
+    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+  }
+});
 
-    if (!backlogItem) {
-      return res.status(404).json({ error: 'Backlog item not found' });
+app.patch('/api/backlog', apiLimiter, authenticateAgent, async (req, res) => {
+  const { isBatch, items, error } = normalizeBatchRequestBody(req.body);
+  if (error) {
+    return res.status(400).json({ error });
+  }
+  const useStrictBatchMode = shouldUseStrictBatchMode(req, isBatch);
+
+  const normalizedItems = [];
+  for (let index = 0; index < items.length; index += 1) {
+    const rawItem = items[index] || {};
+    const parsedBacklogId = backlogIdBodySchema.safeParse(rawItem);
+    if (!parsedBacklogId.success) {
+      return res.status(400).json({ error: `Invalid payload at index ${index}: ${zodErrorMessage(parsedBacklogId.error)}` });
     }
 
-    res.json({ success: true, backlog_item: mapBacklogItemRecord(backlogItem) });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    normalizedItems.push({
+      backlog_item_id: parsedBacklogId.data.backlog_item_id,
+      body: rawItem
+    });
+  }
+
+  try {
+    if (!isBatch) {
+      const updated = await updateBacklogItemInternal(normalizedItems[0].backlog_item_id, normalizedItems[0].body);
+      return res.json(updated);
+    }
+
+    if (useStrictBatchMode) {
+      const results = await executeStrictBatchOperation(normalizedItems, async (item, _index, options) => updateBacklogItemInternal(item.backlog_item_id, item.body, options));
+      return sendBatchOperationResponse(res, results);
+    }
+
+    const results = await executeBatchOperation(normalizedItems, async (item) => updateBacklogItemInternal(item.backlog_item_id, item.body));
+    return sendBatchOperationResponse(res, results);
+  } catch (routeError) {
+    if (useStrictBatchMode) {
+      return res.status(routeError.statusCode || 500).json({
+        error: routeError.message,
+        strict: true,
+        failed_index: routeError.failedIndex
+      });
+    }
+    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+  }
+});
+
+app.delete('/api/backlog', apiLimiter, authenticateAgent, async (req, res) => {
+  const { isBatch, items, error } = normalizeBatchRequestBody(req.body);
+  if (error) {
+    return res.status(400).json({ error });
+  }
+  const useStrictBatchMode = shouldUseStrictBatchMode(req, isBatch);
+
+  const normalizedItems = [];
+  for (let index = 0; index < items.length; index += 1) {
+    const parsedBacklogId = backlogIdBodySchema.safeParse(items[index] || {});
+    if (!parsedBacklogId.success) {
+      return res.status(400).json({ error: `Invalid payload at index ${index}: ${zodErrorMessage(parsedBacklogId.error)}` });
+    }
+    normalizedItems.push(parsedBacklogId.data.backlog_item_id);
+  }
+
+  try {
+    if (!isBatch) {
+      const deleted = await deleteBacklogItemInternal(normalizedItems[0]);
+      return res.json(deleted);
+    }
+
+    if (useStrictBatchMode) {
+      const results = await executeStrictBatchOperation(normalizedItems, async (backlogItemId, _index, options) => deleteBacklogItemInternal(backlogItemId, options));
+      return sendBatchOperationResponse(res, results);
+    }
+
+    const results = await executeBatchOperation(normalizedItems, async (backlogItemId) => deleteBacklogItemInternal(backlogItemId));
+    return sendBatchOperationResponse(res, results);
+  } catch (routeError) {
+    if (useStrictBatchMode) {
+      return res.status(routeError.statusCode || 500).json({
+        error: routeError.message,
+        strict: true,
+        failed_index: routeError.failedIndex
+      });
+    }
+    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
   }
 });
 
@@ -1286,43 +1715,60 @@ app.patch('/api/tasks/:id/status', apiLimiter, authenticateAgent, async (req, re
     return res.status(400).json({ error: zodErrorMessage(parsedBody.error) });
   }
 
-  const taskId = parsedParams.data.id;
-  const { status, project_url: projectUrl, agent_name: agentName } = parsedBody.data;
+  try {
+    const updated = await updateTaskStatusInternal(parsedParams.data.id, parsedBody.data);
+    return res.json(updated);
+  } catch (routeError) {
+    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+  }
+});
+
+app.patch('/api/tasks/status', apiLimiter, authenticateAgent, async (req, res) => {
+  const { isBatch, items, error } = normalizeBatchRequestBody(req.body);
+  if (error) {
+    return res.status(400).json({ error });
+  }
+  const useStrictBatchMode = shouldUseStrictBatchMode(req, isBatch);
+
+  const parsedItems = [];
+  for (let index = 0; index < items.length; index += 1) {
+    const parsedBody = taskStatusUpdateBatchBodySchema.safeParse(items[index] || {});
+    if (!parsedBody.success) {
+      return res.status(400).json({ error: `Invalid payload at index ${index}: ${zodErrorMessage(parsedBody.error)}` });
+    }
+    parsedItems.push(parsedBody.data);
+  }
 
   try {
-    const task = await db('tasks').where({ id: taskId }).first();
-
-    if (!task) {
-      return res.status(404).json({ error: 'Task not found' });
+    if (!isBatch) {
+      const { task_id: taskId, ...body } = parsedItems[0];
+      const updated = await updateTaskStatusInternal(taskId, body);
+      return res.json(updated);
     }
 
-    await db('tasks').where({ id: taskId }).update({ status });
-
-    const linkedBacklogStatus = mapTaskStatusToBacklogStatus(status);
-    if (linkedBacklogStatus) {
-      const backlogUpdate = {
-        status: linkedBacklogStatus,
-        updated_at: db.fn.now()
-      };
-
-      if (status === 'done') {
-        backlogUpdate.active_task_id = null;
-      }
-
-      await db('backlog_items')
-        .where({ active_task_id: taskId })
-        .update(backlogUpdate);
+    if (useStrictBatchMode) {
+      const results = await executeStrictBatchOperation(parsedItems, async (payload, _index, options) => {
+        const { task_id: taskId, ...body } = payload;
+        return updateTaskStatusInternal(taskId, body, options);
+      });
+      return sendBatchOperationResponse(res, results);
     }
 
-    await notifyWebhook(normalizeUrl(projectUrl || task.project_url || ''), {
-      event: 'task_status_updated',
-      task_id: taskId,
-      status,
-      agent_name: agentName
+    const results = await executeBatchOperation(parsedItems, async (payload) => {
+      const { task_id: taskId, ...body } = payload;
+      return updateTaskStatusInternal(taskId, body);
     });
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+
+    return sendBatchOperationResponse(res, results);
+  } catch (routeError) {
+    if (useStrictBatchMode) {
+      return res.status(routeError.statusCode || 500).json({
+        error: routeError.message,
+        strict: true,
+        failed_index: routeError.failedIndex
+      });
+    }
+    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
   }
 });
 
@@ -1338,87 +1784,102 @@ app.post('/api/tasks/:id/logs', apiLimiter, authenticateAgent, async (req, res) 
     return res.status(400).json({ error: zodErrorMessage(parsedBody.error) });
   }
 
-  const taskId = parsedParams.data.id;
-  const {
-    agent_name: agentName,
-    branch,
-    message,
-    technical_details: technicalDetails
-  } = parsedBody.data;
-  const hasTechnicalDetails = Object.prototype.hasOwnProperty.call(parsedBody.data, 'technical_details');
+  try {
+    const logged = await logAgentProgressInternal(parsedParams.data.id, parsedBody.data);
+    return res.json(logged);
+  } catch (routeError) {
+    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+  }
+});
 
-  let serializedTechnicalDetails = null;
-  if (hasTechnicalDetails && technicalDetails != null) {
-    try {
-      serializedTechnicalDetails = JSON.stringify(technicalDetails);
-    } catch (_error) {
-      return res.status(400).json({ error: 'Technical details must be valid JSON data' });
+app.post('/api/tasks/logs', apiLimiter, authenticateAgent, async (req, res) => {
+  const { isBatch, items, error } = normalizeBatchRequestBody(req.body);
+  if (error) {
+    return res.status(400).json({ error });
+  }
+  const useStrictBatchMode = shouldUseStrictBatchMode(req, isBatch);
+
+  const parsedItems = [];
+  for (let index = 0; index < items.length; index += 1) {
+    const parsedBody = logAgentProgressBatchBodySchema.safeParse(items[index] || {});
+    if (!parsedBody.success) {
+      return res.status(400).json({ error: `Invalid payload at index ${index}: ${zodErrorMessage(parsedBody.error)}` });
     }
+    parsedItems.push(parsedBody.data);
   }
 
   try {
-    const task = await db('tasks').where({ id: taskId }).first();
-    if (!task) {
-      return res.status(404).json({ error: 'Task not found' });
+    if (!isBatch) {
+      const { task_id: taskId, ...body } = parsedItems[0];
+      const logged = await logAgentProgressInternal(taskId, body);
+      return res.json(logged);
     }
 
-    const [log] = await db('agent_logs').insert({
-      task_id: taskId,
-      agent_name: agentName || null,
-      branch,
-      message,
-      technical_details: serializedTechnicalDetails
-    }).returning('*');
-    res.json({ success: true, log });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    if (useStrictBatchMode) {
+      const results = await executeStrictBatchOperation(parsedItems, async (payload, _index, options) => {
+        const { task_id: taskId, ...body } = payload;
+        return logAgentProgressInternal(taskId, body, options);
+      });
+      return sendBatchOperationResponse(res, results);
+    }
+
+    const results = await executeBatchOperation(parsedItems, async (payload) => {
+      const { task_id: taskId, ...body } = payload;
+      return logAgentProgressInternal(taskId, body);
+    });
+
+    return sendBatchOperationResponse(res, results);
+  } catch (routeError) {
+    if (useStrictBatchMode) {
+      return res.status(routeError.statusCode || 500).json({
+        error: routeError.message,
+        strict: true,
+        failed_index: routeError.failedIndex
+      });
+    }
+    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
   }
 });
 
 // Skill 4: report_blocker
 app.post('/api/projects/blockers', apiLimiter, authenticateAgent, async (req, res) => {
-  const parsedBody = reportBlockerBodySchema.safeParse(req.body || {});
-  if (!parsedBody.success) {
-    return res.status(400).json({ error: zodErrorMessage(parsedBody.error) });
+  const { isBatch, items, error } = normalizeBatchRequestBody(req.body);
+  if (error) {
+    return res.status(400).json({ error });
   }
+  const useStrictBatchMode = shouldUseStrictBatchMode(req, isBatch);
 
-  const {
-    project_url: projectUrl,
-    task_id: taskId,
-    error_message: errorMessage,
-    agent_name: agentName
-  } = parsedBody.data;
-  const url = normalizeUrl(projectUrl || '');
-
-  if (!url) {
-    return res.status(400).json({ error: 'Project url is required' });
+  const parsedItems = [];
+  for (let index = 0; index < items.length; index += 1) {
+    const parsedBody = reportBlockerBodySchema.safeParse(items[index] || {});
+    if (!parsedBody.success) {
+      return res.status(400).json({ error: `Invalid payload at index ${index}: ${zodErrorMessage(parsedBody.error)}` });
+    }
+    parsedItems.push(parsedBody.data);
   }
 
   try {
-    const task = await db('tasks').where({ id: taskId }).first();
-    if (!task) {
-      return res.status(404).json({ error: 'Task not found' });
+    if (!isBatch) {
+      const reported = await reportBlockerInternal(parsedItems[0]);
+      return res.json(reported);
     }
 
-    await db('projects').where({ url }).update({ status: 'blocked' });
-    await db('backlog_items')
-      .where({ active_task_id: taskId })
-      .update({ status: 'blocked', updated_at: db.fn.now() });
-    await db('agent_logs').insert({
-      task_id: taskId,
-      agent_name: agentName || null,
-      message: 'BLOCKER REPORTED: ' + errorMessage,
-      action_type: 'error'
-    });
-    await notifyWebhook(url, {
-      event: 'project_blocked',
-      task_id: taskId,
-      error_message: errorMessage,
-      agent_name: agentName
-    });
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    if (useStrictBatchMode) {
+      const results = await executeStrictBatchOperation(parsedItems, async (payload, _index, options) => reportBlockerInternal(payload, options));
+      return sendBatchOperationResponse(res, results);
+    }
+
+    const results = await executeBatchOperation(parsedItems, async (payload) => reportBlockerInternal(payload));
+    return sendBatchOperationResponse(res, results);
+  } catch (routeError) {
+    if (useStrictBatchMode) {
+      return res.status(routeError.statusCode || 500).json({
+        error: routeError.message,
+        strict: true,
+        failed_index: routeError.failedIndex
+      });
+    }
+    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
   }
 });
 
@@ -1429,17 +1890,57 @@ app.post('/api/tasks/:id/heartbeat', apiLimiter, authenticateAgent, async (req, 
     return res.status(400).json({ error: zodErrorMessage(parsedParams.error) });
   }
 
-  const taskId = parsedParams.data.id;
+  const parsedBody = heartbeatBodySchema.safeParse(req.body || {});
+  if (!parsedBody.success) {
+    return res.status(400).json({ error: zodErrorMessage(parsedBody.error) });
+  }
 
   try {
-    const updated = await db('tasks').where({ id: taskId }).update({ last_heartbeat: db.fn.now() });
-    if (!updated) {
-      return res.status(404).json({ error: 'Task not found' });
+    const updated = await heartbeatInternal(parsedParams.data.id);
+    return res.json(updated);
+  } catch (routeError) {
+    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+  }
+});
+
+app.post('/api/tasks/heartbeat', apiLimiter, authenticateAgent, async (req, res) => {
+  const { isBatch, items, error } = normalizeBatchRequestBody(req.body);
+  if (error) {
+    return res.status(400).json({ error });
+  }
+  const useStrictBatchMode = shouldUseStrictBatchMode(req, isBatch);
+
+  const parsedItems = [];
+  for (let index = 0; index < items.length; index += 1) {
+    const parsedBody = heartbeatBatchBodySchema.safeParse(items[index] || {});
+    if (!parsedBody.success) {
+      return res.status(400).json({ error: `Invalid payload at index ${index}: ${zodErrorMessage(parsedBody.error)}` });
+    }
+    parsedItems.push(parsedBody.data);
+  }
+
+  try {
+    if (!isBatch) {
+      const heartbeatResult = await heartbeatInternal(parsedItems[0].task_id);
+      return res.json(heartbeatResult);
     }
 
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    if (useStrictBatchMode) {
+      const results = await executeStrictBatchOperation(parsedItems, async (payload, _index, options) => heartbeatInternal(payload.task_id, options));
+      return sendBatchOperationResponse(res, results);
+    }
+
+    const results = await executeBatchOperation(parsedItems, async (payload) => heartbeatInternal(payload.task_id));
+    return sendBatchOperationResponse(res, results);
+  } catch (routeError) {
+    if (useStrictBatchMode) {
+      return res.status(routeError.statusCode || 500).json({
+        error: routeError.message,
+        strict: true,
+        failed_index: routeError.failedIndex
+      });
+    }
+    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
   }
 });
 

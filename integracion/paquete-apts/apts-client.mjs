@@ -1,9 +1,68 @@
 import { execSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TASK_STATUSES = ['todo', 'in_progress', 'review', 'done', 'stalled'];
 const BACKLOG_STATUSES = ['draft', 'needs_details', 'ready', 'in_progress', 'review', 'blocked', 'done', 'archived'];
 const BACKLOG_ITEM_TYPES = ['feature', 'bug', 'chore', 'research'];
+let envLoaded = false;
+
+function parseEnvLine(rawLine) {
+  const line = rawLine.trim();
+  if (!line || line.startsWith('#')) return null;
+
+  const normalized = line.startsWith('export ') ? line.slice(7).trim() : line;
+  const separator = normalized.indexOf('=');
+  if (separator <= 0) return null;
+
+  const key = normalized.slice(0, separator).trim();
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) return null;
+
+  let value = normalized.slice(separator + 1).trim();
+  const isDoubleQuoted = value.startsWith('"') && value.endsWith('"');
+  const isSingleQuoted = value.startsWith("'") && value.endsWith("'");
+
+  if (isDoubleQuoted || isSingleQuoted) {
+    value = value.slice(1, -1);
+  } else {
+    value = value.replace(/\s+#.*$/, '').trim();
+  }
+
+  return [key, value];
+}
+
+function loadEnvFile(filePath) {
+  let contents;
+
+  try {
+    contents = fs.readFileSync(filePath, 'utf8');
+  } catch {
+    return;
+  }
+
+  for (const line of contents.split(/\r?\n/)) {
+    const parsed = parseEnvLine(line);
+    if (!parsed) continue;
+
+    const [key, value] = parsed;
+    if (process.env[key] === undefined) {
+      process.env[key] = value;
+    }
+  }
+}
+
+function loadProjectEnv() {
+  if (envLoaded) return;
+  envLoaded = true;
+
+  const envPath = path.join(process.cwd(), '.env');
+  if (fs.existsSync(envPath) && fs.statSync(envPath).isFile()) {
+    loadEnvFile(envPath);
+  }
+}
+
+loadProjectEnv();
 
 class AptsClientError extends Error {
   constructor(message, {
@@ -33,7 +92,8 @@ function getBaseUrl() {
 function getHeaders() {
   const apiKey = process.env.APTS_API_KEY;
   if (!apiKey) {
-    throw new AptsClientError('Missing APTS_API_KEY', {
+    const expectedEnvPath = path.join(process.cwd(), '.env');
+    throw new AptsClientError(`Missing APTS_API_KEY. Checked process.env and ${expectedEnvPath}. Run this script from the project root or export APTS_API_KEY in your environment.`, {
       errorCode: 'MISSING_API_KEY',
       retriable: false,
     });
@@ -555,11 +615,65 @@ function validateHeartbeatInput(inputOrTaskId, maybePayload) {
   };
 }
 
-async function registerTask(payload) {
-  const normalizedPayload = validateRegisterTaskPayload(payload);
-  return request('/projects/tasks', {
+function normalizeBatchOptions(options, operationName) {
+  if (options === undefined) {
+    return { strict: false };
+  }
+
+  if (!isPlainObject(options)) {
+    throw invalidArgument(`${operationName} options must be an object`, {
+      operation: operationName,
+      expected: 'object',
+      received: options,
+    });
+  }
+
+  if (options.strict !== undefined && typeof options.strict !== 'boolean') {
+    throw invalidArgument(`${operationName} option 'strict' must be a boolean`, {
+      operation: operationName,
+      field: 'strict',
+      expected: 'boolean',
+      received: options.strict,
+    });
+  }
+
+  return {
+    strict: options.strict === true,
+  };
+}
+
+function buildBatchPath(pathname, options) {
+  if (!options?.strict) return pathname;
+  return `${pathname}?strict=true`;
+}
+
+function normalizeBatchPayload(input, operationName, itemValidator, options) {
+  const normalizedOptions = normalizeBatchOptions(options, operationName);
+
+  if (!Array.isArray(input)) {
+    return { isBatch: false, items: [itemValidator(input)], options: normalizedOptions };
+  }
+
+  if (!input.length) {
+    throw invalidArgument(`${operationName} expects a non-empty array when using batch mode`, {
+      operation: operationName,
+      expected: 'non-empty array',
+      received: input,
+    });
+  }
+
+  return {
+    isBatch: true,
+    items: input.map((item) => itemValidator(item)),
+    options: normalizedOptions,
+  };
+}
+
+async function registerTask(payload, options) {
+  const { isBatch, items, options: batchOptions } = normalizeBatchPayload(payload, 'register_task', validateRegisterTaskPayload, options);
+  return request(buildBatchPath('/projects/tasks', isBatch ? batchOptions : { strict: false }), {
     method: 'POST',
-    body: JSON.stringify(normalizedPayload),
+    body: JSON.stringify(isBatch ? items : items[0]),
   });
 }
 
@@ -596,15 +710,34 @@ async function listBacklogItems(urlOrOptions, statusOrOptions = null) {
   });
 }
 
-async function createBacklogItem(payload) {
-  const normalizedPayload = validateCreateBacklogItemPayload(payload);
-  return request('/projects/backlog', {
+async function createBacklogItem(payload, options) {
+  const { isBatch, items, options: batchOptions } = normalizeBatchPayload(payload, 'create_backlog_item', validateCreateBacklogItemPayload, options);
+  return request(buildBatchPath('/projects/backlog', isBatch ? batchOptions : { strict: false }), {
     method: 'POST',
-    body: JSON.stringify(normalizedPayload),
+    body: JSON.stringify(isBatch ? items : items[0]),
   });
 }
 
-async function updateBacklogItem(inputOrBacklogId, payload) {
+async function updateBacklogItem(inputOrBacklogId, payload, options) {
+  if (Array.isArray(inputOrBacklogId)) {
+    if (options !== undefined) {
+      throw invalidArgument('update_backlog_item batch mode accepts at most two arguments: array payload and options', {
+        operation: 'update_backlog_item',
+        expected: '[arrayPayload, options]',
+      });
+    }
+
+    const batchOptions = normalizeBatchOptions(payload, 'update_backlog_item');
+    const normalizedItems = inputOrBacklogId.map((item) => validateUpdateBacklogItemInput(item));
+    return request(buildBatchPath('/backlog', batchOptions), {
+      method: 'PATCH',
+      body: JSON.stringify(normalizedItems.map((item) => ({
+        backlog_item_id: item.backlog_item_id,
+        ...item.payload,
+      }))),
+    });
+  }
+
   const normalized = validateUpdateBacklogItemInput(inputOrBacklogId, payload);
   return request(`/backlog/${normalized.backlog_item_id}`, {
     method: 'PATCH',
@@ -612,14 +745,55 @@ async function updateBacklogItem(inputOrBacklogId, payload) {
   });
 }
 
-async function deleteBacklogItem(inputOrBacklogId) {
+async function deleteBacklogItem(inputOrBacklogId, options) {
+  if (Array.isArray(inputOrBacklogId)) {
+    if (!inputOrBacklogId.length) {
+      throw invalidArgument('delete_backlog_item expects a non-empty array when using batch mode', {
+        operation: 'delete_backlog_item',
+        expected: 'non-empty array',
+        received: inputOrBacklogId,
+      });
+    }
+
+    const batchOptions = normalizeBatchOptions(options, 'delete_backlog_item');
+    const normalizedIds = inputOrBacklogId.map((item) => validateDeleteBacklogItemInput(item));
+    return request(buildBatchPath('/backlog', batchOptions), {
+      method: 'DELETE',
+      body: JSON.stringify(normalizedIds.map((backlog_item_id) => ({ backlog_item_id }))),
+    });
+  }
+
   const backlogItemId = validateDeleteBacklogItemInput(inputOrBacklogId);
   return request(`/backlog/${backlogItemId}`, {
     method: 'DELETE',
   });
 }
 
-async function updateTaskStatus(inputOrTaskId, payload) {
+async function updateTaskStatus(inputOrTaskId, payload, options) {
+  if (Array.isArray(inputOrTaskId)) {
+    if (options !== undefined) {
+      throw invalidArgument('update_task_status batch mode accepts at most two arguments: array payload and options', {
+        operation: 'update_task_status',
+        expected: '[arrayPayload, options]',
+      });
+    }
+
+    if (!inputOrTaskId.length) {
+      throw invalidArgument('update_task_status expects a non-empty array when using batch mode', {
+        operation: 'update_task_status',
+        expected: 'non-empty array',
+        received: inputOrTaskId,
+      });
+    }
+
+    const batchOptions = normalizeBatchOptions(payload, 'update_task_status');
+    const normalizedItems = inputOrTaskId.map((item) => validateUpdateTaskStatusInput(item));
+    return request(buildBatchPath('/tasks/status', batchOptions), {
+      method: 'PATCH',
+      body: JSON.stringify(normalizedItems),
+    });
+  }
+
   const normalizedPayload = validateUpdateTaskStatusInput(inputOrTaskId, payload);
   const { task_id: taskId, ...body } = normalizedPayload;
 
@@ -629,7 +803,31 @@ async function updateTaskStatus(inputOrTaskId, payload) {
   });
 }
 
-async function logAgentProgress(inputOrTaskId, payload) {
+async function logAgentProgress(inputOrTaskId, payload, options) {
+  if (Array.isArray(inputOrTaskId)) {
+    if (options !== undefined) {
+      throw invalidArgument('log_agent_progress batch mode accepts at most two arguments: array payload and options', {
+        operation: 'log_agent_progress',
+        expected: '[arrayPayload, options]',
+      });
+    }
+
+    if (!inputOrTaskId.length) {
+      throw invalidArgument('log_agent_progress expects a non-empty array when using batch mode', {
+        operation: 'log_agent_progress',
+        expected: 'non-empty array',
+        received: inputOrTaskId,
+      });
+    }
+
+    const batchOptions = normalizeBatchOptions(payload, 'log_agent_progress');
+    const normalizedItems = inputOrTaskId.map((item) => validateLogAgentProgressInput(item));
+    return request(buildBatchPath('/tasks/logs', batchOptions), {
+      method: 'POST',
+      body: JSON.stringify(normalizedItems),
+    });
+  }
+
   const normalizedPayload = validateLogAgentProgressInput(inputOrTaskId, payload);
   const { task_id: taskId, project_url: _projectUrl, ...body } = normalizedPayload;
 
@@ -639,15 +837,39 @@ async function logAgentProgress(inputOrTaskId, payload) {
   });
 }
 
-async function reportBlocker(payload) {
-  const normalizedPayload = validateReportBlockerPayload(payload);
-  return request('/projects/blockers', {
+async function reportBlocker(payload, options) {
+  const { isBatch, items, options: batchOptions } = normalizeBatchPayload(payload, 'report_blocker', validateReportBlockerPayload, options);
+  return request(buildBatchPath('/projects/blockers', isBatch ? batchOptions : { strict: false }), {
     method: 'POST',
-    body: JSON.stringify(normalizedPayload),
+    body: JSON.stringify(isBatch ? items : items[0]),
   });
 }
 
-async function heartbeat(inputOrTaskId, payload) {
+async function heartbeat(inputOrTaskId, payload, options) {
+  if (Array.isArray(inputOrTaskId)) {
+    if (options !== undefined) {
+      throw invalidArgument('heartbeat batch mode accepts at most two arguments: array payload and options', {
+        operation: 'heartbeat',
+        expected: '[arrayPayload, options]',
+      });
+    }
+
+    if (!inputOrTaskId.length) {
+      throw invalidArgument('heartbeat expects a non-empty array when using batch mode', {
+        operation: 'heartbeat',
+        expected: 'non-empty array',
+        received: inputOrTaskId,
+      });
+    }
+
+    const batchOptions = normalizeBatchOptions(payload, 'heartbeat');
+    const normalizedItems = inputOrTaskId.map((item) => validateHeartbeatInput(item));
+    return request(buildBatchPath('/tasks/heartbeat', batchOptions), {
+      method: 'POST',
+      body: JSON.stringify(normalizedItems),
+    });
+  }
+
   const normalizedPayload = validateHeartbeatInput(inputOrTaskId, payload);
   const { task_id: taskId, ...body } = normalizedPayload;
 

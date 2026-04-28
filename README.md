@@ -203,6 +203,8 @@ El login del dashboard usa `DASHBOARD_PASSWORD` y crea una sesion HTTP con cooki
 - `npm run dev`: backend y frontend en paralelo.
 - `npm run install:all`: instala dependencias en raiz, backend y frontend.
 - `node scripts/test_agent_api.js`: prueba el flujo de skills contra el backend local.
+- `node scripts/test_agent_api_batch.js`: valida operaciones batch (status, logs, heartbeat, backlog) y modo estricto all-or-nothing.
+- `npm run test:api:batch`: alias para ejecutar el smoke batch de API.
 - `node simulate_apts_data.js`: genera trafico de ejemplo para poblar el dashboard.
 
 ## Testing
@@ -214,6 +216,16 @@ Con el backend corriendo:
 ```bash
 node scripts/test_agent_api.js
 ```
+
+### Smoke test de API batch
+
+Con el backend corriendo:
+
+```bash
+node scripts/test_agent_api_batch.js
+```
+
+Este test cubre operaciones batch mutantes y valida rollback completo cuando se usa `strict=true`.
 
 ### E2E del frontend
 
