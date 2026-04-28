@@ -37,6 +37,8 @@ Si modificas el cliente HTTP exportable, replica el cambio tanto en `paquete-apt
 
 Si modificas el manifiesto publico de integracion expuesto por APTS en `/api/public/integrar`, tambien debes subir `schema_version` y registrar una nota nueva en `bootstrap.manifest_updates.notes` para que los proyectos cliente puedan entender el cambio y reaccionar a tiempo. El historial es append-only: no se deben borrar ni reemplazar notas previas al agregar una version nueva.
 
+El manifiesto expone metadatos de sincronizacion por artefacto (`artifact_version`, `updated_in_schema_version`, `sync_action`, `deprecated_filenames`) y una politica global (`bootstrap.artifact_sync_policy`). Los actualizadores locales deben usar esos campos para decidir que sobreescribir y que archivos legacy eliminar durante la actualizacion.
+
 ## Nota
 
 Los archivos aqui presentes son artefactos de integracion y distribucion. No son customizaciones activas del workspace APTS.

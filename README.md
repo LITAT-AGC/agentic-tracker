@@ -56,6 +56,8 @@ Ademas, el backend puede publicar un punto de entrada publico para agentes en `/
 
 Politica de mantenimiento del manifiesto: cada cambio funcional, estructural o semantico en `/api/public/integrar` debe actualizar `schema_version` y agregar una entrada nueva en `bootstrap.manifest_updates.notes` explicando que cambio, desde que version aplica y por que importa para los clientes del manifiesto. Ese historial es append-only: no reemplazar notas anteriores por la ultima version.
 
+Sincronizacion de artefactos de integracion: el manifiesto ahora publica metadatos por artefacto (`artifact_version`, `updated_in_schema_version`, `sync_action` y `deprecated_filenames`) mas una politica global en `bootstrap.artifact_sync_policy`. Con eso, un actualizador local puede detectar que scripts/agentes cambiaron, sobreescribir archivos gestionados cuando cambia la version y borrar archivos legacy declarados por APTS.
+
 Todas las llamadas de agentes deben incluir la cabecera:
 
 ```http
