@@ -761,10 +761,18 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.12';
+const integrationManifestSchemaVersion = '2.0.13';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.13',
+    date: '2026-04-29',
+    changes: [
+      'Bootstrap metadata now defines an explicit AGENTS.md setup policy so integrators can create a new instruction file when missing and safely update an existing one without replacing project-specific rules.',
+      'The public APTS integration guides now include an idempotent create-or-update flow for AGENTS.md and .github/copilot-instructions.md using a managed section strategy.'
+    ]
+  },
   {
     version: '2.0.12',
     date: '2026-04-29',
@@ -991,8 +999,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'SKILL.md'),
     fileName: 'SKILL.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.12',
-    updatedInSchemaVersion: '2.0.12',
+    artifactVersion: '2.0.13',
+    updatedInSchemaVersion: '2.0.13',
     kind: 'skill_package',
     recommended: false,
     syncAction: 'overwrite',
@@ -1004,8 +1012,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-agent-guidelines.md'),
     fileName: 'apts-agent-guidelines.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.12',
-    updatedInSchemaVersion: '2.0.12',
+    artifactVersion: '2.0.13',
+    updatedInSchemaVersion: '2.0.13',
     kind: 'agent_guidelines',
     recommended: true,
     syncAction: 'overwrite',
@@ -1231,6 +1239,17 @@ const buildIntegrationManifest = (req) => ({
       runtime_adapter_paths: ['.github/skills/apts', '.agents/skills/apts', '.claude/skills/apts'],
       policy: 'Keep APTS integration artifacts local to each repository and avoid user-global skill installation for project integrations.'
     },
+    agent_instruction_policy: {
+      preferred_instruction_files: ['AGENTS.md', '.github/copilot-instructions.md'],
+      missing_file_behavior: 'If neither AGENTS.md nor .github/copilot-instructions.md exists, create AGENTS.md from the downloaded apts-agent-guidelines.md before protected APTS calls.',
+      existing_file_behavior: 'If an instruction file already exists, preserve project-specific rules and merge or refresh only one APTS-managed section instead of replacing the whole file.',
+      managed_section_markers: ['<!-- APTS:START -->', '<!-- APTS:END -->'],
+      update_strategy: [
+        'If an instruction file has no APTS managed section, append one managed section once.',
+        'If managed markers already exist, replace only the content between markers.',
+        'Do not duplicate multiple APTS managed sections in the same file.'
+      ]
+    },
     local_resilience_log: {
       required: true,
       source_of_truth: false,
@@ -1264,6 +1283,7 @@ const buildIntegrationManifest = (req) => ({
       'Resolve project and agent identity from local Git.',
       'If APTS_API_KEY is not yet present in the environment, request APTS_API_KEY from the operator and confirm APTS_BASE_URL as well.',
       'Create or update a .env file at the client project root with APTS_BASE_URL and APTS_API_KEY before using protected APIs.',
+      'Ensure the project has AGENTS.md or .github/copilot-instructions.md. Create AGENTS.md from apts-agent-guidelines.md if neither file exists, or merge/update one APTS-managed section if an instruction file already exists.',
       'Create a workspace-local integration folder such as .ia/apts, place the APTS contract and HTTP client there, and only then wire runtime-specific adapters if needed.',
       'If the project previously used ad-hoc APTS wrapper scripts for base operations, remove them once the official client or CLI is installed and keep only thin discovery adapters when the runtime still needs them.',
       'Prepare a local append-only resilience journal, for example at .apts/agent-resilience-log.jsonl, without treating it as a source of truth.',
@@ -1297,6 +1317,7 @@ const buildIntegrationManifest = (req) => ({
     'Maintain the local resilience log described in the bootstrap section; it is append-only and must not replace APTS as the source of truth.',
     'Download and install the skills contract first.',
     'Read the base agent guidelines before the first APTS API call.',
+    'Ensure AGENTS.md or .github/copilot-instructions.md exists before protected calls: create AGENTS.md if neither exists, or merge/update one APTS-managed section if an instruction file already exists.',
     'If the current chat introduces a new bug, error, or regression request, ensure it is represented in APTS backlog as a bug item before registering execution work or starting implementation.',
     'If the runtime supports custom agents, install and use APTS Bugfix Intake as the first entrypoint for chat-triggered defect intake.',
     'Choose the reference client that matches the client project module system: apts-client.js for CommonJS or apts-client.mjs for ESM.',

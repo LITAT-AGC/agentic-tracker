@@ -2,6 +2,29 @@
 
 Use this content as a baseline for `AGENTS.md` or `.github/copilot-instructions.md` in the client project.
 
+## AGENTS.md bootstrap policy (create or update)
+
+Apply this policy before the first protected APTS API call:
+
+1. If neither `AGENTS.md` nor `.github/copilot-instructions.md` exists, create `AGENTS.md` and add the APTS baseline block from this guide.
+2. If `AGENTS.md` already exists, keep project-specific rules and only merge or refresh an APTS-managed section.
+3. If `AGENTS.md` does not exist but `.github/copilot-instructions.md` exists, merge or refresh the same APTS-managed section there.
+4. On repeated installs or updates, do not duplicate instructions. Update the existing APTS-managed section in place.
+
+Recommended managed section markers:
+
+```md
+<!-- APTS:START -->
+...APTS managed guidance...
+<!-- APTS:END -->
+```
+
+Managed section rules:
+
+- Never delete project-specific guidance outside the managed markers.
+- On upgrades, replace only the text between `<!-- APTS:START -->` and `<!-- APTS:END -->`.
+- If markers are missing in an existing instruction file, append one managed section once and reuse it on future updates.
+
 ## Skill installation scope (workspace-local)
 
 Use a workspace-local installation strategy for APTS integration artifacts:
