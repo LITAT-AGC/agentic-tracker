@@ -761,10 +761,18 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.13';
+const integrationManifestSchemaVersion = '2.0.14';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.14',
+    date: '2026-04-29',
+    changes: [
+      'Bootstrap metadata now defines an explicit official-script policy: base APTS integration operations must use only scripts published by the manifest.',
+      'Integration guidance now forbids merging legacy local wrapper snippets into downloaded official APTS scripts, requiring full artifact replacement on version updates.'
+    ]
+  },
   {
     version: '2.0.13',
     date: '2026-04-29',
@@ -999,8 +1007,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'SKILL.md'),
     fileName: 'SKILL.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.13',
-    updatedInSchemaVersion: '2.0.13',
+    artifactVersion: '2.0.14',
+    updatedInSchemaVersion: '2.0.14',
     kind: 'skill_package',
     recommended: false,
     syncAction: 'overwrite',
@@ -1012,8 +1020,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-agent-guidelines.md'),
     fileName: 'apts-agent-guidelines.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.13',
-    updatedInSchemaVersion: '2.0.13',
+    artifactVersion: '2.0.14',
+    updatedInSchemaVersion: '2.0.14',
     kind: 'agent_guidelines',
     recommended: true,
     syncAction: 'overwrite',
@@ -1217,6 +1225,8 @@ const buildIntegrationManifest = (req) => ({
         'the matching reference client artifact is available in the same local folder as the CLI'
       ],
       cli_dependency_rule: 'apts-cli.js depends on apts-client.js and apts-cli.mjs depends on apts-client.mjs. Keep each CLI and its matching client artifact together in the same workspace-local folder.',
+      official_script_integrity_rule: 'For base APTS operations, use only official scripts published by this manifest (apts-client.js, apts-client.mjs, apts-cli.js, or apts-cli.mjs). Do not merge legacy wrapper snippets into those files.',
+      adapter_exception_rule: 'If runtime-specific glue is still needed, keep it as a thin adapter that delegates to the official script unchanged.',
       legacy_wrapper_cleanup_rule: 'After installing the official client or CLI, remove older project-local scripts that only wrapped base APTS operations such as register_task, read_project_context, update_task_status, log_agent_progress, report_blocker, or heartbeat. Keep only thin runtime-specific adapters when discovery requires them.',
       default_rule: 'If in doubt, inspect package.json and the client project code before choosing an artifact. Download the CLI only together with the matching client artifact.'
     },
@@ -1226,10 +1236,12 @@ const buildIntegrationManifest = (req) => ({
       when_version_changes: 'overwrite_local_file',
       delete_known_legacy_files: true,
       legacy_cleanup_targets: buildLegacyCleanupTargets(),
+      managed_artifact_integrity: 'Treat downloaded official APTS scripts as managed artifacts. Do not hand-edit them or splice legacy wrapper code into them; replace the full file when artifact_version changes.',
       manual_cleanup_note: 'Automatic cleanup only applies to filenames explicitly published by APTS in legacy_cleanup_targets. If the client project previously created custom APTS wrapper scripts for base operations, remove them manually during migration unless APTS later publishes those filenames as deprecated.',
       updater_contract: [
         'For each manifest artifact id, compare local metadata with artifact_version from this manifest.',
         'If local version differs from artifact_version, re-download and overwrite the local managed file.',
+        'Never compose mixed scripts by merging legacy local wrappers with downloaded official APTS artifacts.',
         'If delete_known_legacy_files is true, remove local files listed under legacy_cleanup_targets before finishing sync.'
       ]
     },
@@ -1249,6 +1261,14 @@ const buildIntegrationManifest = (req) => ({
         'If managed markers already exist, replace only the content between markers.',
         'Do not duplicate multiple APTS managed sections in the same file.'
       ]
+    },
+    official_integration_script_policy: {
+      required: true,
+      scope: 'base_apts_contract_operations',
+      allowed_artifact_ids: ['js_client_commonjs', 'js_client_esm', 'js_cli_commonjs', 'js_cli_esm'],
+      single_source_of_truth: 'For base integration operations, invoke only official scripts published by APTS in this manifest.',
+      mixed_script_forbidden: 'Do not merge, splice, or partially reuse legacy local wrapper code inside downloaded official scripts.',
+      migration_rule: 'If legacy wrappers still contain project-specific logic, extract that logic into a thin adapter and keep official scripts unchanged.'
     },
     local_resilience_log: {
       required: true,
@@ -1285,6 +1305,7 @@ const buildIntegrationManifest = (req) => ({
       'Create or update a .env file at the client project root with APTS_BASE_URL and APTS_API_KEY before using protected APIs.',
       'Ensure the project has AGENTS.md or .github/copilot-instructions.md. Create AGENTS.md from apts-agent-guidelines.md if neither file exists, or merge/update one APTS-managed section if an instruction file already exists.',
       'Create a workspace-local integration folder such as .ia/apts, place the APTS contract and HTTP client there, and only then wire runtime-specific adapters if needed.',
+      'Do not merge legacy local wrappers into official APTS scripts; keep official scripts unchanged and move extra project logic to thin adapters when needed.',
       'If the project previously used ad-hoc APTS wrapper scripts for base operations, remove them once the official client or CLI is installed and keep only thin discovery adapters when the runtime still needs them.',
       'Prepare a local append-only resilience journal, for example at .apts/agent-resilience-log.jsonl, without treating it as a source of truth.',
       'Inspect local files that currently contain backlog, planning, or operational tracking.',
@@ -1322,6 +1343,7 @@ const buildIntegrationManifest = (req) => ({
     'If the runtime supports custom agents, install and use APTS Bugfix Intake as the first entrypoint for chat-triggered defect intake.',
     'Choose the reference client that matches the client project module system: apts-client.js for CommonJS or apts-client.mjs for ESM.',
     'If the runtime prefers shellable command entrypoints over importing JavaScript modules, download the matching CLI as well: apts-cli.js for CommonJS or apts-cli.mjs for ESM, keeping it beside the matching client file.',
+    'For base APTS operations, use only official scripts published by this manifest and never merge legacy wrapper code into downloaded managed scripts.',
     'After installing the official client or CLI, remove older local APTS wrapper scripts for base operations to avoid drift. Keep only thin runtime-specific discovery adapters when required.',
     'Download the optional agent templates only if your runtime supports custom agents.',
     'Use APTS_BASE_URL with the published /api base path.'

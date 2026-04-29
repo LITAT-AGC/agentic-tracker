@@ -32,6 +32,7 @@ Note: in this repository, it is published as integration material under the repo
 
 - Use a workspace-local, runtime-neutral base folder: `.ia/apts/`.
 - Keep the APTS contract, the matching HTTP client, and the optional matching CLI in that base folder.
+- Treat official APTS scripts as managed artifacts: replace them as full files on updates and do not merge code from legacy local wrappers into those scripts.
 - Add runtime-specific adapter folders only for discovery when needed: `.github/skills/apts/` (VS Code/Copilot), `.agents/skills/apts/` (agent loaders using `.agents`), and `.claude/skills/apts/` (Claude-style loaders).
 - Avoid user-global skill installation for project integrations because it increases cross-project configuration leakage and version drift.
 
@@ -58,8 +59,11 @@ Note: in this repository, it is published as integration material under the repo
 
 - The exported APTS client (`apts-client.js` / `apts-client.mjs`) must include every operation in the integration contract, including backlog management with soft-delete.
 - The official CLI (`apts-cli.js` / `apts-cli.mjs`) is a thin executable entrypoint over the matching client and must stay aligned with that client variant.
+- For base APTS contract operations, the integration layer must use only official scripts published by APTS (`apts-client.js`, `apts-client.mjs`, `apts-cli.js`, `apts-cli.mjs`).
+- Do not merge or splice code from old project-local wrappers into those official scripts.
 - The client project should not create parallel wrappers or scripts to cover missing functions of the base flow.
 - When migrating to the official client or CLI, retire any older project-local APTS wrappers that only proxy those base operations.
+- If custom runtime behavior is still required, implement it as a thin adapter that delegates to the official script unchanged.
 - If a new integration backend capability is introduced, add it first to the official client and to `apts_skills.json`, then update the guide.
 
 ## Maintenance note

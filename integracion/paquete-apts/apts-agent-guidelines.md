@@ -24,6 +24,7 @@ Managed section rules:
 - Never delete project-specific guidance outside the managed markers.
 - On upgrades, replace only the text between `<!-- APTS:START -->` and `<!-- APTS:END -->`.
 - If markers are missing in an existing instruction file, append one managed section once and reuse it on future updates.
+- Treat downloaded official APTS scripts as managed files. Replace them entirely on version updates and do not merge legacy wrapper snippets into those files.
 
 ## Skill installation scope (workspace-local)
 
@@ -73,7 +74,7 @@ Before using any skill, resolve from the local Git environment:
 
 Mandatory rules:
 0. If the user asks for "next task", "continue backlog", "run backlog", or equivalent requests, you must invoke `APTS Backlog Orchestrator` first and not run direct implementation from the general agent.
-0.1. Use the official APTS client or CLI (`apts-client.js`, `apts-client.mjs`, `apts-cli.js`, or `apts-cli.mjs`) as the integration layer; do not build parallel scripts for base contract operations, and retire older local wrappers for those operations during migration.
+0.1. Use only the official APTS client or CLI (`apts-client.js`, `apts-client.mjs`, `apts-cli.js`, or `apts-cli.mjs`) as the base integration layer; do not build parallel scripts for base contract operations, do not merge legacy wrapper snippets into official scripts, and retire older local wrappers for those operations during migration.
 0.2. Invoke APTS operations using contract-first JSON object payloads (for example `{"task_id":"...","status":"review",...}`), even when a legacy positional signature is still supported for backward compatibility.
 0.3. If `APTS Bugfix Intake` is installed in the client project, invoke it first for new bug, error, regression, or broken-behavior requests coming from chat.
 0.4. If the current chat asks to fix a bug, investigate an error, or resolve a regression or broken behavior, first inspect APTS backlog for an existing matching non-deleted bug item.
