@@ -55,6 +55,10 @@ Note: in this repository, it is published as integration material under the repo
 8. Configure `APTS_BASE_URL` and `APTS_API_KEY` in a `.env` file at the client project root (or an equivalent secret manager that exposes them as environment variables).
 9. Validate the integration by running `register_task`, then `log_agent_progress`, and then `heartbeat`.
 
+Task recovery note: during backlog execution, call `register_task` with `backlog_item_id` so APTS can resume interrupted `todo`/`in_progress`/`stalled` tasks instead of creating duplicates.
+
+Task close note: prefer `review` first and promote to `done` only after review policy passes and recent execution activity is present.
+
 ## Official client coverage
 
 - The exported APTS client (`apts-client.js` / `apts-client.mjs`) must include every operation in the integration contract, including backlog management with soft-delete.

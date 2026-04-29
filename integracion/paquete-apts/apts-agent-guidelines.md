@@ -82,13 +82,13 @@ Mandatory rules:
 0.6. When the runtime exposes a stable conversation or thread identifier, store `source_kind` = `chat_request` and persist that identifier in `source_ref` for the bug backlog item.
 0.7. Do not start direct implementation or register execution work for a new defect request until the work is represented in APTS backlog and the task can reference that `backlog_item_id`.
 1. Read the project backlog with `list_backlog_items` and select an item suitable for execution.
-2. If you do not have `task_id`, use `register_task` and include `backlog_item_id` when available.
+2. Call `register_task` with `backlog_item_id` for execution work and always use the returned `task_id`; this may resume interrupted work instead of creating a duplicate task.
 3. Before modifying code, use `read_project_context`.
 4. While working, send `heartbeat` periodically.
 5. Each important milestone must be recorded with `log_agent_progress`.
 6. If you cannot continue, use `report_blocker` and stop work.
 7. If you are refining scope, planning, or capturing a new defect request from chat, use `create_backlog_item` or `update_backlog_item` instead of inventing work outside APTS.
-8. At completion, use `update_task_status` with `done` or `review`.
+8. At completion, set `review` first; use `done` only from review and only when recent execution activity exists.
 9. Never invent `project_url`, `agent_name`, or `branch`; always resolve them from Git.
 10. If `APTS_API_KEY` is missing, stop operational integration, request it from the operator, and continue only after it is stored as an environment secret.
 11. Keep a local append-only resilience journal, but never use it to replace APTS as official tracking.

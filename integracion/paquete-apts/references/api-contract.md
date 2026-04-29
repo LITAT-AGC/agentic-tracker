@@ -36,6 +36,7 @@ branch=$(git branch --show-current)
 - Metodo: `POST`
 - Ruta: `/projects/tasks`
 - Body: objeto unico o array de objetos `register_task`
+- Comportamiento de reanudacion: cuando se envia `backlog_item_id` y ese backlog item ya tiene una `active_task_id` en estado `todo`, `in_progress` o `stalled`, APTS reanuda esa tarea en lugar de crear una duplicada.
 - Body minimo:
 
 ```json
@@ -97,6 +98,8 @@ branch=$(git branch --show-current)
 - Ruta single: `/tasks/:id/status`
 - Ruta batch: `/tasks/status`
 - Estados soportados: `todo`, `in_progress`, `review`, `done`, `stalled`
+- Regla de transicion: `done` solo se acepta desde `review`.
+- Regla de cierre robusto: para pasar a `done` debe existir actividad reciente de ejecucion (heartbeat o log de progreso reciente).
 
 ### 4. log_agent_progress
 
@@ -123,11 +126,11 @@ branch=$(git branch --show-current)
 2. Leer contexto y backlog del proyecto.
 3. Si la solicitud actual es un bugfix, error o regresion reportada por chat, verificar si ya existe un backlog item `bug` equivalente y reutilizarlo cuando corresponda.
 4. Crear o actualizar backlog en APTS (incluyendo soft-delete cuando corresponda). Para defectos nuevos, crear primero el item `bug` antes de implementar.
-5. Crear tarea si no hay `task_id`.
+5. Crear o reanudar tarea con `register_task` usando `backlog_item_id` cuando aplique.
 6. Reportar progreso en cada hito importante.
 7. Enviar heartbeat mientras la tarea siga activa.
 8. Reportar blocker si el agente queda detenido.
-9. Cerrar la tarea con `done` o `review`.
+9. Cerrar primero en `review`; pasar a `done` solo desde `review` y con actividad reciente de ejecucion.
 
 ## Politica anti-loop de reintentos
 

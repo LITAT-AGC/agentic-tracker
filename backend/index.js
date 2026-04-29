@@ -151,6 +151,15 @@ const authenticateAgent = (req, res, next) => {
 const BACKLOG_ITEM_TYPES = ['feature', 'bug', 'chore', 'research'];
 const BACKLOG_STATUSES = ['draft', 'needs_details', 'ready', 'in_progress', 'review', 'blocked', 'done', 'archived'];
 const TASK_STATUSES = ['todo', 'in_progress', 'review', 'done', 'stalled'];
+const TASK_RESUMABLE_STATUSES = new Set(['todo', 'in_progress', 'stalled']);
+const TASK_STATUS_TRANSITIONS = {
+  todo: new Set(['in_progress', 'stalled']),
+  in_progress: new Set(['todo', 'review', 'stalled']),
+  review: new Set(['in_progress', 'done', 'stalled']),
+  stalled: new Set(['todo', 'in_progress']),
+  done: new Set([])
+};
+const TASK_ACTIVITY_FRESHNESS_MS = 15 * 60 * 1000;
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
 const OPENROUTER_CHAT_URL = 'https://openrouter.ai/api/v1/chat/completions';
@@ -761,10 +770,18 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.14';
+const integrationManifestSchemaVersion = '2.0.15';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.15',
+    date: '2026-04-29',
+    changes: [
+      'register_task now resumes an active task for the same backlog item when that task is in todo, in_progress, or stalled, instead of always creating duplicate execution tasks.',
+      'Task status transitions are now strict: done is accepted only from review and only with recent execution activity (heartbeat or progress log), reducing accidental closure of interrupted executions.'
+    ]
+  },
   {
     version: '2.0.14',
     date: '2026-04-29',
@@ -994,8 +1011,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts_skills.json'),
     fileName: 'apts_skills.json',
     contentType: 'application/json; charset=utf-8',
-    artifactVersion: '2.0.11',
-    updatedInSchemaVersion: '2.0.11',
+    artifactVersion: '2.0.15',
+    updatedInSchemaVersion: '2.0.15',
     kind: 'skills_contract',
     recommended: true,
     syncAction: 'overwrite',
@@ -1007,8 +1024,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'SKILL.md'),
     fileName: 'SKILL.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.14',
-    updatedInSchemaVersion: '2.0.14',
+    artifactVersion: '2.0.15',
+    updatedInSchemaVersion: '2.0.15',
     kind: 'skill_package',
     recommended: false,
     syncAction: 'overwrite',
@@ -1020,8 +1037,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-agent-guidelines.md'),
     fileName: 'apts-agent-guidelines.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.14',
-    updatedInSchemaVersion: '2.0.14',
+    artifactVersion: '2.0.15',
+    updatedInSchemaVersion: '2.0.15',
     kind: 'agent_guidelines',
     recommended: true,
     syncAction: 'overwrite',
@@ -1033,8 +1050,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'plantillas-agentes', 'ejecutor-item-backlog-dev-test-commit.agent.md'),
     fileName: 'ejecutor-item-backlog-dev-test-commit.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.0',
-    updatedInSchemaVersion: '2.0.0',
+    artifactVersion: '2.0.15',
+    updatedInSchemaVersion: '2.0.15',
     kind: 'agent_template',
     recommended: false,
     syncAction: 'overwrite',
@@ -1048,8 +1065,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'plantillas-agentes', 'orquestador-backlog-apts.agent.md'),
     fileName: 'orquestador-backlog-apts.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.0',
-    updatedInSchemaVersion: '2.0.0',
+    artifactVersion: '2.0.15',
+    updatedInSchemaVersion: '2.0.15',
     kind: 'agent_template',
     recommended: false,
     syncAction: 'overwrite',
@@ -1270,6 +1287,12 @@ const buildIntegrationManifest = (req) => ({
       mixed_script_forbidden: 'Do not merge, splice, or partially reuse legacy local wrapper code inside downloaded official scripts.',
       migration_rule: 'If legacy wrappers still contain project-specific logic, extract that logic into a thin adapter and keep official scripts unchanged.'
     },
+    task_recovery_policy: {
+      register_task_resume_rule: 'When register_task includes backlog_item_id and the linked backlog item already has an active task in todo, in_progress, or stalled, APTS resumes that task instead of creating a duplicate.',
+      done_transition_rule: 'Task status done is accepted only from review and only when recent execution activity exists (heartbeat or progress log within the freshness window).',
+      blocker_transition_rule: 'report_blocker sets task status to stalled and marks the linked backlog item as blocked.',
+      stale_heartbeat_rule: 'When heartbeat is stale, background monitoring marks in_progress tasks as stalled and marks linked backlog items as blocked.'
+    },
     local_resilience_log: {
       required: true,
       source_of_truth: false,
@@ -1305,6 +1328,7 @@ const buildIntegrationManifest = (req) => ({
       'Create or update a .env file at the client project root with APTS_BASE_URL and APTS_API_KEY before using protected APIs.',
       'Ensure the project has AGENTS.md or .github/copilot-instructions.md. Create AGENTS.md from apts-agent-guidelines.md if neither file exists, or merge/update one APTS-managed section if an instruction file already exists.',
       'Create a workspace-local integration folder such as .ia/apts, place the APTS contract and HTTP client there, and only then wire runtime-specific adapters if needed.',
+      'Treat interrupted execution as resumable work: call register_task with backlog_item_id so APTS can resume existing stalled/todo/in_progress tasks for that backlog item instead of creating duplicates.',
       'Do not merge legacy local wrappers into official APTS scripts; keep official scripts unchanged and move extra project logic to thin adapters when needed.',
       'If the project previously used ad-hoc APTS wrapper scripts for base operations, remove them once the official client or CLI is installed and keep only thin discovery adapters when the runtime still needs them.',
       'Prepare a local append-only resilience journal, for example at .apts/agent-resilience-log.jsonl, without treating it as a source of truth.',
@@ -1343,6 +1367,8 @@ const buildIntegrationManifest = (req) => ({
     'If the runtime supports custom agents, install and use APTS Bugfix Intake as the first entrypoint for chat-triggered defect intake.',
     'Choose the reference client that matches the client project module system: apts-client.js for CommonJS or apts-client.mjs for ESM.',
     'If the runtime prefers shellable command entrypoints over importing JavaScript modules, download the matching CLI as well: apts-cli.js for CommonJS or apts-cli.mjs for ESM, keeping it beside the matching client file.',
+    'Use register_task with backlog_item_id to resume interrupted work for that backlog item before creating additional execution tasks.',
+    'Do not force task status done for interrupted executions: pass through review first and ensure recent heartbeat or progress logs exist before closing as done.',
     'For base APTS operations, use only official scripts published by this manifest and never merge legacy wrapper code into downloaded managed scripts.',
     'After installing the official client or CLI, remove older local APTS wrapper scripts for base operations to avoid drift. Keep only thin runtime-specific discovery adapters when required.',
     'Download the optional agent templates only if your runtime supports custom agents.',
@@ -1438,6 +1464,39 @@ const queueWebhookNotification = async (projectUrl, payload, { deferredWebhooks 
   await notifyWebhook(normalizedProjectUrl, payload);
 };
 
+const parseDateOrNull = (value) => {
+  if (!value) return null;
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+};
+
+const hasRecentTaskActivity = ({ lastHeartbeat, lastLogAt }, now = Date.now()) => {
+  const heartbeatDate = parseDateOrNull(lastHeartbeat);
+  const logDate = parseDateOrNull(lastLogAt);
+
+  const latest = [heartbeatDate, logDate]
+    .filter(Boolean)
+    .reduce((maxDate, candidate) => {
+      if (!maxDate) return candidate;
+      return candidate.getTime() > maxDate.getTime() ? candidate : maxDate;
+    }, null);
+
+  if (!latest) return false;
+  return (now - latest.getTime()) <= TASK_ACTIVITY_FRESHNESS_MS;
+};
+
+const ensureTaskStatusTransition = (currentStatus, nextStatus) => {
+  if (currentStatus === nextStatus) {
+    return;
+  }
+
+  const allowedTransitions = TASK_STATUS_TRANSITIONS[currentStatus];
+  if (!allowedTransitions || !allowedTransitions.has(nextStatus)) {
+    throw createHttpError(409, `Invalid task status transition from ${currentStatus} to ${nextStatus}`);
+  }
+};
+
 const registerTaskInternal = async (payload, { connection = db } = {}) => {
   const {
     project_url: projectUrl,
@@ -1462,6 +1521,40 @@ const registerTaskInternal = async (payload, { connection = db } = {}) => {
     if (!linkedBacklogItem) {
       throw createHttpError(400, 'Backlog item id is not valid for project url');
     }
+
+    if (linkedBacklogItem.active_task_id) {
+      const activeTask = await connection('tasks')
+        .where({ id: linkedBacklogItem.active_task_id, project_url: url })
+        .first();
+
+      if (activeTask && TASK_RESUMABLE_STATUSES.has(activeTask.status)) {
+        const previousStatus = activeTask.status;
+
+        await connection('tasks')
+          .where({ id: activeTask.id })
+          .update({
+            status: 'in_progress',
+            last_heartbeat: connection.fn.now(),
+            updated_at: connection.fn.now()
+          });
+
+        await connection('backlog_items')
+          .where({ id: backlogItemId, project_url: url })
+          .update({
+            status: 'in_progress',
+            active_task_id: activeTask.id,
+            updated_at: connection.fn.now()
+          });
+
+        return {
+          task_id: activeTask.id,
+          status: 'in_progress',
+          backlog_item_id: backlogItemId,
+          resumed: true,
+          previous_status: previousStatus
+        };
+      }
+    }
   }
 
   await ensureProjectExists(url, { connection });
@@ -1472,7 +1565,8 @@ const registerTaskInternal = async (payload, { connection = db } = {}) => {
     agent_name: agentName || null,
     agent_email: agentEmail || null,
     context: context ?? null,
-    status: 'in_progress'
+    status: 'in_progress',
+    last_heartbeat: connection.fn.now()
   }).returning('*');
 
   if (backlogItemId) {
@@ -1485,7 +1579,13 @@ const registerTaskInternal = async (payload, { connection = db } = {}) => {
       });
   }
 
-  return { task_id: task.id, status: task.status, backlog_item_id: backlogItemId || null };
+  return {
+    task_id: task.id,
+    status: task.status,
+    backlog_item_id: backlogItemId || null,
+    resumed: false,
+    previous_status: null
+  };
 };
 
 const createBacklogItemInternal = async (body, { connection = db } = {}) => {
@@ -1574,7 +1674,36 @@ const updateTaskStatusInternal = async (taskId, payload, { connection = db, defe
     throw createHttpError(404, 'Task not found');
   }
 
-  await connection('tasks').where({ id: taskId }).update({ status });
+  if (task.status !== status) {
+    ensureTaskStatusTransition(task.status, status);
+
+    if (status === 'done') {
+      const latestLog = await connection('agent_logs')
+        .where({ task_id: taskId })
+        .orderBy('created_at', 'desc')
+        .first('created_at');
+
+      const hasRecentActivity = hasRecentTaskActivity({
+        lastHeartbeat: task.last_heartbeat,
+        lastLogAt: latestLog?.created_at
+      });
+
+      if (!hasRecentActivity) {
+        throw createHttpError(409, 'Cannot mark task as done without recent execution activity. Resume task and send heartbeat or log_agent_progress first.');
+      }
+    }
+
+    const taskUpdate = {
+      status,
+      updated_at: connection.fn.now()
+    };
+
+    if (status === 'in_progress') {
+      taskUpdate.last_heartbeat = connection.fn.now();
+    }
+
+    await connection('tasks').where({ id: taskId }).update(taskUpdate);
+  }
 
   const linkedBacklogStatus = mapTaskStatusToBacklogStatus(status);
   if (linkedBacklogStatus) {
@@ -1655,6 +1784,10 @@ const reportBlockerInternal = async (payload, { connection = db, deferredWebhook
   if (!task) {
     throw createHttpError(404, 'Task not found');
   }
+
+  await connection('tasks')
+    .where({ id: taskId })
+    .update({ status: 'stalled', updated_at: connection.fn.now() });
 
   await connection('projects').where({ url }).update({ status: 'blocked' });
   await connection('backlog_items')
@@ -2487,10 +2620,22 @@ const startBackgroundJobs = () => {
   setInterval(async () => {
     try {
       const fifteenMinsAgo = new Date(Date.now() - 15 * 60 * 1000);
-      const updated = await db('tasks')
+      const staleTaskIds = await db('tasks')
         .where('status', 'in_progress')
         .andWhere('last_heartbeat', '<', fifteenMinsAgo)
-        .update({ status: 'stalled' });
+        .pluck('id');
+
+      if (staleTaskIds.length === 0) {
+        return;
+      }
+
+      const updated = await db('tasks')
+        .whereIn('id', staleTaskIds)
+        .update({ status: 'stalled', updated_at: db.fn.now() });
+
+      await db('backlog_items')
+        .whereIn('active_task_id', staleTaskIds)
+        .update({ status: 'blocked', updated_at: db.fn.now() });
 
       if (updated > 0) {
         logger.warn({ updated }, 'Job marked tasks as stalled');

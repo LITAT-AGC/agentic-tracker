@@ -35,6 +35,12 @@ Run a linear execution cycle over APTS backlog, one item at a time:
 - Only take items with status `ready` unless the user explicitly asks to retry `blocked` or `review` items.
 - Do not skip order without an explicit user instruction.
 
+## Interrupted Execution Recovery Rule
+- Before creating a new execution task, inspect `read_project_context` for interrupted work (`stalled` tasks or backlog items that still point to an active interrupted task).
+- If interrupted work exists for the selected backlog item, resume it first instead of creating a duplicate execution task.
+- Use `register_task` with the same `backlog_item_id`; APTS will resume the existing task when it is in `todo`, `in_progress`, or `stalled`.
+- Do not force a parallel second task for the same backlog item while interrupted work is resumable.
+
 ## Task Creation Rule
 For each selected backlog item:
 1. Resolve `project_url`, `agent_name`, `agent_email`, `branch` from Git.
@@ -61,9 +67,10 @@ Treat a subagent result as success only when all are true:
 3. COMMIT is a real hash and not `N/A`
 
 If successful:
-1. Ensure the execution task is marked `review` or `done` in APTS if the worker did not already do it.
-2. Log one orchestration summary to APTS.
-3. Continue with the next ready backlog item.
+1. Never force `done` from the orchestrator.
+2. If the worker did not close the task explicitly, use `review` as the fallback close status.
+3. Log one orchestration summary to APTS.
+4. Continue with the next ready backlog item.
 
 ## Failure Rule
 If the subagent returns `BLOCKED` or validations fail:

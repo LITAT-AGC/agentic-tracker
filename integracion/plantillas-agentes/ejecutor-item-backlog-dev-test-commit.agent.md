@@ -33,12 +33,12 @@ The orchestrator should pass at least:
   - `agent_name` from `git config user.name`
   - `agent_email` from `git config user.email`
   - `branch` from `git branch --show-current`
-- If `task_id` is missing, create it with `register_task` and include `backlog_item_id`.
+- Call `register_task` with `backlog_item_id` before editing; treat its response as create-or-resume and always continue with the returned `task_id`.
 - Before editing code, call `read_project_context`.
 - Send `log_agent_progress` at meaningful milestones.
 - Send `heartbeat` while executing longer tasks.
 - If blocked, use `report_blocker` before returning `BLOCKED`.
-- If successful, use `update_task_status` with `review` or `done` depending on the repository policy.
+- If successful, close with `review` first. Move to `done` only after review policy passes and with recent execution activity (heartbeat or progress log) still present.
 - Invoke APTS operations with contract-first JSON object payloads (for example `{"task_id":"...","status":"in_progress",...}`) to avoid parameter-shape confusion.
 
 ## APTS Retry Policy (anti-loop)

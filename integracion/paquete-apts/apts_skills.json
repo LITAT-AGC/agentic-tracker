@@ -2,7 +2,7 @@
   "skills": [
     {
       "name": "register_task",
-      "description": "Create a new task in the project. Necessary when an agent starts from scratch and doesn't have a task_id, after the relevant backlog item is already identified or created when applicable.",
+      "description": "Create or resume a task in the project. When backlog_item_id points to an active task in todo, in_progress, or stalled, APTS resumes that task instead of creating a duplicate.",
       "parameters": {
         "oneOf": [
           {
@@ -418,7 +418,7 @@
     },
     {
       "name": "update_task_status",
-      "description": "Update the status of a task.",
+      "description": "Update the status of a task. Use strict transitions: close with review first, then done only from review and with recent execution activity.",
       "parameters": {
         "oneOf": [
           {
