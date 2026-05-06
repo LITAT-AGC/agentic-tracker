@@ -98,3 +98,114 @@ Mandatory rules:
 	- Retry only on network errors, `429`, and `5xx`, with at most 2 retries and short backoff.
 	- If still failing after retries, report blocker and stop instead of attempting unbounded payload variations.
 ```
+
+## Operational Quick Reference
+
+Use `integracion/paquete-apts/apts_skills.json` as the formal contract and `integracion/paquete-apts/references/api-contract.md` as the human-readable source of truth.
+
+### Common Required Fields
+
+| Field | Required by |
+| --- | --- |
+| `project_url` | `register_task`, `create_backlog_item`, `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` |
+| `url` | `read_project_context`, `list_backlog_items` |
+| `agent_name` | `register_task`, `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` |
+| `agent_email` | `register_task`, `update_task_status` |
+| `branch` | `log_agent_progress` |
+| `task_id` | `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` |
+| `backlog_item_id` | `register_task` when executing tracked work, `update_backlog_item`, `delete_backlog_item` |
+
+### Reuse Or Create Backlog Item
+
+- Reuse an item only when an active backlog item already describes exactly the same scope.
+- If no active item matches exactly, create a new backlog item before execution.
+- For new bug, error, or regression requests from chat, look for an existing non-deleted `bug` item first, then create one only if no matching item exists.
+- For small chores such as documentation adjustments, follow the same exact-scope rule instead of guessing based on size alone.
+
+### Happy Path
+
+1. Resolve `project_url`, `agent_name`, `agent_email`, and `branch` from Git.
+2. Call `list_backlog_items` and choose to reuse or create an item.
+3. Call `register_task` and keep the returned `task_id`.
+4. Call `read_project_context` before editing.
+5. Call `heartbeat` while the task is active.
+6. Call `log_agent_progress` on meaningful milestones.
+7. If blocked, call `report_blocker` and stop.
+8. Finish with `update_task_status` to `review`, then `done` only after review and recent activity.
+
+### Minimum Payloads
+
+```json
+{
+	"create_backlog_item": {
+		"project_url": "https://github.com/org/repo",
+		"title": "Document APTS command payloads"
+	},
+	"register_task": {
+		"project_url": "https://github.com/org/repo",
+		"title": "Document APTS command payloads",
+		"agent_name": "Copilot",
+		"agent_email": "copilot@example.com"
+	},
+	"read_project_context": {
+		"url": "https://github.com/org/repo",
+		"limit": 5
+	},
+	"heartbeat": {
+		"task_id": "22222222-2222-2222-2222-222222222222",
+		"agent_name": "Copilot",
+		"project_url": "https://github.com/org/repo"
+	},
+	"log_agent_progress": {
+		"task_id": "22222222-2222-2222-2222-222222222222",
+		"project_url": "https://github.com/org/repo",
+		"agent_name": "Copilot",
+		"branch": "main",
+		"message": "Updated APTS docs with explicit payload examples."
+	},
+	"update_task_status": {
+		"task_id": "22222222-2222-2222-2222-222222222222",
+		"status": "review",
+		"project_url": "https://github.com/org/repo",
+		"agent_name": "Copilot",
+		"agent_email": "copilot@example.com"
+	}
+}
+```
+
+### PowerShell Examples
+
+```powershell
+$heartbeat = @'
+{
+	"task_id": "22222222-2222-2222-2222-222222222222",
+	"agent_name": "Copilot",
+	"project_url": "https://github.com/org/repo"
+}
+'@
+
+$heartbeat | node .ia/apts/apts-cli.mjs heartbeat --stdin --pretty
+```
+
+```powershell
+@'
+{
+	"project_url": "https://github.com/org/repo",
+	"title": "Document APTS command payloads",
+	"agent_name": "Copilot",
+	"agent_email": "copilot@example.com"
+}
+'@ | Set-Content -Path register-task.json
+
+Get-Content .\register-task.json | node .ia/apts/apts-cli.mjs register-task --stdin --pretty
+```
+
+### Frequent Errors
+
+| Error | Meaning | Retry |
+| --- | --- | --- |
+| `INVALID_ARGUMENT` | Missing required field, invalid enum, invalid UUID, or malformed JSON. | No. Fix payload first. |
+| `401` / `403` | Missing or invalid API key. | No. Fix auth first. |
+| `404` | Wrong resource id or route. | No, unless the reference is stale and can be refreshed deterministically. |
+| `429` | Rate limited. | Yes, up to 2 retries with short backoff. |
+| Network error / `5xx` | Temporary server or connectivity failure. | Yes, up to 2 retries with short backoff. |

@@ -770,10 +770,18 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.15';
+const integrationManifestSchemaVersion = '2.0.16';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.16',
+    date: '2026-05-06',
+    changes: [
+      'Public APTS integration guidance now publishes explicit minimum payload fields, a short common-fields table, and a full happy-path sequence for the core commands.',
+      'Official CLI help for CommonJS and ESM now shows per-command required fields and copy-ready examples, including Windows PowerShell-friendly usage patterns.'
+    ]
+  },
   {
     version: '2.0.15',
     date: '2026-04-29',
@@ -1011,8 +1019,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts_skills.json'),
     fileName: 'apts_skills.json',
     contentType: 'application/json; charset=utf-8',
-    artifactVersion: '2.0.15',
-    updatedInSchemaVersion: '2.0.15',
+    artifactVersion: '2.0.16',
+    updatedInSchemaVersion: '2.0.16',
     kind: 'skills_contract',
     recommended: true,
     syncAction: 'overwrite',
@@ -1024,8 +1032,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'SKILL.md'),
     fileName: 'SKILL.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.15',
-    updatedInSchemaVersion: '2.0.15',
+    artifactVersion: '2.0.16',
+    updatedInSchemaVersion: '2.0.16',
     kind: 'skill_package',
     recommended: false,
     syncAction: 'overwrite',
@@ -1126,8 +1134,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-cli.js'),
     fileName: 'apts-cli.js',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.0.9',
-    updatedInSchemaVersion: '2.0.9',
+    artifactVersion: '2.0.16',
+    updatedInSchemaVersion: '2.0.16',
     kind: 'reference_cli',
     recommended: false,
     optional: true,
@@ -1143,8 +1151,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-cli.mjs'),
     fileName: 'apts-cli.mjs',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.0.9',
-    updatedInSchemaVersion: '2.0.9',
+    artifactVersion: '2.0.16',
+    updatedInSchemaVersion: '2.0.16',
     kind: 'reference_cli',
     recommended: false,
     optional: true,

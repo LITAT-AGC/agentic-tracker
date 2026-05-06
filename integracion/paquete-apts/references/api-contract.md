@@ -22,6 +22,25 @@ agent_email=$(git config user.email)
 branch=$(git branch --show-current)
 ```
 
+## Campos comunes obligatorios
+
+| Campo | Operaciones |
+| --- | --- |
+| `project_url` | `register_task`, `create_backlog_item`, `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` |
+| `url` | `read_project_context`, `list_backlog_items` |
+| `agent_name` | `register_task`, `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` |
+| `agent_email` | `register_task`, `update_task_status` |
+| `branch` | `log_agent_progress` |
+| `task_id` | `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` |
+| `backlog_item_id` | `register_task` cuando se enlaza ejecucion a backlog, `update_backlog_item`, `delete_backlog_item` |
+
+## Regla explicita para crear o reutilizar backlog
+
+- Si no hay un backlog item activo que describa exactamente el cambio actual, crear uno nuevo.
+- Si ya existe un item activo que cubre exactamente el mismo alcance, reutilizarlo.
+- Para bugs, errores o regresiones reportadas por chat, primero buscar un item `bug` no eliminado equivalente.
+- Para chores pequenos, reutilizar solo cuando el item activo ya cubra exactamente ese ajuste documental o de mantenimiento.
+
 ## Endpoints
 
 ### Modo batch (nuevo)
@@ -37,6 +56,7 @@ branch=$(git branch --show-current)
 - Ruta: `/projects/tasks`
 - Body: objeto unico o array de objetos `register_task`
 - Comportamiento de reanudacion: cuando se envia `backlog_item_id` y ese backlog item ya tiene una `active_task_id` en estado `todo`, `in_progress` o `stalled`, APTS reanuda esa tarea en lugar de crear una duplicada.
+- Payload obligatorio: `project_url`, `title`, `agent_name`, `agent_email`
 - Body minimo:
 
 ```json
@@ -52,14 +72,35 @@ branch=$(git branch --show-current)
 
 - Metodo: `GET`
 - Ruta: `/projects/context?url=<project_url>&limit=5`
+- Query minima: `url`
+
+Ejemplo:
+
+```json
+{
+  "url": "https://github.com/org/repo",
+  "limit": 5,
+  "backlog_status": "in_progress"
+}
+```
 
 ### 2b. list_backlog_items
 
 - Metodo: `GET`
 - Ruta base: `/projects/backlog?url=<project_url>`
+- Query minima: `url`
 - Query params opcionales:
   - `status=<draft|needs_details|ready|in_progress|review|blocked|done|archived>`
   - `include_deleted=true` para incluir items eliminados por soft-delete
+
+Ejemplo:
+
+```json
+{
+  "url": "https://github.com/org/repo",
+  "status": "ready"
+}
+```
 
 ### 2c. create_backlog_item
 
@@ -68,6 +109,7 @@ branch=$(git branch --show-current)
 - Body: objeto unico o array de objetos `create_backlog_item`
 - Intake recomendado para bugs desde chat: si la solicitud actual describe un bug, error o regresion nueva, primero listar backlog para buscar un item `bug` existente; si no existe, crear uno con `item_type: "bug"`, documentar sintoma, comportamiento esperado, comportamiento observado y evidencia disponible, y usar `source_kind: "chat_request"` con `source_ref` cuando el runtime exponga un identificador estable.
 - Si el runtime soporta agentes custom y esta instalada la plantilla `APTS Bugfix Intake`, usarla como entrypoint para este paso de intake antes de pasar a implementacion.
+- Payload obligatorio: `project_url`, `title`
 - Body minimo:
 
 ```json
@@ -83,6 +125,16 @@ branch=$(git branch --show-current)
 - Ruta single: `/backlog/:id`
 - Ruta batch: `/backlog`
 - Body batch: objetos con `backlog_item_id` y campos a actualizar.
+- Payload obligatorio: `backlog_item_id`
+
+Ejemplo:
+
+```json
+{
+  "backlog_item_id": "11111111-1111-1111-1111-111111111111",
+  "status": "review"
+}
+```
 
 ### 2e. delete_backlog_item (soft-delete)
 
@@ -91,6 +143,7 @@ branch=$(git branch --show-current)
 - Ruta batch: `/backlog`
 - Body batch: objetos con `backlog_item_id`.
 - Comportamiento: marca el item como eliminado logicamente. Por defecto no aparece en listados salvo que se pida `include_deleted=true`.
+- Payload obligatorio: `backlog_item_id`
 
 ### 3. update_task_status
 
@@ -100,6 +153,19 @@ branch=$(git branch --show-current)
 - Estados soportados: `todo`, `in_progress`, `review`, `done`, `stalled`
 - Regla de transicion: `done` solo se acepta desde `review`.
 - Regla de cierre robusto: para pasar a `done` debe existir actividad reciente de ejecucion (heartbeat o log de progreso reciente).
+- Payload obligatorio: `task_id`, `status`, `project_url`, `agent_name`, `agent_email`
+
+Ejemplo:
+
+```json
+{
+  "task_id": "22222222-2222-2222-2222-222222222222",
+  "status": "review",
+  "project_url": "https://github.com/org/repo",
+  "agent_name": "Copilot",
+  "agent_email": "copilot@example.com"
+}
+```
 
 ### 4. log_agent_progress
 
@@ -107,30 +173,105 @@ branch=$(git branch --show-current)
 - Ruta single: `/tasks/:id/logs`
 - Ruta batch: `/tasks/logs`
 - `technical_details` puede incluir `files_modified`, `commands_run` y `outcome`
+- Payload obligatorio: `task_id`, `project_url`, `agent_name`, `branch`, `message`
+
+Ejemplo:
+
+```json
+{
+  "task_id": "22222222-2222-2222-2222-222222222222",
+  "project_url": "https://github.com/org/repo",
+  "agent_name": "Copilot",
+  "branch": "main",
+  "message": "Se agregaron ejemplos listos para copiar.",
+  "technical_details": {
+    "files_modified": [
+      "README.md"
+    ],
+    "commands_run": [
+      "node .ia/apts/apts-cli.mjs help heartbeat"
+    ],
+    "outcome": "success"
+  }
+}
+```
 
 ### 5. report_blocker
 
 - Metodo: `POST`
 - Ruta: `/projects/blockers`
 - Body: objeto unico o array de objetos `report_blocker`
+- Payload obligatorio: `project_url`, `task_id`, `error_message`, `agent_name`
+
+Ejemplo:
+
+```json
+{
+  "project_url": "https://github.com/org/repo",
+  "task_id": "22222222-2222-2222-2222-222222222222",
+  "error_message": "No puedo continuar hasta recibir APTS_API_KEY.",
+  "agent_name": "Copilot"
+}
+```
 
 ### 6. heartbeat
 
 - Metodo: `POST`
 - Ruta single: `/tasks/:id/heartbeat`
 - Ruta batch: `/tasks/heartbeat`
+- Payload obligatorio: `task_id`, `agent_name`, `project_url`
+
+Ejemplo:
+
+```json
+{
+  "task_id": "22222222-2222-2222-2222-222222222222",
+  "agent_name": "Copilot",
+  "project_url": "https://github.com/org/repo"
+}
+```
 
 ## Flujo operativo recomendado
 
 1. Resolver identidad desde Git.
-2. Leer contexto y backlog del proyecto.
+2. Listar backlog y decidir si reutilizar item existente o crear uno nuevo usando la regla de alcance exacto.
 3. Si la solicitud actual es un bugfix, error o regresion reportada por chat, verificar si ya existe un backlog item `bug` equivalente y reutilizarlo cuando corresponda.
 4. Crear o actualizar backlog en APTS (incluyendo soft-delete cuando corresponda). Para defectos nuevos, crear primero el item `bug` antes de implementar.
 5. Crear o reanudar tarea con `register_task` usando `backlog_item_id` cuando aplique.
-6. Reportar progreso en cada hito importante.
-7. Enviar heartbeat mientras la tarea siga activa.
-8. Reportar blocker si el agente queda detenido.
-9. Cerrar primero en `review`; pasar a `done` solo desde `review` y con actividad reciente de ejecucion.
+6. Leer `read_project_context` antes de editar.
+7. Reportar progreso en cada hito importante.
+8. Enviar heartbeat mientras la tarea siga activa.
+9. Reportar blocker si el agente queda detenido.
+10. Cerrar primero en `review`; pasar a `done` solo desde `review` y con actividad reciente de ejecucion.
+
+## Ejemplos PowerShell
+
+Usar here-strings o archivos temporales evita friccion por quoting inline en Windows.
+
+```powershell
+$heartbeat = @'
+{
+  "task_id": "22222222-2222-2222-2222-222222222222",
+  "agent_name": "Copilot",
+  "project_url": "https://github.com/org/repo"
+}
+'@
+
+$heartbeat | node .ia/apts/apts-cli.mjs heartbeat --stdin --pretty
+```
+
+```powershell
+@'
+{
+  "project_url": "https://github.com/org/repo",
+  "title": "Documentar payloads minimos de APTS",
+  "agent_name": "Copilot",
+  "agent_email": "copilot@example.com"
+}
+'@ | Set-Content -Path register-task.json
+
+Get-Content .\register-task.json | node .ia/apts/apts-cli.mjs register-task --stdin --pretty
+```
 
 ## Politica anti-loop de reintentos
 
@@ -138,6 +279,16 @@ branch=$(git branch --show-current)
 - Reintentar solo ante errores de red, `429` y `5xx`.
 - Limitar a 2 reintentos por operacion.
 - Si tras los reintentos sigue fallando, reportar blocker y detener ejecucion.
+
+## Errores frecuentes
+
+| Error | Significado | Revisar primero | Reintentar |
+| --- | --- | --- | --- |
+| `INVALID_ARGUMENT` | Falta campo obligatorio, enum invalido, UUID invalido o JSON mal formado. | Comparar payload contra `apts_skills.json`. | No. |
+| `401` / `403` | API key ausente o invalida. | `APTS_API_KEY` y cabecera bearer. | No. |
+| `404` | Ruta o recurso no encontrado. | `task_id`, `backlog_item_id` y base URL. | No, salvo referencia stale verificable. |
+| `429` | Rate limit. | Frecuencia y politica de backoff. | Si, hasta 2 veces. |
+| Error de red / `5xx` | Falla temporal de servicio o conectividad. | Reachability y estado de APTS. | Si, hasta 2 veces. |
 
 ## Regla de invocacion del cliente oficial
 

@@ -83,6 +83,71 @@ const COMMANDS = {
   },
 };
 
+const COMMAND_HELP_DETAILS = {
+  'register-task': {
+    requiredFields: ['project_url', 'title', 'agent_name', 'agent_email'],
+    examples: [
+      "node .ia/apts/apts-cli.mjs register-task --json '{\"project_url\":\"https://github.com/org/repo\",\"title\":\"Implement feature\",\"agent_name\":\"Copilot\",\"agent_email\":\"copilot@example.com\"}'",
+      'Get-Content register-task.json | node .ia/apts/apts-cli.mjs register-task --stdin --pretty',
+    ],
+  },
+  'read-project-context': {
+    requiredFields: ['url'],
+    examples: [
+      "node .ia/apts/apts-cli.mjs read-project-context --json '{\"url\":\"https://github.com/org/repo\",\"limit\":5}'",
+    ],
+  },
+  'list-backlog-items': {
+    requiredFields: ['url'],
+    examples: [
+      "node .ia/apts/apts-cli.mjs list-backlog-items --json '{\"url\":\"https://github.com/org/repo\",\"status\":\"ready\"}'",
+    ],
+  },
+  'create-backlog-item': {
+    requiredFields: ['project_url', 'title'],
+    examples: [
+      "node .ia/apts/apts-cli.mjs create-backlog-item --json '{\"project_url\":\"https://github.com/org/repo\",\"title\":\"Document APTS examples\"}'",
+    ],
+  },
+  'update-backlog-item': {
+    requiredFields: ['backlog_item_id'],
+    examples: [
+      "node .ia/apts/apts-cli.mjs update-backlog-item --json '{\"backlog_item_id\":\"11111111-1111-1111-1111-111111111111\",\"status\":\"review\"}'",
+    ],
+  },
+  'delete-backlog-item': {
+    requiredFields: ['backlog_item_id'],
+    examples: [
+      "node .ia/apts/apts-cli.mjs delete-backlog-item --json '{\"backlog_item_id\":\"11111111-1111-1111-1111-111111111111\"}'",
+    ],
+  },
+  'update-task-status': {
+    requiredFields: ['task_id', 'status', 'project_url', 'agent_name', 'agent_email'],
+    examples: [
+      "node .ia/apts/apts-cli.mjs update-task-status --json '{\"task_id\":\"22222222-2222-2222-2222-222222222222\",\"status\":\"review\",\"project_url\":\"https://github.com/org/repo\",\"agent_name\":\"Copilot\",\"agent_email\":\"copilot@example.com\"}'",
+    ],
+  },
+  'log-agent-progress': {
+    requiredFields: ['task_id', 'project_url', 'agent_name', 'branch', 'message'],
+    examples: [
+      "node .ia/apts/apts-cli.mjs log-agent-progress --json '{\"task_id\":\"22222222-2222-2222-2222-222222222222\",\"project_url\":\"https://github.com/org/repo\",\"agent_name\":\"Copilot\",\"branch\":\"main\",\"message\":\"Checkpoint\"}'",
+    ],
+  },
+  'report-blocker': {
+    requiredFields: ['project_url', 'task_id', 'error_message', 'agent_name'],
+    examples: [
+      "node .ia/apts/apts-cli.mjs report-blocker --json '{\"project_url\":\"https://github.com/org/repo\",\"task_id\":\"22222222-2222-2222-2222-222222222222\",\"error_message\":\"Tests are blocked by missing fixture\",\"agent_name\":\"Copilot\"}'",
+    ],
+  },
+  heartbeat: {
+    requiredFields: ['task_id', 'agent_name', 'project_url'],
+    examples: [
+      "node .ia/apts/apts-cli.mjs heartbeat --json '{\"task_id\":\"22222222-2222-2222-2222-222222222222\",\"agent_name\":\"Copilot\",\"project_url\":\"https://github.com/org/repo\"}'",
+      'Get-Content heartbeat.json | node .ia/apts/apts-cli.mjs heartbeat --stdin --pretty',
+    ],
+  },
+};
+
 function canonicalizeCommandName(value) {
   return String(value || '').trim().toLowerCase().replace(/_/g, '-');
 }
@@ -174,12 +239,14 @@ function buildHelp(commandName) {
   }
 
   if (command) {
+    const details = COMMAND_HELP_DETAILS[normalized];
     return [
       `APTS CLI`,
       '',
       `${normalized}: ${command.description}`,
       '',
       `Usage: ${command.usage}`,
+      ...(details ? ['', `Minimum payload fields: ${details.requiredFields.join(', ')}`] : []),
       '',
       'Flags:',
       '  --json <payload>     Inline JSON payload matching the contract-first shape.',
@@ -188,6 +255,7 @@ function buildHelp(commandName) {
       '  --cwd <path>         Resolve .env and Git identity from a different working directory.',
       '  --pretty             Pretty-print JSON output.',
       '  --help               Show this help.',
+      ...(details ? ['', 'Examples:', ...details.examples.map((example) => `  ${example}`)] : []),
     ].join('\n');
   }
 
@@ -213,6 +281,8 @@ function buildHelp(commandName) {
     '  --json <payload>     Inline JSON payload matching the contract-first shape.',
     '  --stdin              Read the JSON payload from stdin.',
     '  --options <json>     Optional JSON options for batch strict mode.',
+    '',
+    'Run `apts-cli help <command>` to see minimum required fields and copy-ready examples for that operation.',
     '',
     'Examples:',
     '  node .ia/apts/apts-cli.mjs resolve-git-identity --cwd .',

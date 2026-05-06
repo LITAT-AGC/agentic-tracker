@@ -281,6 +281,116 @@ Para el cliente HTTP exportable:
 
 Importante: ambos scripts deben mantenerse sincronizados. Si APTS cambia endpoints, payloads, helpers o manejo de errores del cliente, el ajuste debe replicarse en `integracion/paquete-apts/apts-client.js` y en `integracion/paquete-apts/apts-client.mjs`.
 
+### Contrato operativo minimo
+
+La fuente formal para parametros y tipos vive en `integracion/paquete-apts/apts_skills.json`. La referencia humana detallada vive en `integracion/paquete-apts/references/api-contract.md`.
+
+Campos obligatorios mas comunes:
+
+| Campo | Lo usan |
+| --- | --- |
+| `project_url` | `register_task`, `create_backlog_item`, `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` |
+| `url` | `read_project_context`, `list_backlog_items` |
+| `agent_name` | `register_task`, `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` |
+| `agent_email` | `register_task`, `update_task_status` |
+| `branch` | `log_agent_progress` |
+| `task_id` | `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` |
+| `backlog_item_id` | `register_task` cuando ejecuta un item trazado, `update_backlog_item`, `delete_backlog_item` |
+
+Regla de backlog:
+
+- Si no existe un backlog item activo que describa exactamente el cambio a realizar, crear uno nuevo.
+- Si existe uno activo que ya cubre exactamente ese alcance, reutilizarlo.
+- Para bugs, errores o regresiones reportadas por chat, buscar primero un `bug` no eliminado y crear uno solo si no hay coincidencia.
+- Para chores pequenos, aplicar la misma regla exacta en lugar de decidir solo por tamano.
+
+Happy path operativo:
+
+1. Resolver `project_url`, `agent_name`, `agent_email` y `branch` desde Git.
+2. Llamar `list_backlog_items` y decidir si reutilizas o creas item.
+3. Llamar `register_task` y conservar `task_id`.
+4. Llamar `read_project_context` antes de editar.
+5. Mientras trabajas, alternar `heartbeat` y `log_agent_progress`.
+6. Si quedas bloqueado, usar `report_blocker` y detenerte.
+7. Cerrar con `update_task_status` a `review` primero y a `done` solo despues de review y actividad reciente.
+
+Payloads minimos listos para copiar:
+
+```json
+{
+  "create_backlog_item": {
+    "project_url": "https://github.com/org/repo",
+    "title": "Documentar payloads minimos de APTS"
+  },
+  "register_task": {
+    "project_url": "https://github.com/org/repo",
+    "title": "Documentar payloads minimos de APTS",
+    "agent_name": "Copilot",
+    "agent_email": "copilot@example.com"
+  },
+  "read_project_context": {
+    "url": "https://github.com/org/repo",
+    "limit": 5
+  },
+  "heartbeat": {
+    "task_id": "22222222-2222-2222-2222-222222222222",
+    "agent_name": "Copilot",
+    "project_url": "https://github.com/org/repo"
+  },
+  "log_agent_progress": {
+    "task_id": "22222222-2222-2222-2222-222222222222",
+    "project_url": "https://github.com/org/repo",
+    "agent_name": "Copilot",
+    "branch": "main",
+    "message": "Se documentaron ejemplos listos para copiar."
+  },
+  "update_task_status": {
+    "task_id": "22222222-2222-2222-2222-222222222222",
+    "status": "review",
+    "project_url": "https://github.com/org/repo",
+    "agent_name": "Copilot",
+    "agent_email": "copilot@example.com"
+  }
+}
+```
+
+Ejemplos PowerShell seguros:
+
+```powershell
+$payload = @'
+{
+  "task_id": "22222222-2222-2222-2222-222222222222",
+  "agent_name": "Copilot",
+  "project_url": "https://github.com/org/repo"
+}
+'@
+
+$payload | node .ia/apts/apts-cli.mjs heartbeat --stdin --pretty
+```
+
+```powershell
+@'
+{
+  "project_url": "https://github.com/org/repo",
+  "title": "Documentar payloads minimos de APTS",
+  "agent_name": "Copilot",
+  "agent_email": "copilot@example.com"
+}
+'@ | Set-Content -Path register-task.json
+
+Get-Content .\register-task.json | node .ia/apts/apts-cli.mjs register-task --stdin --pretty
+```
+
+Errores frecuentes:
+
+| Error | Que suele significar | Que revisar primero | Reintentar |
+| --- | --- | --- | --- |
+| `INVALID_ARGUMENT` | Falta un campo obligatorio, UUID invalido, enum invalido o JSON mal formado. | Payload contra `apts_skills.json`. | No. |
+| `401` / `403` | API key ausente o invalida. | `APTS_API_KEY` y cabecera bearer. | No. |
+| `404` | Ruta o recurso incorrecto. | `task_id`, `backlog_item_id` y `APTS_BASE_URL`. | No, salvo stale id verificable. |
+| `429` | Rate limit. | Politica de reintentos y frecuencia. | Si, maximo 2 veces. |
+| Error de red / `5xx` | Falla temporal del servicio o conectividad. | Reachability y salud de APTS. | Si, maximo 2 veces. |
+
 #### Opcion A: tu runtime soporta esquemas JSON o function calling
 
 1. Copia `integracion/paquete-apts/apts_skills.json` a tu proyecto integrador, por ejemplo en `tools/apts_skills.json`.
