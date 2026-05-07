@@ -4,7 +4,10 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "migrate:test": "knex --env test migrate:latest",
+    "start:test": "node scripts/start_test_server.js",
+    "migrate:sqlite-legacy-to-pg": "node scripts/migrate_sqlite_legacy_to_postgres.js"
   },
   "keywords": [],
   "author": "",

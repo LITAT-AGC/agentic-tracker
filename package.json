@@ -7,6 +7,8 @@
     "dev:backend": "cd backend && node index.js",
     "dev:frontend": "cd frontend && npm run dev",
     "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install",
+    "test:e2e:prepare": "cd backend && npm run migrate:test",
+    "test:e2e:backend": "cd backend && npm run start:test",
     "test:api:batch": "node scripts/test_agent_api_batch.js"
   },
   "devDependencies": {

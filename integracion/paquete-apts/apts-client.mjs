@@ -20,6 +20,7 @@ const AUTO_FILL_FIELDS_BY_OPERATION = {
   register_task: ['project_url', 'agent_name', 'agent_email'],
   read_project_context: ['url'],
   list_backlog_items: ['url'],
+  search_similar_bug_reports: ['url'],
   create_backlog_item: ['project_url'],
   update_task_status: ['task_id', 'project_url', 'agent_name', 'agent_email'],
   log_agent_progress: ['task_id', 'project_url', 'agent_name', 'branch'],
@@ -339,6 +340,27 @@ function optionalInteger(payload, field, operationName) {
       operation: operationName,
       field,
       expected: 'integer',
+      received: original,
+    });
+  }
+
+  return value;
+}
+
+function optionalNumber(payload, field, operationName) {
+  const original = payload[field];
+  if (original === undefined) return undefined;
+
+  let value = original;
+  if (typeof value === 'string' && value.trim()) {
+    value = Number(value.trim());
+  }
+
+  if (!Number.isFinite(value)) {
+    throw invalidArgument(`${operationName} expects '${field}' to be a number`, {
+      operation: operationName,
+      field,
+      expected: 'number',
       received: original,
     });
   }
@@ -702,6 +724,41 @@ function validateListBacklogItemsInput(urlOrOptions, statusOrOptions = null) {
   };
 }
 
+function validateSemanticBugSearchInput(payload) {
+  const operation = 'search_similar_bug_reports';
+  const preparedPayload = prepareOperationPayload(payload, operation, ['url']);
+  assertPayloadObject(preparedPayload, operation);
+
+  const topK = optionalInteger(preparedPayload, 'top_k', operation);
+  if (topK !== undefined && (topK < 1 || topK > 20)) {
+    throw invalidArgument(`${operation} expects 'top_k' between 1 and 20`, {
+      operation,
+      field: 'top_k',
+      expected: 'integer between 1 and 20',
+      received: topK,
+    });
+  }
+
+  const threshold = optionalNumber(preparedPayload, 'threshold', operation);
+  if (threshold !== undefined && (threshold < 0 || threshold > 1)) {
+    throw invalidArgument(`${operation} expects 'threshold' between 0 and 1`, {
+      operation,
+      field: 'threshold',
+      expected: 'number between 0 and 1',
+      received: threshold,
+    });
+  }
+
+  return {
+    url: requiredString(preparedPayload, 'url', operation, { unwrapQuotes: true }),
+    query_text: requiredString(preparedPayload, 'query_text', operation),
+    top_k: topK,
+    threshold,
+    include_closed: optionalBoolean(preparedPayload, 'include_closed', operation),
+    exclude_backlog_item_id: optionalUuid(preparedPayload, 'exclude_backlog_item_id', operation, { nullable: true }),
+  };
+}
+
 function validateCreateBacklogItemPayload(payload) {
   const operation = 'create_backlog_item';
   const preparedPayload = prepareOperationPayload(payload, operation, ['project_url']);
@@ -1003,6 +1060,16 @@ async function listBacklogItems(urlOrOptions, statusOrOptions = null) {
   });
 }
 
+async function searchSimilarBugReports(payload) {
+  const normalizedPayload = validateSemanticBugSearchInput(payload);
+  persistExecutionContextFromPayload({ project_url: normalizedPayload.url });
+
+  return request('/projects/backlog/semantic-search', {
+    method: 'POST',
+    body: JSON.stringify(normalizedPayload),
+  });
+}
+
 async function createBacklogItem(payload, options) {
   const { isBatch, items, options: batchOptions } = normalizeBatchPayload(payload, 'create_backlog_item', validateCreateBacklogItemPayload, options);
   const response = await request(buildBatchPath('/projects/backlog', isBatch ? batchOptions : { strict: false }), {
@@ -1199,6 +1266,7 @@ export {
   reportBlocker,
   resolveExecutionIdentity,
   resolveGitIdentity,
+  searchSimilarBugReports,
   setExecutionContext,
   updateBacklogItem,
   updateTaskStatus,

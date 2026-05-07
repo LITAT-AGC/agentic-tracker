@@ -93,6 +93,7 @@ Task close note: prefer `review` first and promote to `done` only after review p
 - If a user chat asks to fix a bug, investigate an error, or resolve a regression or broken behavior, first inspect APTS backlog for an existing matching non-deleted bug item.
 - If the client runtime supports custom agents, install and invoke `APTS Bugfix Intake` as the first entrypoint for those defect requests.
 - If a matching bug item already exists, reuse it instead of creating a duplicate defect entry.
+- Before creating a new bug item, prefer `search_similar_bug_reports` with the defect symptom to detect semantic duplicates.
 - If no matching bug item exists, create it in APTS before implementation starts using `create_backlog_item` with `item_type: "bug"`.
 - Capture the symptom, expected behavior, observed behavior, and any reproduction evidence available from the chat in that backlog item.
 - When the runtime exposes a stable conversation or thread identifier, store `source_kind: "chat_request"` and persist that identifier in `source_ref`.

@@ -82,6 +82,7 @@ Mandatory rules:
 0.2. Invoke APTS operations using contract-first JSON object payloads (for example `{"task_id":"...","status":"review",...}`), even when a legacy positional signature is still supported for backward compatibility.
 0.3. If `APTS Bugfix Intake` is installed in the client project, invoke it first for new bug, error, regression, or broken-behavior requests coming from chat.
 0.4. If the current chat asks to fix a bug, investigate an error, or resolve a regression or broken behavior, first inspect APTS backlog for an existing matching non-deleted bug item.
+0.4.1. Prefer `search_similar_bug_reports` with the symptom summary before deciding whether a new `bug` item is needed.
 0.5. If no matching bug item exists, create it with `create_backlog_item` before implementation starts, using `item_type` = `bug` and capturing the symptom, expected behavior, observed behavior, and any reproduction evidence available from the chat.
 0.6. When the runtime exposes a stable conversation or thread identifier, store `source_kind` = `chat_request` and persist that identifier in `source_ref` for the bug backlog item.
 0.7. Do not start direct implementation or register execution work for a new defect request until the work is represented in APTS backlog and the task can reference that `backlog_item_id`.
@@ -114,7 +115,7 @@ When you use the official client/CLI, missing identity fields are auto-filled fr
 | Field | Required by |
 | --- | --- |
 | `project_url` | `register_task`, `create_backlog_item`, `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` |
-| `url` | `read_project_context`, `list_backlog_items` |
+| `url` | `read_project_context`, `list_backlog_items`, `search_similar_bug_reports` |
 | `agent_name` | `register_task`, `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` |
 | `agent_email` | `register_task`, `update_task_status` |
 | `branch` | `log_agent_progress` |

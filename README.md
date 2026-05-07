@@ -5,7 +5,8 @@ APTS es un servicio de seguimiento de proyectos orientado a agentes de IA. En lu
 ## Que incluye
 
 - Backend en Node.js + Express + Knex.
-- Base de datos SQLite para desarrollo y test, y PostgreSQL para produccion.
+- Base de datos PostgreSQL en todos los entornos operativos.
+- Perfil SQLite legacy solo para una migracion one-shot de datos historicos.
 - Dashboard web en Vue 3 + Vite + Pinia + PrimeVue + Tailwind CSS + ECharts.
 - Material de integracion para proyectos cliente en `integracion/`.
 - Script de prueba de API para validar el flujo de agentes.
@@ -28,8 +29,8 @@ APTS esta pensado para equipos que usan agentes de desarrollo y necesitan:
 
 - API REST para agentes y dashboard.
 - Persistencia con Knex.
-- SQLite en desarrollo y test.
-- PostgreSQL en produccion mediante `DATABASE_URL`.
+- PostgreSQL en desarrollo, test y produccion mediante `PG_CONNECTION_STRING` o `DATABASE_URL`.
+- Perfil `sqlite_legacy` reservado para migrar una base SQLite historica una sola vez.
 - Autenticacion por API key para agentes.
 - Sesion por cookie para dashboard humano.
 
@@ -69,6 +70,7 @@ Authorization: Bearer <APTS_API_KEY>
 | `register_task` | POST | `/api/projects/tasks` | Crear una tarea nueva y obtener `task_id` (opcionalmente vinculada a `backlog_item_id`). |
 | `read_project_context` | GET | `/api/projects/context?url=...&limit=...` | Leer backlog, tareas y logs recientes del proyecto. |
 | `list_backlog_items` | GET | `/api/projects/backlog?url=...&status=...` | Listar backlog por proyecto, ordenado por prioridad y orden manual. |
+| `search_similar_bug_reports` | POST | `/api/projects/backlog/semantic-search` | Buscar bugs similares semánticamente para intake sin duplicados. |
 | `create_backlog_item` | POST | `/api/projects/backlog` | Crear un backlog item gestionado en APTS. |
 | `update_backlog_item` | PATCH | `/api/backlog/:id` | Editar estado, prioridad o contenido de un backlog item. |
 | `update_task_status` | PATCH | `/api/tasks/:id/status` | Cambiar estado de una tarea. |
@@ -157,15 +159,37 @@ CORS_ORIGIN=http://localhost:47302,http://localhost:5173
 SESSION_SECRET=replace-with-a-secure-secret
 APTS_API_KEY=replace-with-a-secure-api-key
 DASHBOARD_PASSWORD=replace-with-a-strong-password
+PG_CONNECTION_STRING=postgresql://user:password@host:5432/apts
+PG_TEST_CONNECTION_STRING=postgresql://user:password@host:5432/apts_test
+OPENROUTER_DEFAULT_EMBEDDING_MODEL=openai/text-embedding-3-small
 
-# Solo en produccion
-DATABASE_URL=postgres://user:password@host:5432/apts
+# Opcional: alias compatible para despliegues existentes
+DATABASE_URL=postgresql://user:password@host:5432/apts
 ```
 
 Notas:
 
-- En desarrollo y test se usa SQLite automaticamente mediante `backend/knexfile.js`.
-- En produccion, `NODE_ENV=production` usa PostgreSQL con `DATABASE_URL`.
+- APTS usa PostgreSQL por defecto en desarrollo, test y produccion.
+- `backend/knexfile.js` mantiene `sqlite_legacy` solo para migrar datos historicos una vez.
+
+### Migracion one-shot desde SQLite legacy
+
+Si tienes datos historicos en `backend/apts.db` y ya configuraste PostgreSQL:
+
+```bash
+cd backend
+npx knex migrate:latest
+npm run migrate:sqlite-legacy-to-pg -- --truncate-target
+```
+
+`--truncate-target` es opcional y se recomienda solo para una primera carga limpia.
+
+Ademas, al iniciar el backend en PostgreSQL, APTS ejecuta un bootstrap automatico:
+
+- detecta `backend/apts.db` (perfil `sqlite_legacy`),
+- copia registros a PostgreSQL con upsert,
+- elimina el archivo SQLite solo si la copia fue correcta,
+- y realiza backfill de embeddings para bugs abiertos que aun no tengan embedding.
 
 ### 3. Ejecutar migraciones
 
@@ -250,16 +274,19 @@ Seguir las reglas de `AGENTS.md`:
 
 - No ejecutar `npx playwright install`.
 - Usar el Chrome local del sistema.
-- Ejecutar el backend en modo `test` para no tocar la base de desarrollo.
+- Ejecutar el backend en modo `test` con `PG_TEST_CONNECTION_STRING` para no tocar la base de desarrollo.
 
 En PowerShell:
 
 ```powershell
-cd backend
-$env:NODE_ENV="test"
-npx knex migrate:latest
-node index.js
+npm run test:e2e:prepare
+npm run test:e2e:backend
 ```
+
+Estos scripts fuerzan el modo test automaticamente:
+
+- `test:e2e:prepare`: ejecuta migraciones en entorno `test` con `knex --env test`.
+- `test:e2e:backend`: arranca backend con `NODE_ENV=test`.
 
 En otra terminal:
 

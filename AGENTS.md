@@ -9,16 +9,16 @@ When executing end-to-end (E2E) frontend tests using Playwright, you MUST follow
 ### 1. Database & Backend Preparation
 The frontend E2E tests require a live backend. However, it must **never** be run against the `development` or `production` databases.
 
-You must run the backend in `test` mode, which points to a temporary testing database (`apts_test.db`):
+You must run the backend in `test` mode using a dedicated PostgreSQL test database (configure `PG_TEST_CONNECTION_STRING`):
 
 ```bash
 # Terminal 1: Setup test database and run backend
-cd backend
-set NODE_ENV=test
-npx knex migrate:latest
-node index.js
+npm run test:e2e:prepare
+npm run test:e2e:backend
 ```
-*(Note: If using PowerShell, use `$env:NODE_ENV="test"` instead of `set NODE_ENV=test`)*
+These scripts force test mode automatically:
+- `test:e2e:prepare` runs backend migrations with `knex --env test`.
+- `test:e2e:backend` starts backend with `NODE_ENV=test` from `backend/scripts/start_test_server.js`.
 
 ### 2. Running the E2E Tests
 **Important Playwright Rules:**
@@ -34,13 +34,14 @@ npx playwright test
 ```
 
 ### 3. Cleanup (Optional but recommended)
-After testing is completed, you can delete the `apts_test.db` to ensure a clean state for the next test run.
+After testing is completed, reset or drop the PostgreSQL test database if you need a clean state for the next run.
 
 ---
 
 ## 🛠️ General Rules
 - Always prioritize using the most specific tool for the task at hand.
 - Before modifying database schemas, always create a new migration. Do not modify existing applied migrations.
+- Backend startup in PostgreSQL performs a legacy bootstrap: copy rows from sqlite_legacy (`backend/apts.db`) to PostgreSQL with upsert, delete SQLite only after successful copy, then backfill embeddings for open bugs without embedding.
 - When creating UI components, utilize the existing Tailwind CSS setup and prioritize the dark, premium aesthetic.
 - For any functional change in APTS that affects behavior exposed to integrators (API routes, payloads, statuses, auth flow, downloadable artifacts, or integration guidance), you must bump the public integration manifest `schema_version` and add a matching entry to `bootstrap.manifest_updates.notes`.
 - `bootstrap.manifest_updates.notes` is append-only version history: never replace it with only the latest change, never delete previous entries, and always prepend the new version entry.
@@ -57,7 +58,7 @@ When using the official APTS client or CLI, identity fields are auto-filled from
 
 | Field | Required by | Notes |
 | --- | --- | --- |
-| `project_url` | `register_task`, `create_backlog_item`, `read_project_context` (`url` query), `list_backlog_items` (`url` query), `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` | Resolve it from `git remote get-url origin`. |
+| `project_url` | `register_task`, `create_backlog_item`, `read_project_context` (`url` query), `list_backlog_items` (`url` query), `search_similar_bug_reports` (`url` body), `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` | Resolve it from `git remote get-url origin`. |
 | `agent_name` | `register_task`, `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` | Resolve it from `git config user.name`. |
 | `agent_email` | `register_task`, `update_task_status` | Resolve it from `git config user.email`. |
 | `branch` | `log_agent_progress` | Resolve it from `git branch --show-current`. |

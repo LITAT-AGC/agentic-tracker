@@ -53,6 +53,13 @@ const COMMANDS = {
     supportsOptions: false,
     invoke: (client, payload) => client.listBacklogItems(payload),
   },
+  'search-similar-bug-reports': {
+    description: 'Find semantically similar bug reports in APTS backlog using OpenRouter embeddings.',
+    usage: 'apts-cli search-similar-bug-reports (--json <payload> | --stdin) [--cwd <path>] [--pretty]',
+    expectsPayload: true,
+    supportsOptions: false,
+    invoke: (client, payload) => client.searchSimilarBugReports(payload),
+  },
   'create-backlog-item': {
     description: 'Create one backlog item or a batch of backlog items.',
     usage: 'apts-cli create-backlog-item (--json <payload> | --stdin) [--options <json>] [--cwd <path>] [--pretty]',
@@ -128,6 +135,12 @@ const COMMAND_HELP_DETAILS = {
     requiredFields: [],
     examples: [
       "node .ia/apts/apts-cli.mjs list-backlog-items --json '{\"status\":\"ready\"}'",
+    ],
+  },
+  'search-similar-bug-reports': {
+    requiredFields: ['query_text'],
+    examples: [
+      "node .ia/apts/apts-cli.mjs search-similar-bug-reports --json '{\"query_text\":\"Error 500 al guardar backlog\",\"top_k\":5,\"threshold\":0.78}'",
     ],
   },
   'create-backlog-item': {

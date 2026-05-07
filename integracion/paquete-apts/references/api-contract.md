@@ -54,7 +54,7 @@ La tabla refleja campos obligatorios a nivel de API. El cliente/CLI oficial pued
 | Campo | Operaciones |
 | --- | --- |
 | `project_url` | `register_task`, `create_backlog_item`, `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` |
-| `url` | `read_project_context`, `list_backlog_items` |
+| `url` | `read_project_context`, `list_backlog_items`, `search_similar_bug_reports` |
 | `agent_name` | `register_task`, `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` |
 | `agent_email` | `register_task`, `update_task_status` |
 | `branch` | `log_agent_progress` |
@@ -143,6 +143,31 @@ Ejemplo:
 {
   "project_url": "https://github.com/org/repo",
   "title": "Definir onboarding inicial"
+}
+```
+
+### 2f. search_similar_bug_reports
+
+- Metodo: `POST`
+- Ruta: `/projects/backlog/semantic-search`
+- Body: objeto `search_similar_bug_reports`
+- Objetivo: encontrar bugs similares semanticamente para evitar duplicados en intake.
+- Payload minimo: `url`, `query_text`
+- Campos opcionales:
+  - `top_k` (1..20, default 5)
+  - `threshold` (0..1, default 0.78)
+  - `include_closed` (default false)
+  - `exclude_backlog_item_id` (UUID)
+
+Ejemplo:
+
+```json
+{
+  "url": "https://github.com/org/repo",
+  "query_text": "Error 500 al guardar backlog desde dashboard",
+  "top_k": 5,
+  "threshold": 0.78,
+  "include_closed": false
 }
 ```
 

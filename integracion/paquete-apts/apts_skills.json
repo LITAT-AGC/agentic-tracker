@@ -125,6 +125,39 @@
       }
     },
     {
+      "name": "search_similar_bug_reports",
+      "description": "Find semantically similar non-deleted bug reports using OpenRouter embeddings to reduce duplicate bug intake. Minimum payload in official client/CLI: query_text (url auto-resolves from env/local managed context/Git when omitted).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "query_text": {
+            "type": "string"
+          },
+          "top_k": {
+            "type": "number",
+            "default": 5
+          },
+          "threshold": {
+            "type": "number",
+            "default": 0.78
+          },
+          "include_closed": {
+            "type": "boolean",
+            "default": false
+          },
+          "exclude_backlog_item_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "query_text"
+        ]
+      }
+    },
+    {
       "name": "create_backlog_item",
       "description": "Create a managed backlog item for a project. Minimum payload in official client/CLI: title (project_url auto-resolves from env/local managed context/Git when omitted). Mandatory before direct implementation when a chat introduces a new bug, error, or regression not yet tracked in APTS; use item_type 'bug' for defect intake.",
       "parameters": {

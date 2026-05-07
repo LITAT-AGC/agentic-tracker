@@ -1,6 +1,7 @@
 require('dotenv').config();
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const createKnex = require('knex');
 const express = require('express');
 const cors = require('cors');
 const session = require('express-session');
@@ -10,7 +11,7 @@ const pinoHttp = require('pino-http');
 const { z } = require('zod');
 const knexConfig = require('./knexfile');
 const rootPackage = require('../package.json');
-const db = require('knex')(knexConfig[process.env.NODE_ENV || 'development']);
+const db = createKnex(knexConfig[process.env.NODE_ENV || 'development']);
 
 const app = express();
 app.set('trust proxy', 1);
@@ -163,12 +164,28 @@ const TASK_ACTIVITY_FRESHNESS_MS = 15 * 60 * 1000;
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
 const OPENROUTER_CHAT_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const OPENROUTER_EMBEDDINGS_URL = 'https://openrouter.ai/api/v1/embeddings';
 const DEFAULT_OPENROUTER_MODEL = process.env.OPENROUTER_DEFAULT_MODEL || 'google/gemini-2.0-flash-lite-001';
+const DEFAULT_OPENROUTER_EMBEDDING_MODEL = process.env.OPENROUTER_DEFAULT_EMBEDDING_MODEL || 'openai/text-embedding-3-small';
 const CONFIG_KEYS = {
-  openrouterModel: 'openrouter_model'
+  openrouterModel: 'openrouter_model',
+  openrouterEmbeddingModel: 'openrouter_embedding_model'
 };
 const AUTO_TRIAGE_BACKLOG_STATUSES = new Set(['draft', 'needs_details', 'ready']);
+const OPEN_BUG_BACKLOG_STATUSES = new Set(['draft', 'needs_details', 'ready', 'in_progress', 'review', 'blocked']);
+const MAX_SEMANTIC_SEARCH_TOP_K = 20;
+const DEFAULT_SEMANTIC_SEARCH_TOP_K = 5;
+const DEFAULT_SEMANTIC_SEARCH_THRESHOLD = 0.78;
+const MAX_OPEN_BUGS_FOR_STARTUP_EMBEDDING = 10;
 const MAX_BATCH_SIZE = 100;
+const SQLITE_LEGACY_BATCH_SIZE = 200;
+const SQLITE_LEGACY_TABLES = [
+  { name: 'projects', primaryKey: 'url' },
+  { name: 'tasks', primaryKey: 'id' },
+  { name: 'backlog_items', primaryKey: 'id' },
+  { name: 'agent_logs', primaryKey: 'id' },
+  { name: 'config', primaryKey: 'key' }
+];
 
 const parseJsonArray = (value) => {
   if (!value) return [];
@@ -179,6 +196,37 @@ const parseJsonArray = (value) => {
     return Array.isArray(parsed) ? parsed : [];
   } catch (_error) {
     return [];
+  }
+};
+
+const chunkArray = (items, chunkSize) => {
+  const chunks = [];
+
+  for (let index = 0; index < items.length; index += chunkSize) {
+    chunks.push(items.slice(index, index + chunkSize));
+  }
+
+  return chunks;
+};
+
+const normalizeSqliteLegacyRow = (tableName, row) => {
+  if (tableName !== 'agent_logs') {
+    return row;
+  }
+
+  if (typeof row.technical_details !== 'string') {
+    return row;
+  }
+
+  const rawTechnicalDetails = row.technical_details.trim();
+  if (!rawTechnicalDetails) {
+    return { ...row, technical_details: null };
+  }
+
+  try {
+    return { ...row, technical_details: JSON.parse(rawTechnicalDetails) };
+  } catch (_error) {
+    return row;
   }
 };
 
@@ -389,6 +437,35 @@ const integerFieldSchema = (invalidMessage, { optional = false } = {}) => {
   return optional ? schema.optional() : schema;
 };
 
+const numberFieldSchema = (invalidMessage, { optional = false, min, max } = {}) => {
+  let numberSchema = z.number({ invalid_type_error: invalidMessage });
+
+  if (typeof min === 'number') {
+    numberSchema = numberSchema.min(min, invalidMessage);
+  }
+
+  if (typeof max === 'number') {
+    numberSchema = numberSchema.max(max, invalidMessage);
+  }
+
+  const schema = z.preprocess(
+    (value) => {
+      if (optional && value === undefined) return undefined;
+      if (value === null || value === '') return value;
+      if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed) return value;
+        const parsed = Number(trimmed);
+        return Number.isFinite(parsed) ? parsed : value;
+      }
+      return value;
+    },
+    numberSchema
+  );
+
+  return optional ? schema.optional() : schema;
+};
+
 const uuidFieldSchema = (
   invalidMessage,
   { optional = false, nullable = false } = {}
@@ -473,6 +550,23 @@ const backlogIdBodySchema = z.object({
   backlog_item_id: uuidFieldSchema('Backlog item id must be a valid UUID')
 });
 
+const semanticBugSearchBodySchema = z.object({
+  url: nonEmptyStringSchema('Project url is required', 'Project url is required', { unwrapQuotes: true }),
+  query_text: nonEmptyStringSchema('Query text is required', 'Query text must be a string'),
+  top_k: integerFieldSchema('top_k must be an integer between 1 and 20', { optional: true }),
+  threshold: numberFieldSchema('threshold must be a number between 0 and 1', { optional: true, min: 0, max: 1 }),
+  include_closed: z.preprocess(
+    (value) => {
+      if (value === undefined) return undefined;
+      if (typeof value === 'boolean') return value;
+      if (typeof value === 'string') return parseBooleanFlag(value);
+      return value;
+    },
+    z.boolean({ invalid_type_error: 'include_closed must be a boolean' }).optional()
+  ),
+  exclude_backlog_item_id: uuidFieldSchema('exclude_backlog_item_id must be a valid UUID', { optional: true, nullable: true })
+});
+
 const resolveTaskBodySchema = z.object({
   instruction: nonEmptyStringSchema('Instruction is required', 'Instruction must be a string')
 });
@@ -495,10 +589,13 @@ const backlogUpdatePayloadSchema = backlogCreatePayloadSchema.partial();
 const mapBacklogItemRecord = (item) => {
   if (!item) return item;
 
+  const { bug_embedding: _bugEmbedding, ...safeItem } = item;
+
   return {
-    ...item,
+    ...safeItem,
     llm_missing_details: parseJsonArray(item.llm_missing_details),
-    llm_confidence: toNumberOrNull(item.llm_confidence)
+    llm_confidence: toNumberOrNull(item.llm_confidence),
+    bug_embedding_norm: toNumberOrNull(item.bug_embedding_norm)
   };
 };
 
@@ -543,6 +640,11 @@ const getOpenRouterApiKey = () => {
 const getEffectiveOpenRouterModel = async () => {
   const configuredModel = await getConfigValue(CONFIG_KEYS.openrouterModel);
   return configuredModel || DEFAULT_OPENROUTER_MODEL;
+};
+
+const getEffectiveOpenRouterEmbeddingModel = async () => {
+  const configuredModel = await getConfigValue(CONFIG_KEYS.openrouterEmbeddingModel);
+  return configuredModel || DEFAULT_OPENROUTER_EMBEDDING_MODEL;
 };
 
 const getOpenRouterHeaders = () => {
@@ -597,6 +699,296 @@ const fetchOpenRouterModels = async () => {
       const rightCompletion = right.completion_price ?? Number.MAX_SAFE_INTEGER;
       return leftCompletion - rightCompletion;
     });
+};
+
+const parseEmbeddingVector = (value) => {
+  const rawArray = parseJsonArray(value);
+  if (!Array.isArray(rawArray) || rawArray.length === 0) return [];
+
+  return rawArray
+    .map((entry) => Number(entry))
+    .filter((entry) => Number.isFinite(entry));
+};
+
+const vectorNorm = (vector) => Math.sqrt(vector.reduce((accumulator, value) => accumulator + (value * value), 0));
+
+const cosineSimilarity = (left, right, leftNorm = null, rightNorm = null) => {
+  if (!Array.isArray(left) || !Array.isArray(right)) return 0;
+  if (left.length === 0 || right.length === 0) return 0;
+  if (left.length !== right.length) return 0;
+
+  const numerator = left.reduce((accumulator, leftValue, index) => accumulator + (leftValue * right[index]), 0);
+  const denominator = (leftNorm ?? vectorNorm(left)) * (rightNorm ?? vectorNorm(right));
+
+  if (!Number.isFinite(denominator) || denominator <= 0) {
+    return 0;
+  }
+
+  return numerator / denominator;
+};
+
+const normalizeTextField = (value) => (typeof value === 'string' ? value.trim() : '');
+
+const buildBugEmbeddingText = (backlogItem) => {
+  const title = normalizeTextField(backlogItem?.title);
+  const description = normalizeTextField(backlogItem?.description);
+  const acceptanceCriteria = normalizeTextField(backlogItem?.acceptance_criteria);
+  const sourceKind = normalizeTextField(backlogItem?.source_kind);
+  const sourceRef = normalizeTextField(backlogItem?.source_ref);
+
+  return [
+    title ? `titulo: ${title}` : '',
+    description ? `descripcion: ${description}` : '',
+    acceptanceCriteria ? `criterios_aceptacion: ${acceptanceCriteria}` : '',
+    sourceKind ? `origen: ${sourceKind}` : '',
+    sourceRef ? `referencia: ${sourceRef}` : ''
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+    .slice(0, 16000);
+};
+
+const requestOpenRouterEmbedding = async (inputText) => {
+  const normalizedInput = normalizeTextField(inputText);
+  if (!normalizedInput) {
+    throw createHttpError(400, 'Embedding input text is required');
+  }
+
+  const model = await getEffectiveOpenRouterEmbeddingModel();
+
+  const response = await fetch(OPENROUTER_EMBEDDINGS_URL, {
+    method: 'POST',
+    headers: getOpenRouterHeaders(),
+    body: JSON.stringify({
+      model,
+      input: normalizedInput
+    })
+  });
+
+  const data = await readOpenRouterResponse(response);
+  const embedding = parseEmbeddingVector(data?.data?.[0]?.embedding);
+
+  if (!embedding.length) {
+    throw createHttpError(502, 'OpenRouter embedding response did not include a valid vector');
+  }
+
+  return {
+    model,
+    embedding,
+    norm: vectorNorm(embedding)
+  };
+};
+
+const persistBugEmbeddingForBacklogItem = async (backlogItemId, { connection = db } = {}) => {
+  const backlogItem = await connection('backlog_items')
+    .where({ id: backlogItemId })
+    .whereNull('deleted_at')
+    .first();
+
+  if (!backlogItem) {
+    return { status: 'not_found', backlog_item_id: backlogItemId };
+  }
+
+  if (backlogItem.item_type !== 'bug') {
+    await connection('backlog_items')
+      .where({ id: backlogItemId })
+      .update({
+        bug_embedding: null,
+        bug_embedding_model: null,
+        bug_embedding_norm: null,
+        bug_embedding_updated_at: null,
+        updated_at: connection.fn.now()
+      });
+    return { status: 'cleared', backlog_item_id: backlogItemId };
+  }
+
+  const embeddingInput = buildBugEmbeddingText(backlogItem);
+  if (!embeddingInput) {
+    return { status: 'skipped', backlog_item_id: backlogItemId };
+  }
+
+  const embeddingResult = await requestOpenRouterEmbedding(embeddingInput);
+
+  await connection('backlog_items')
+    .where({ id: backlogItemId })
+    .update({
+      bug_embedding: JSON.stringify(embeddingResult.embedding),
+      bug_embedding_model: embeddingResult.model,
+      bug_embedding_norm: embeddingResult.norm,
+      bug_embedding_updated_at: connection.fn.now(),
+      updated_at: connection.fn.now()
+    });
+
+  return {
+    status: 'embedded',
+    backlog_item_id: backlogItemId,
+    model: embeddingResult.model
+  };
+};
+
+const tryPersistBugEmbeddingForBacklogItem = async (backlogItemId, options = {}) => {
+  try {
+    return await persistBugEmbeddingForBacklogItem(backlogItemId, options);
+  } catch (error) {
+    logger.warn({ backlog_item_id: backlogItemId, error: error.message }, 'Unable to persist bug embedding');
+    return { status: 'failed', backlog_item_id: backlogItemId, error: error.message };
+  }
+};
+
+const backfillOpenBugEmbeddingsAtStartup = async () => {
+  const [{ count: openBugCountRaw }] = await db('backlog_items')
+    .where({ item_type: 'bug' })
+    .whereNull('deleted_at')
+    .whereIn('status', [...OPEN_BUG_BACKLOG_STATUSES])
+    .count({ count: '*' });
+
+  const openBugCount = Number(openBugCountRaw || 0);
+
+  if (openBugCount > MAX_OPEN_BUGS_FOR_STARTUP_EMBEDDING) {
+    return {
+      skipped: true,
+      reason: 'too_many_open_bugs',
+      open_bug_count: openBugCount,
+      max_open_bugs_for_startup_embedding: MAX_OPEN_BUGS_FOR_STARTUP_EMBEDDING,
+      scanned: 0,
+      embedded: 0,
+      failed: 0
+    };
+  }
+
+  const openBugsWithoutEmbedding = await db('backlog_items')
+    .where({ item_type: 'bug' })
+    .whereNull('deleted_at')
+    .whereIn('status', [...OPEN_BUG_BACKLOG_STATUSES])
+    .where((queryBuilder) => {
+      queryBuilder.whereNull('bug_embedding').orWhere('bug_embedding', '');
+    })
+    .orderBy('updated_at', 'desc')
+    .select('id');
+
+  if (!openBugsWithoutEmbedding.length) {
+    return {
+      skipped: false,
+      open_bug_count: openBugCount,
+      scanned: 0,
+      embedded: 0,
+      failed: 0
+    };
+  }
+
+  let embeddedCount = 0;
+  let failedCount = 0;
+
+  for (const backlogItem of openBugsWithoutEmbedding) {
+    const result = await tryPersistBugEmbeddingForBacklogItem(backlogItem.id);
+    if (result?.status === 'embedded') {
+      embeddedCount += 1;
+      continue;
+    }
+
+    if (result?.status === 'failed') {
+      failedCount += 1;
+    }
+  }
+
+  return {
+    skipped: false,
+    open_bug_count: openBugCount,
+    scanned: openBugsWithoutEmbedding.length,
+    embedded: embeddedCount,
+    failed: failedCount
+  };
+};
+
+const copyLegacySQLiteIntoPostgresAtStartup = async () => {
+  if (db.client.config.client !== 'pg') {
+    return { skipped: true, reason: 'current_client_is_not_postgres' };
+  }
+
+  const sqliteLegacyConfig = knexConfig.sqlite_legacy;
+  if (!sqliteLegacyConfig || sqliteLegacyConfig.client !== 'better-sqlite3') {
+    return { skipped: true, reason: 'sqlite_legacy_config_missing' };
+  }
+
+  const sqliteLegacyFilePath = sqliteLegacyConfig.connection?.filename;
+  if (!sqliteLegacyFilePath) {
+    return { skipped: true, reason: 'sqlite_legacy_file_missing' };
+  }
+
+  const sqliteFileExists = await fs.access(sqliteLegacyFilePath)
+    .then(() => true)
+    .catch(() => false);
+
+  if (!sqliteFileExists) {
+    return { skipped: true, reason: 'sqlite_legacy_file_not_found', file_path: sqliteLegacyFilePath };
+  }
+
+  const sqliteLegacyDb = createKnex(sqliteLegacyConfig);
+
+  try {
+    await sqliteLegacyDb.raw('select 1');
+
+    const sourceCounts = {};
+    let totalRows = 0;
+
+    for (const table of SQLITE_LEGACY_TABLES) {
+      const [{ count }] = await sqliteLegacyDb(table.name).count({ count: '*' });
+      const parsedCount = Number(count || 0);
+      sourceCounts[table.name] = parsedCount;
+      totalRows += parsedCount;
+    }
+
+    if (totalRows === 0) {
+      await sqliteLegacyDb.destroy();
+      await fs.unlink(sqliteLegacyFilePath).catch(() => {});
+
+      return {
+        skipped: true,
+        reason: 'sqlite_legacy_empty',
+        file_removed: true,
+        file_path: sqliteLegacyFilePath,
+        source_counts: sourceCounts
+      };
+    }
+
+    await db.transaction(async (transaction) => {
+      for (const table of SQLITE_LEGACY_TABLES) {
+        const rows = await sqliteLegacyDb(table.name).select('*');
+        if (!rows.length) {
+          continue;
+        }
+
+        const normalizedRows = rows.map((row) => normalizeSqliteLegacyRow(table.name, row));
+        const chunks = chunkArray(normalizedRows, SQLITE_LEGACY_BATCH_SIZE);
+
+        for (const chunk of chunks) {
+          await transaction(table.name)
+            .insert(chunk)
+            .onConflict(table.primaryKey)
+            .merge();
+        }
+      }
+    });
+
+    await sqliteLegacyDb.destroy();
+    const removedLegacyFile = await fs.unlink(sqliteLegacyFilePath)
+      .then(() => true)
+      .catch((unlinkError) => {
+        logger.warn({ file_path: sqliteLegacyFilePath, error: unlinkError.message }, 'Unable to delete sqlite legacy file after successful migration');
+        return false;
+      });
+
+    return {
+      skipped: false,
+      migrated: true,
+      file_removed: removedLegacyFile,
+      file_path: sqliteLegacyFilePath,
+      source_counts: sourceCounts
+    };
+  } catch (error) {
+    await sqliteLegacyDb.destroy();
+    throw error;
+  }
 };
 
 const extractJsonObject = (value) => {
@@ -745,6 +1137,70 @@ const listBacklogItems = async (projectUrl, status, { includeDeleted = false } =
   return items.map(mapBacklogItemRecord);
 };
 
+const searchSimilarBugReports = async ({
+  projectUrl,
+  queryText,
+  topK = DEFAULT_SEMANTIC_SEARCH_TOP_K,
+  threshold = DEFAULT_SEMANTIC_SEARCH_THRESHOLD,
+  includeClosed = false,
+  excludeBacklogItemId = null
+}) => {
+  const normalizedProjectUrl = normalizeUrl(projectUrl);
+  if (!normalizedProjectUrl) {
+    throw createHttpError(400, 'Project url is required');
+  }
+
+  const embeddingResult = await requestOpenRouterEmbedding(queryText);
+
+  const candidateQuery = db('backlog_items')
+    .where({ project_url: normalizedProjectUrl, item_type: 'bug' })
+    .whereNull('deleted_at')
+    .whereNotNull('bug_embedding')
+    .orderBy('updated_at', 'desc');
+
+  if (!includeClosed) {
+    candidateQuery.whereIn('status', [...OPEN_BUG_BACKLOG_STATUSES]);
+  }
+
+  if (excludeBacklogItemId) {
+    candidateQuery.whereNot({ id: excludeBacklogItemId });
+  }
+
+  const candidates = await candidateQuery.select('*');
+
+  const matches = candidates
+    .map((candidate) => {
+      const candidateEmbedding = parseEmbeddingVector(candidate.bug_embedding);
+      const similarityScore = cosineSimilarity(
+        embeddingResult.embedding,
+        candidateEmbedding,
+        embeddingResult.norm,
+        toNumberOrNull(candidate.bug_embedding_norm)
+      );
+
+      if (!Number.isFinite(similarityScore)) {
+        return null;
+      }
+
+      return {
+        similarity_score: Math.max(0, Math.min(1, similarityScore)),
+        backlog_item: mapBacklogItemRecord(candidate)
+      };
+    })
+    .filter(Boolean)
+    .filter((match) => match.similarity_score >= threshold)
+    .sort((left, right) => right.similarity_score - left.similarity_score)
+    .slice(0, topK);
+
+  return {
+    model: embeddingResult.model,
+    threshold,
+    top_k: topK,
+    candidates_scanned: candidates.length,
+    matches
+  };
+};
+
 const getBacklogPayload = (body, { partial = false } = {}) => {
   const requestBody = body && typeof body === 'object' ? body : {};
   const schema = partial ? backlogUpdatePayloadSchema : backlogCreatePayloadSchema;
@@ -770,10 +1226,18 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.19';
+const integrationManifestSchemaVersion = '2.0.20';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.20',
+    date: '2026-05-08',
+    changes: [
+      'APTS adds semantic bug lookup via OpenRouter embeddings at search_similar_bug_reports to reduce duplicate defect intake before implementation starts.',
+      'Official APTS clients, CLIs, and skills contract now expose search-similar-bug-reports while backlog bug items keep embedding metadata synchronized automatically.'
+    ]
+  },
   {
     version: '2.0.19',
     date: '2026-05-07',
@@ -1043,8 +1507,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts_skills.json'),
     fileName: 'apts_skills.json',
     contentType: 'application/json; charset=utf-8',
-    artifactVersion: '2.0.19',
-    updatedInSchemaVersion: '2.0.19',
+    artifactVersion: '2.0.20',
+    updatedInSchemaVersion: '2.0.20',
     kind: 'skills_contract',
     recommended: true,
     syncAction: 'overwrite',
@@ -1056,8 +1520,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'SKILL.md'),
     fileName: 'SKILL.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.19',
-    updatedInSchemaVersion: '2.0.19',
+    artifactVersion: '2.0.20',
+    updatedInSchemaVersion: '2.0.20',
     kind: 'skill_package',
     recommended: false,
     syncAction: 'overwrite',
@@ -1069,8 +1533,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-agent-guidelines.md'),
     fileName: 'apts-agent-guidelines.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.19',
-    updatedInSchemaVersion: '2.0.19',
+    artifactVersion: '2.0.20',
+    updatedInSchemaVersion: '2.0.20',
     kind: 'agent_guidelines',
     recommended: true,
     syncAction: 'overwrite',
@@ -1126,8 +1590,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-client.js'),
     fileName: 'apts-client.js',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.0.19',
-    updatedInSchemaVersion: '2.0.19',
+    artifactVersion: '2.0.20',
+    updatedInSchemaVersion: '2.0.20',
     kind: 'reference_client',
     recommended: false,
     optional: true,
@@ -1142,8 +1606,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-client.mjs'),
     fileName: 'apts-client.mjs',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.0.19',
-    updatedInSchemaVersion: '2.0.19',
+    artifactVersion: '2.0.20',
+    updatedInSchemaVersion: '2.0.20',
     kind: 'reference_client',
     recommended: false,
     optional: true,
@@ -1158,8 +1622,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-cli.js'),
     fileName: 'apts-cli.js',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.0.19',
-    updatedInSchemaVersion: '2.0.19',
+    artifactVersion: '2.0.20',
+    updatedInSchemaVersion: '2.0.20',
     kind: 'reference_cli',
     recommended: false,
     optional: true,
@@ -1175,8 +1639,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-cli.mjs'),
     fileName: 'apts-cli.mjs',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.0.19',
-    updatedInSchemaVersion: '2.0.19',
+    artifactVersion: '2.0.20',
+    updatedInSchemaVersion: '2.0.20',
     kind: 'reference_cli',
     recommended: false,
     optional: true,
@@ -1230,7 +1694,7 @@ const buildIntegrationManifest = (req) => ({
         'incidents where existing functionality is broken'
       ],
       required_backlog_item_type: 'bug',
-      existing_item_policy: 'Before creating a new defect entry, inspect APTS backlog and reuse an existing non-deleted bug item when it already tracks the same symptom, scope, or failure.',
+      existing_item_policy: 'Before creating a new defect entry, inspect APTS backlog and reuse an existing non-deleted bug item when it already tracks the same symptom, scope, or failure. Prefer search_similar_bug_reports for semantic duplicate detection.',
       new_item_policy: 'If no matching bug item exists, create one in APTS before implementation starts and capture the symptom, expected behavior, observed behavior, and any reproduction evidence available from the chat.',
       task_link_policy: 'Only register or continue execution work after the task can reference that backlog_item_id.',
       source_tracking: {
@@ -1365,7 +1829,7 @@ const buildIntegrationManifest = (req) => ({
       'If the project previously used ad-hoc APTS wrapper scripts for base operations, remove them once the official client or CLI is installed and keep only thin discovery adapters when the runtime still needs them.',
       'Prepare a local append-only resilience journal, for example at .apts/agent-resilience-log.jsonl, without treating it as a source of truth.',
       'Inspect local files that currently contain backlog, planning, or operational tracking.',
-      'If the current chat request is a new bugfix, error investigation, or regression report, inspect APTS backlog for a matching bug item or create one with item_type=bug before implementation starts.',
+      'If the current chat request is a new bugfix, error investigation, or regression report, run search_similar_bug_reports and inspect APTS backlog for a matching bug item before creating a new item_type=bug.',
       'Create or update backlog_items in APTS to reflect that initial state.',
       'From that point onward, use APTS as the primary tracking system and do not invent work outside APTS.'
     ],
@@ -1645,7 +2109,13 @@ const createBacklogItemInternal = async (body, { connection = db } = {}) => {
     ...payload
   }).returning('*');
 
-  return { backlog_item: mapBacklogItemRecord(backlogItem) };
+  await tryPersistBugEmbeddingForBacklogItem(backlogItem.id, { connection });
+
+  const refreshedBacklogItem = await connection('backlog_items')
+    .where({ id: backlogItem.id })
+    .first();
+
+  return { backlog_item: mapBacklogItemRecord(refreshedBacklogItem || backlogItem) };
 };
 
 const updateBacklogItemInternal = async (backlogItemId, body, { connection = db } = {}) => {
@@ -1675,7 +2145,13 @@ const updateBacklogItemInternal = async (backlogItemId, body, { connection = db 
     throw createHttpError(404, 'Backlog item not found');
   }
 
-  return { backlog_item: mapBacklogItemRecord(backlogItem) };
+  await tryPersistBugEmbeddingForBacklogItem(backlogItem.id, { connection });
+
+  const refreshedBacklogItem = await connection('backlog_items')
+    .where({ id: backlogItem.id })
+    .first();
+
+  return { backlog_item: mapBacklogItemRecord(refreshedBacklogItem || backlogItem) };
 };
 
 const deleteBacklogItemInternal = async (backlogItemId, { connection = db } = {}) => {
@@ -1953,6 +2429,51 @@ app.get('/api/projects/backlog', apiLimiter, authenticateAgent, async (req, res)
     res.json({ backlog });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// Skill 1e: search_similar_bug_reports
+app.post('/api/projects/backlog/semantic-search', apiLimiter, authenticateAgent, async (req, res) => {
+  const parsedBody = semanticBugSearchBodySchema.safeParse(req.body || {});
+  if (!parsedBody.success) {
+    return res.status(400).json({ error: zodErrorMessage(parsedBody.error) });
+  }
+
+  const {
+    url,
+    query_text: queryText,
+    top_k: requestedTopK,
+    threshold: requestedThreshold,
+    include_closed: includeClosed,
+    exclude_backlog_item_id: excludeBacklogItemId
+  } = parsedBody.data;
+
+  const topK = Math.max(1, Math.min(MAX_SEMANTIC_SEARCH_TOP_K, requestedTopK ?? DEFAULT_SEMANTIC_SEARCH_TOP_K));
+  const threshold = requestedThreshold ?? DEFAULT_SEMANTIC_SEARCH_THRESHOLD;
+
+  try {
+    const result = await searchSimilarBugReports({
+      projectUrl: url,
+      queryText,
+      topK,
+      threshold,
+      includeClosed: includeClosed === true,
+      excludeBacklogItemId: excludeBacklogItemId || null
+    });
+
+    return res.json({
+      query: {
+        url: normalizeUrl(url),
+        query_text: queryText,
+        top_k: topK,
+        threshold,
+        include_closed: includeClosed === true,
+        exclude_backlog_item_id: excludeBacklogItemId || null
+      },
+      ...result
+    });
+  } catch (routeError) {
+    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
   }
 });
 
@@ -2450,7 +2971,13 @@ app.post('/api/dashboard/projects/:url/backlog', requireAuth, async (req, res) =
       ...payload
     }).returning('*');
 
-    res.status(201).json({ backlog_item: mapBacklogItemRecord(backlogItem) });
+    await tryPersistBugEmbeddingForBacklogItem(backlogItem.id);
+
+    const refreshedBacklogItem = await db('backlog_items')
+      .where({ id: backlogItem.id })
+      .first();
+
+    res.status(201).json({ backlog_item: mapBacklogItemRecord(refreshedBacklogItem || backlogItem) });
   } catch (routeError) {
     res.status(500).json({ error: routeError.message });
   }
@@ -2481,7 +3008,13 @@ app.patch('/api/dashboard/backlog/:id', requireAuth, async (req, res) => {
       return res.status(404).json({ error: 'Backlog item not found' });
     }
 
-    res.json({ backlog_item: mapBacklogItemRecord(backlogItem) });
+    await tryPersistBugEmbeddingForBacklogItem(backlogItem.id);
+
+    const refreshedBacklogItem = await db('backlog_items')
+      .where({ id: backlogItem.id })
+      .first();
+
+    res.json({ backlog_item: mapBacklogItemRecord(refreshedBacklogItem || backlogItem) });
   } catch (routeError) {
     res.status(500).json({ error: routeError.message });
   }
@@ -2560,13 +3093,17 @@ app.post('/api/dashboard/projects/:url/backlog/analyze', requireAuth, async (req
 app.get('/api/dashboard/config/openrouter', requireAuth, async (_req, res) => {
   try {
     const selectedModel = await getConfigValue(CONFIG_KEYS.openrouterModel);
+    const selectedEmbeddingModel = await getConfigValue(CONFIG_KEYS.openrouterEmbeddingModel);
 
     res.json({
       openrouter: {
         api_key_configured: Boolean((process.env.OPENROUTER_API_KEY || '').trim()),
         selected_model: selectedModel,
         effective_model: selectedModel || DEFAULT_OPENROUTER_MODEL,
-        default_model: DEFAULT_OPENROUTER_MODEL
+        default_model: DEFAULT_OPENROUTER_MODEL,
+        selected_embedding_model: selectedEmbeddingModel,
+        effective_embedding_model: selectedEmbeddingModel || DEFAULT_OPENROUTER_EMBEDDING_MODEL,
+        default_embedding_model: DEFAULT_OPENROUTER_EMBEDDING_MODEL
       }
     });
   } catch (error) {
@@ -2585,18 +3122,32 @@ app.get('/api/dashboard/config/openrouter/models', requireAuth, async (_req, res
 
 app.patch('/api/dashboard/config/openrouter', requireAuth, async (req, res) => {
   const model = typeof req.body?.model === 'string' ? req.body.model.trim() : '';
+  const embeddingModel = typeof req.body?.embedding_model === 'string' ? req.body.embedding_model.trim() : '';
 
-  if (!model) {
-    return res.status(400).json({ error: 'Model is required' });
+  if (!model && !embeddingModel) {
+    return res.status(400).json({ error: 'model or embedding_model is required' });
   }
 
   try {
-    await setConfigValue(CONFIG_KEYS.openrouterModel, model);
+    if (model) {
+      await setConfigValue(CONFIG_KEYS.openrouterModel, model);
+    }
+
+    if (embeddingModel) {
+      await setConfigValue(CONFIG_KEYS.openrouterEmbeddingModel, embeddingModel);
+    }
+
+    const selectedModel = await getConfigValue(CONFIG_KEYS.openrouterModel);
+    const selectedEmbeddingModel = await getConfigValue(CONFIG_KEYS.openrouterEmbeddingModel);
+
     res.json({
       openrouter: {
-        selected_model: model,
-        effective_model: model,
-        default_model: DEFAULT_OPENROUTER_MODEL
+        selected_model: selectedModel,
+        effective_model: selectedModel || DEFAULT_OPENROUTER_MODEL,
+        default_model: DEFAULT_OPENROUTER_MODEL,
+        selected_embedding_model: selectedEmbeddingModel,
+        effective_embedding_model: selectedEmbeddingModel || DEFAULT_OPENROUTER_EMBEDDING_MODEL,
+        default_embedding_model: DEFAULT_OPENROUTER_EMBEDDING_MODEL
       }
     });
   } catch (error) {
@@ -2690,6 +3241,12 @@ const startServer = async () => {
       migrations_applied: migrationNames.length,
       migrations: migrationNames
     }, 'Database migrations checked');
+
+    const legacyMigrationResult = await copyLegacySQLiteIntoPostgresAtStartup();
+    logger.info({ legacy_migration: legacyMigrationResult }, 'Legacy SQLite bootstrap checked');
+
+    const embeddingBackfillResult = await backfillOpenBugEmbeddingsAtStartup();
+    logger.info({ embedding_backfill: embeddingBackfillResult }, 'Open bug embedding backfill checked');
 
     app.listen(PORT, () => {
       logger.info({ port: PORT }, 'Backend running');
