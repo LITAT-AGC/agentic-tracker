@@ -214,22 +214,40 @@ const normalizeSqliteLegacyRow = (tableName, row) => {
     return row;
   }
 
-  if (typeof row.technical_details !== 'string') {
-    return row;
-  }
-
-  const rawTechnicalDetails = row.technical_details.trim();
-  if (!rawTechnicalDetails) {
+  const rawTechnicalDetails = row.technical_details;
+  if (rawTechnicalDetails == null) {
     return { ...row, technical_details: null };
   }
 
+  const parseRawText = (rawText) => {
+    const normalizedText = String(rawText || '').trim();
+    if (!normalizedText) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(normalizedText);
+    } catch (_error) {
+      return { legacy_text: normalizedText };
+    }
+  };
+
+  if (typeof rawTechnicalDetails === 'string') {
+    return { ...row, technical_details: parseRawText(rawTechnicalDetails) };
+  }
+
+  if (Buffer.isBuffer(rawTechnicalDetails)) {
+    return { ...row, technical_details: parseRawText(rawTechnicalDetails.toString('utf8')) };
+  }
+
   try {
-    return { ...row, technical_details: JSON.parse(rawTechnicalDetails) };
+    JSON.stringify(rawTechnicalDetails);
+    return { ...row, technical_details: rawTechnicalDetails };
   } catch (_error) {
     return {
       ...row,
       technical_details: {
-        legacy_text: rawTechnicalDetails
+        legacy_text: String(rawTechnicalDetails)
       }
     };
   }
