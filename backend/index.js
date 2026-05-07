@@ -214,43 +214,10 @@ const normalizeSqliteLegacyRow = (tableName, row) => {
     return row;
   }
 
-  const rawTechnicalDetails = row.technical_details;
-  if (rawTechnicalDetails == null) {
-    return { ...row, technical_details: null };
-  }
-
-  const parseRawText = (rawText) => {
-    const normalizedText = String(rawText || '').trim();
-    if (!normalizedText) {
-      return null;
-    }
-
-    try {
-      return JSON.parse(normalizedText);
-    } catch (_error) {
-      return { legacy_text: normalizedText };
-    }
+  return {
+    ...row,
+    technical_details: null
   };
-
-  if (typeof rawTechnicalDetails === 'string') {
-    return { ...row, technical_details: parseRawText(rawTechnicalDetails) };
-  }
-
-  if (Buffer.isBuffer(rawTechnicalDetails)) {
-    return { ...row, technical_details: parseRawText(rawTechnicalDetails.toString('utf8')) };
-  }
-
-  try {
-    JSON.stringify(rawTechnicalDetails);
-    return { ...row, technical_details: rawTechnicalDetails };
-  } catch (_error) {
-    return {
-      ...row,
-      technical_details: {
-        legacy_text: String(rawTechnicalDetails)
-      }
-    };
-  }
 };
 
 const toNumberOrNull = (value) => {
