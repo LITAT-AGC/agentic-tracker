@@ -41,7 +41,12 @@ const normalizeSourceRow = (tableName, row) => {
   try {
     return { ...row, technical_details: JSON.parse(raw) };
   } catch (_error) {
-    return row;
+    return {
+      ...row,
+      technical_details: {
+        legacy_text: raw
+      }
+    };
   }
 };
 

@@ -226,7 +226,12 @@ const normalizeSqliteLegacyRow = (tableName, row) => {
   try {
     return { ...row, technical_details: JSON.parse(rawTechnicalDetails) };
   } catch (_error) {
-    return row;
+    return {
+      ...row,
+      technical_details: {
+        legacy_text: rawTechnicalDetails
+      }
+    };
   }
 };
 
