@@ -11,6 +11,27 @@ const COMMANDS = {
     supportsOptions: false,
     invoke: (client) => client.resolveGitIdentity(),
   },
+  'show-execution-context': {
+    description: 'Show resolved execution context (env, local context file, and Git fallback).',
+    usage: 'apts-cli show-execution-context [--cwd <path>] [--pretty]',
+    expectsPayload: false,
+    supportsOptions: false,
+    invoke: (client) => client.getExecutionContext(),
+  },
+  'set-execution-context': {
+    description: 'Persist execution context fields to the local managed context file.',
+    usage: 'apts-cli set-execution-context (--json <payload> | --stdin) [--cwd <path>] [--pretty]',
+    expectsPayload: true,
+    supportsOptions: false,
+    invoke: (client, payload) => client.setExecutionContext(payload),
+  },
+  'clear-execution-context': {
+    description: 'Clear the local managed execution context file.',
+    usage: 'apts-cli clear-execution-context [--cwd <path>] [--pretty]',
+    expectsPayload: false,
+    supportsOptions: false,
+    invoke: (client) => client.clearStoredExecutionContext(),
+  },
   'register-task': {
     description: 'Create one task or a batch of tasks.',
     usage: 'apts-cli register-task (--json <payload> | --stdin) [--options <json>] [--cwd <path>] [--pretty]',
@@ -84,29 +105,35 @@ const COMMANDS = {
 };
 
 const COMMAND_HELP_DETAILS = {
-  'register-task': {
-    requiredFields: ['project_url', 'title', 'agent_name', 'agent_email'],
+  'set-execution-context': {
+    requiredFields: [],
     examples: [
-      "node .ia/apts/apts-cli.mjs register-task --json '{\"project_url\":\"https://github.com/org/repo\",\"title\":\"Implement feature\",\"agent_name\":\"Copilot\",\"agent_email\":\"copilot@example.com\"}'",
+      "node .ia/apts/apts-cli.mjs set-execution-context --json '{\"task_id\":\"22222222-2222-2222-2222-222222222222\"}'",
+    ],
+  },
+  'register-task': {
+    requiredFields: ['title'],
+    examples: [
+      "node .ia/apts/apts-cli.mjs register-task --json '{\"title\":\"Implement feature\"}'",
       'Get-Content register-task.json | node .ia/apts/apts-cli.mjs register-task --stdin --pretty',
     ],
   },
   'read-project-context': {
-    requiredFields: ['url'],
+    requiredFields: [],
     examples: [
-      "node .ia/apts/apts-cli.mjs read-project-context --json '{\"url\":\"https://github.com/org/repo\",\"limit\":5}'",
+      "node .ia/apts/apts-cli.mjs read-project-context --json '{\"limit\":5}'",
     ],
   },
   'list-backlog-items': {
-    requiredFields: ['url'],
+    requiredFields: [],
     examples: [
-      "node .ia/apts/apts-cli.mjs list-backlog-items --json '{\"url\":\"https://github.com/org/repo\",\"status\":\"ready\"}'",
+      "node .ia/apts/apts-cli.mjs list-backlog-items --json '{\"status\":\"ready\"}'",
     ],
   },
   'create-backlog-item': {
-    requiredFields: ['project_url', 'title'],
+    requiredFields: ['title'],
     examples: [
-      "node .ia/apts/apts-cli.mjs create-backlog-item --json '{\"project_url\":\"https://github.com/org/repo\",\"title\":\"Document APTS examples\"}'",
+      "node .ia/apts/apts-cli.mjs create-backlog-item --json '{\"title\":\"Document APTS examples\"}'",
     ],
   },
   'update-backlog-item': {
@@ -122,27 +149,27 @@ const COMMAND_HELP_DETAILS = {
     ],
   },
   'update-task-status': {
-    requiredFields: ['task_id', 'status', 'project_url', 'agent_name', 'agent_email'],
+    requiredFields: ['status'],
     examples: [
-      "node .ia/apts/apts-cli.mjs update-task-status --json '{\"task_id\":\"22222222-2222-2222-2222-222222222222\",\"status\":\"review\",\"project_url\":\"https://github.com/org/repo\",\"agent_name\":\"Copilot\",\"agent_email\":\"copilot@example.com\"}'",
+      "node .ia/apts/apts-cli.mjs update-task-status --json '{\"status\":\"review\"}'",
     ],
   },
   'log-agent-progress': {
-    requiredFields: ['task_id', 'project_url', 'agent_name', 'branch', 'message'],
+    requiredFields: ['message'],
     examples: [
-      "node .ia/apts/apts-cli.mjs log-agent-progress --json '{\"task_id\":\"22222222-2222-2222-2222-222222222222\",\"project_url\":\"https://github.com/org/repo\",\"agent_name\":\"Copilot\",\"branch\":\"main\",\"message\":\"Checkpoint\"}'",
+      "node .ia/apts/apts-cli.mjs log-agent-progress --json '{\"message\":\"Checkpoint\"}'",
     ],
   },
   'report-blocker': {
-    requiredFields: ['project_url', 'task_id', 'error_message', 'agent_name'],
+    requiredFields: ['error_message'],
     examples: [
-      "node .ia/apts/apts-cli.mjs report-blocker --json '{\"project_url\":\"https://github.com/org/repo\",\"task_id\":\"22222222-2222-2222-2222-222222222222\",\"error_message\":\"Tests are blocked by missing fixture\",\"agent_name\":\"Copilot\"}'",
+      "node .ia/apts/apts-cli.mjs report-blocker --json '{\"error_message\":\"Tests are blocked by missing fixture\"}'",
     ],
   },
   heartbeat: {
-    requiredFields: ['task_id', 'agent_name', 'project_url'],
+    requiredFields: [],
     examples: [
-      "node .ia/apts/apts-cli.mjs heartbeat --json '{\"task_id\":\"22222222-2222-2222-2222-222222222222\",\"agent_name\":\"Copilot\",\"project_url\":\"https://github.com/org/repo\"}'",
+      "node .ia/apts/apts-cli.mjs heartbeat --json '{}'",
       'Get-Content heartbeat.json | node .ia/apts/apts-cli.mjs heartbeat --stdin --pretty',
     ],
   },
@@ -246,7 +273,9 @@ function buildHelp(commandName) {
       `${normalized}: ${command.description}`,
       '',
       `Usage: ${command.usage}`,
-      ...(details ? ['', `Minimum payload fields: ${details.requiredFields.join(', ')}`] : []),
+      ...(details
+        ? ['', `Minimum payload fields: ${details.requiredFields.length ? details.requiredFields.join(', ') : 'none (resolved automatically from env, local context, or Git)'}`]
+        : []),
       '',
       'Flags:',
       '  --json <payload>     Inline JSON payload matching the contract-first shape.',
@@ -255,6 +284,7 @@ function buildHelp(commandName) {
       '  --cwd <path>         Resolve .env and Git identity from a different working directory.',
       '  --pretty             Pretty-print JSON output.',
       '  --help               Show this help.',
+      '  Note:                Official client/CLI auto-fills project_url, agent identity, branch, and task_id (from env, local context file, or Git fallback) when missing.',
       ...(details ? ['', 'Examples:', ...details.examples.map((example) => `  ${example}`)] : []),
     ].join('\n');
   }
@@ -286,6 +316,7 @@ function buildHelp(commandName) {
     '',
     'Examples:',
     '  node .ia/apts/apts-cli.mjs resolve-git-identity --cwd .',
+    '  node .ia/apts/apts-cli.mjs show-execution-context --pretty',
     '  cat register-task.json | node .ia/apts/apts-cli.mjs register-task --stdin',
     "  cat payload.json | node .ia/apts/apts-cli.mjs update-task-status --stdin --options '{\"strict\":true}'",
   ].join('\n');

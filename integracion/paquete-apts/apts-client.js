@@ -6,7 +6,39 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-
 const TASK_STATUSES = ['todo', 'in_progress', 'review', 'done', 'stalled'];
 const BACKLOG_STATUSES = ['draft', 'needs_details', 'ready', 'in_progress', 'review', 'blocked', 'done', 'archived'];
 const BACKLOG_ITEM_TYPES = ['feature', 'bug', 'chore', 'research'];
+const DEFAULT_EXECUTION_CONTEXT_FILE = path.join('.apts', 'execution-context.json');
+const STORED_EXECUTION_CONTEXT_KEYS = ['project_url', 'agent_name', 'agent_email', 'branch', 'task_id', 'backlog_item_id'];
+const EXECUTION_IDENTITY_ENV_KEYS = {
+  project_url: 'APTS_PROJECT_URL',
+  agent_name: 'APTS_AGENT_NAME',
+  agent_email: 'APTS_AGENT_EMAIL',
+  branch: 'APTS_BRANCH',
+  task_id: 'APTS_TASK_ID',
+  backlog_item_id: 'APTS_BACKLOG_ITEM_ID',
+};
+const AUTO_FILL_FIELDS_BY_OPERATION = {
+  register_task: ['project_url', 'agent_name', 'agent_email'],
+  read_project_context: ['url'],
+  list_backlog_items: ['url'],
+  create_backlog_item: ['project_url'],
+  update_task_status: ['task_id', 'project_url', 'agent_name', 'agent_email'],
+  log_agent_progress: ['task_id', 'project_url', 'agent_name', 'branch'],
+  report_blocker: ['task_id', 'project_url', 'agent_name'],
+  heartbeat: ['task_id', 'project_url', 'agent_name'],
+};
+const IDENTITY_FIELD_HINTS = {
+  project_url: { env: 'APTS_PROJECT_URL', git: 'git remote get-url origin' },
+  url: { env: 'APTS_PROJECT_URL', git: 'git remote get-url origin' },
+  agent_name: { env: 'APTS_AGENT_NAME', git: 'git config user.name' },
+  agent_email: { env: 'APTS_AGENT_EMAIL', git: 'git config user.email' },
+  branch: { env: 'APTS_BRANCH', git: 'git branch --show-current' },
+  task_id: { env: 'APTS_TASK_ID', git: null },
+  backlog_item_id: { env: 'APTS_BACKLOG_ITEM_ID', git: null },
+};
 let envLoaded = false;
+let executionIdentityCache = null;
+let storedExecutionContextCache = null;
+let storedExecutionContextLoaded = false;
 
 function parseEnvLine(rawLine) {
   const line = rawLine.trim();
@@ -134,6 +166,113 @@ function normalizeString(value, { lowercase = false, unwrapQuotes = false } = {}
   }
 
   return normalized;
+}
+
+function getExecutionContextFilePath() {
+  const configuredPath = normalizeString(process.env.APTS_CONTEXT_FILE, { unwrapQuotes: true });
+  if (typeof configuredPath === 'string' && configuredPath) {
+    return path.resolve(configuredPath);
+  }
+  return path.resolve(DEFAULT_EXECUTION_CONTEXT_FILE);
+}
+
+function sanitizeExecutionContextRecord(input) {
+  if (!isPlainObject(input)) return {};
+
+  const sanitized = {};
+  for (const field of STORED_EXECUTION_CONTEXT_KEYS) {
+    const shouldUnwrap = field === 'project_url' || field === 'branch' || field === 'task_id' || field === 'backlog_item_id';
+    const value = normalizeString(input[field], { unwrapQuotes: shouldUnwrap });
+    if (typeof value === 'string' && value) {
+      sanitized[field] = value;
+    }
+  }
+
+  return sanitized;
+}
+
+function loadStoredExecutionContext({ refresh = false } = {}) {
+  if (!refresh && storedExecutionContextLoaded && storedExecutionContextCache) {
+    return storedExecutionContextCache;
+  }
+
+  const filePath = getExecutionContextFilePath();
+  let parsed = {};
+
+  try {
+    if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+      parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    }
+  } catch {
+    parsed = {};
+  }
+
+  storedExecutionContextCache = sanitizeExecutionContextRecord(parsed);
+  storedExecutionContextLoaded = true;
+  return storedExecutionContextCache;
+}
+
+function writeStoredExecutionContext(update, { replace = false } = {}) {
+  const filePath = getExecutionContextFilePath();
+  const current = replace ? {} : loadStoredExecutionContext();
+  const next = sanitizeExecutionContextRecord({ ...current, ...update });
+
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+
+  storedExecutionContextCache = next;
+  storedExecutionContextLoaded = true;
+  executionIdentityCache = null;
+
+  return {
+    file_path: filePath,
+    context: next,
+  };
+}
+
+function updateStoredExecutionContextSafe(update) {
+  if (!isPlainObject(update)) return null;
+
+  try {
+    return writeStoredExecutionContext(update);
+  } catch {
+    return null;
+  }
+}
+
+function setExecutionContext(update) {
+  assertPayloadObject(update, 'set_execution_context');
+  return writeStoredExecutionContext(update);
+}
+
+function clearStoredExecutionContext() {
+  const filePath = getExecutionContextFilePath();
+
+  try {
+    if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+      fs.unlinkSync(filePath);
+    }
+  } catch {
+    // Ignore clear failures to keep operational flow resilient.
+  }
+
+  storedExecutionContextCache = {};
+  storedExecutionContextLoaded = true;
+  executionIdentityCache = null;
+
+  return {
+    file_path: filePath,
+    context: {},
+    cleared: true,
+  };
+}
+
+function getExecutionContext() {
+  return {
+    file_path: getExecutionContextFilePath(),
+    stored: { ...loadStoredExecutionContext() },
+    resolved: { ...resolveExecutionIdentity({ refresh: true }) },
+  };
 }
 
 function invalidArgument(message, details = null) {
@@ -324,6 +463,55 @@ function readGit(command) {
   return execSync(command, { encoding: 'utf8' }).trim();
 }
 
+function readGitOptional(command, { unwrapQuotes = false } = {}) {
+  try {
+    const value = normalizeString(execSync(command, { encoding: 'utf8' }), { unwrapQuotes });
+    if (typeof value !== 'string' || !value) return undefined;
+    return value;
+  } catch {
+    return undefined;
+  }
+}
+
+function readEnvOptional(envKey, { unwrapQuotes = false } = {}) {
+  const value = normalizeString(process.env[envKey], { unwrapQuotes });
+  if (typeof value !== 'string' || !value) return undefined;
+  return value;
+}
+
+function resolveExecutionIdentity({ refresh = false } = {}) {
+  if (!refresh && executionIdentityCache) {
+    return executionIdentityCache;
+  }
+
+  const storedIdentity = loadStoredExecutionContext();
+  const envIdentity = {
+    project_url: readEnvOptional(EXECUTION_IDENTITY_ENV_KEYS.project_url, { unwrapQuotes: true }),
+    agent_name: readEnvOptional(EXECUTION_IDENTITY_ENV_KEYS.agent_name),
+    agent_email: readEnvOptional(EXECUTION_IDENTITY_ENV_KEYS.agent_email),
+    branch: readEnvOptional(EXECUTION_IDENTITY_ENV_KEYS.branch, { unwrapQuotes: true }),
+    task_id: readEnvOptional(EXECUTION_IDENTITY_ENV_KEYS.task_id, { unwrapQuotes: true }),
+    backlog_item_id: readEnvOptional(EXECUTION_IDENTITY_ENV_KEYS.backlog_item_id, { unwrapQuotes: true }),
+  };
+  const gitIdentity = {
+    project_url: readGitOptional('git remote get-url origin', { unwrapQuotes: true }),
+    agent_name: readGitOptional('git config user.name'),
+    agent_email: readGitOptional('git config user.email'),
+    branch: readGitOptional('git branch --show-current', { unwrapQuotes: true }),
+  };
+
+  executionIdentityCache = {
+    project_url: envIdentity.project_url || storedIdentity.project_url || gitIdentity.project_url,
+    agent_name: envIdentity.agent_name || storedIdentity.agent_name || gitIdentity.agent_name,
+    agent_email: envIdentity.agent_email || storedIdentity.agent_email || gitIdentity.agent_email,
+    branch: envIdentity.branch || storedIdentity.branch || gitIdentity.branch,
+    task_id: envIdentity.task_id || storedIdentity.task_id,
+    backlog_item_id: envIdentity.backlog_item_id || storedIdentity.backlog_item_id,
+  };
+
+  return executionIdentityCache;
+}
+
 function resolveGitIdentity() {
   return {
     project_url: readGit('git remote get-url origin'),
@@ -333,17 +521,119 @@ function resolveGitIdentity() {
   };
 }
 
+function hasNonEmptyString(value, { unwrapQuotes = false } = {}) {
+  const normalized = normalizeString(value, { unwrapQuotes });
+  return typeof normalized === 'string' && normalized.length > 0;
+}
+
+function enrichPayloadWithExecutionIdentity(payload, operationName) {
+  if (!isPlainObject(payload)) return payload;
+
+  const enriched = { ...payload };
+  const identity = resolveExecutionIdentity();
+  const targetFields = AUTO_FILL_FIELDS_BY_OPERATION[operationName] || [];
+
+  for (const field of targetFields) {
+    const shouldUnwrap = field === 'project_url' || field === 'url' || field === 'branch';
+    if (hasNonEmptyString(enriched[field], { unwrapQuotes: shouldUnwrap })) continue;
+
+    const identityField = field === 'url' ? 'project_url' : field;
+    if (hasNonEmptyString(identity[identityField], { unwrapQuotes: shouldUnwrap })) {
+      enriched[field] = identity[identityField];
+    }
+  }
+
+  if ((operationName === 'read_project_context' || operationName === 'list_backlog_items')
+    && !hasNonEmptyString(enriched.url, { unwrapQuotes: true })) {
+    const fromPayloadProjectUrl = normalizeString(enriched.project_url, { unwrapQuotes: true });
+    if (hasNonEmptyString(fromPayloadProjectUrl, { unwrapQuotes: true })) {
+      enriched.url = fromPayloadProjectUrl;
+    }
+  }
+
+  return enriched;
+}
+
+function assertAutoFilledFields(payload, operationName, requiredAutoFields) {
+  const missingFields = requiredAutoFields.filter((field) => {
+    const shouldUnwrap = field === 'project_url' || field === 'url' || field === 'branch';
+    return !hasNonEmptyString(payload[field], { unwrapQuotes: shouldUnwrap });
+  });
+
+  if (!missingFields.length) return;
+
+  const missingHints = missingFields.map((field) => ({
+    field,
+    env: IDENTITY_FIELD_HINTS[field]?.env || null,
+    git: IDENTITY_FIELD_HINTS[field]?.git || null,
+  }));
+
+  throw invalidArgument(`${operationName} is missing required identity fields after automatic resolution`, {
+    operation: operationName,
+    missing_fields: missingFields,
+    hints: missingHints,
+  });
+}
+
+function prepareOperationPayload(payload, operationName, requiredAutoFields = []) {
+  const enrichedPayload = enrichPayloadWithExecutionIdentity(payload, operationName);
+  if (requiredAutoFields.length) {
+    assertAutoFilledFields(enrichedPayload, operationName, requiredAutoFields);
+  }
+  return enrichedPayload;
+}
+
+function persistExecutionContextFromPayload(payload) {
+  if (!isPlainObject(payload)) return;
+
+  const patch = {};
+
+  const projectUrl = normalizeString(payload.project_url, { unwrapQuotes: true });
+  if (typeof projectUrl === 'string' && projectUrl) {
+    patch.project_url = projectUrl;
+  }
+
+  const agentName = normalizeString(payload.agent_name);
+  if (typeof agentName === 'string' && agentName) {
+    patch.agent_name = agentName;
+  }
+
+  const agentEmail = normalizeString(payload.agent_email);
+  if (typeof agentEmail === 'string' && agentEmail) {
+    patch.agent_email = agentEmail;
+  }
+
+  const branch = normalizeString(payload.branch, { unwrapQuotes: true });
+  if (typeof branch === 'string' && branch) {
+    patch.branch = branch;
+  }
+
+  const taskId = normalizeString(payload.task_id, { unwrapQuotes: true });
+  if (typeof taskId === 'string' && UUID_REGEX.test(taskId)) {
+    patch.task_id = taskId;
+  }
+
+  const backlogItemId = normalizeString(payload.backlog_item_id, { unwrapQuotes: true });
+  if (typeof backlogItemId === 'string' && UUID_REGEX.test(backlogItemId)) {
+    patch.backlog_item_id = backlogItemId;
+  }
+
+  if (!Object.keys(patch).length) return;
+  updateStoredExecutionContextSafe(patch);
+}
+
 function validateRegisterTaskPayload(payload) {
   const operation = 'register_task';
-  assertPayloadObject(payload, operation);
+  const preparedPayload = prepareOperationPayload(payload, operation, ['project_url', 'agent_name', 'agent_email']);
+  assertPayloadObject(preparedPayload, operation);
 
   return {
-    project_url: requiredString(payload, 'project_url', operation, { unwrapQuotes: true }),
-    title: requiredString(payload, 'title', operation),
-    agent_name: requiredString(payload, 'agent_name', operation),
-    agent_email: requiredString(payload, 'agent_email', operation),
-    context: optionalString(payload, 'context', operation),
-    backlog_item_id: optionalUuid(payload, 'backlog_item_id', operation),
+    project_url: requiredString(preparedPayload, 'project_url', operation, { unwrapQuotes: true }),
+    title: requiredString(preparedPayload, 'title', operation),
+    agent_name: requiredString(preparedPayload, 'agent_name', operation),
+    agent_email: requiredString(preparedPayload, 'agent_email', operation),
+    context: optionalString(preparedPayload, 'context', operation),
+    backlog_item_id: optionalUuid(preparedPayload, 'backlog_item_id', operation),
   };
 }
 
@@ -351,7 +641,7 @@ function validateReadProjectContextInput(urlOrOptions, limitOrOptions = 5) {
   const operation = 'read_project_context';
 
   if (isPlainObject(urlOrOptions)) {
-    const payload = urlOrOptions;
+    const payload = prepareOperationPayload(urlOrOptions, operation, ['url']);
     assertPayloadObject(payload, operation);
 
     return {
@@ -361,22 +651,13 @@ function validateReadProjectContextInput(urlOrOptions, limitOrOptions = 5) {
     };
   }
 
-  const url = normalizeString(urlOrOptions, { unwrapQuotes: true });
-  if (typeof url !== 'string' || !url) {
-    throw invalidArgument(`${operation} requires 'url'`, {
-      operation,
-      field: 'url',
-      expected: 'non-empty string',
-      received: urlOrOptions,
-    });
-  }
-
   const options = isPlainObject(limitOrOptions)
     ? limitOrOptions
     : { limit: limitOrOptions };
+  const payload = prepareOperationPayload({ url: urlOrOptions }, operation, ['url']);
 
   return {
-    url,
+    url: requiredString(payload, 'url', operation, { unwrapQuotes: true }),
     limit: optionalInteger(options, 'limit', operation) ?? 5,
     backlog_status: optionalEnum(
       {
@@ -393,7 +674,7 @@ function validateListBacklogItemsInput(urlOrOptions, statusOrOptions = null) {
   const operation = 'list_backlog_items';
 
   if (isPlainObject(urlOrOptions)) {
-    const payload = urlOrOptions;
+    const payload = prepareOperationPayload(urlOrOptions, operation, ['url']);
     assertPayloadObject(payload, operation);
 
     return {
@@ -403,22 +684,13 @@ function validateListBacklogItemsInput(urlOrOptions, statusOrOptions = null) {
     };
   }
 
-  const url = normalizeString(urlOrOptions, { unwrapQuotes: true });
-  if (typeof url !== 'string' || !url) {
-    throw invalidArgument(`${operation} requires 'url'`, {
-      operation,
-      field: 'url',
-      expected: 'non-empty string',
-      received: urlOrOptions,
-    });
-  }
-
   const options = isPlainObject(statusOrOptions)
     ? statusOrOptions
     : { status: statusOrOptions };
+  const payload = prepareOperationPayload({ url: urlOrOptions }, operation, ['url']);
 
   return {
-    url,
+    url: requiredString(payload, 'url', operation, { unwrapQuotes: true }),
     status: optionalEnum(options, 'status', BACKLOG_STATUSES, operation),
     include_deleted: optionalBoolean(
       {
@@ -432,19 +704,20 @@ function validateListBacklogItemsInput(urlOrOptions, statusOrOptions = null) {
 
 function validateCreateBacklogItemPayload(payload) {
   const operation = 'create_backlog_item';
-  assertPayloadObject(payload, operation);
+  const preparedPayload = prepareOperationPayload(payload, operation, ['project_url']);
+  assertPayloadObject(preparedPayload, operation);
 
   return {
-    project_url: requiredString(payload, 'project_url', operation, { unwrapQuotes: true }),
-    title: requiredString(payload, 'title', operation),
-    description: optionalString(payload, 'description', operation, { nullable: true }),
-    acceptance_criteria: optionalString(payload, 'acceptance_criteria', operation, { nullable: true }),
-    item_type: optionalEnum(payload, 'item_type', BACKLOG_ITEM_TYPES, operation),
-    status: optionalEnum(payload, 'status', BACKLOG_STATUSES, operation),
-    priority: optionalInteger(payload, 'priority', operation),
-    sort_order: optionalInteger(payload, 'sort_order', operation),
-    source_kind: optionalString(payload, 'source_kind', operation, { nullable: true }),
-    source_ref: optionalString(payload, 'source_ref', operation, { nullable: true }),
+    project_url: requiredString(preparedPayload, 'project_url', operation, { unwrapQuotes: true }),
+    title: requiredString(preparedPayload, 'title', operation),
+    description: optionalString(preparedPayload, 'description', operation, { nullable: true }),
+    acceptance_criteria: optionalString(preparedPayload, 'acceptance_criteria', operation, { nullable: true }),
+    item_type: optionalEnum(preparedPayload, 'item_type', BACKLOG_ITEM_TYPES, operation),
+    status: optionalEnum(preparedPayload, 'status', BACKLOG_STATUSES, operation),
+    priority: optionalInteger(preparedPayload, 'priority', operation),
+    sort_order: optionalInteger(preparedPayload, 'sort_order', operation),
+    source_kind: optionalString(preparedPayload, 'source_kind', operation, { nullable: true }),
+    source_ref: optionalString(preparedPayload, 'source_ref', operation, { nullable: true }),
   };
 }
 
@@ -545,6 +818,8 @@ function validateUpdateTaskStatusInput(inputOrTaskId, maybePayload) {
     payload = inputOrTaskId;
   }
 
+  payload = prepareOperationPayload(payload, operation, ['task_id', 'project_url', 'agent_name', 'agent_email']);
+
   assertPayloadObject(payload, operation);
 
   return {
@@ -569,6 +844,8 @@ function validateLogAgentProgressInput(inputOrTaskId, maybePayload) {
     payload = inputOrTaskId;
   }
 
+  payload = prepareOperationPayload(payload, operation, ['task_id', 'project_url', 'agent_name', 'branch']);
+
   assertPayloadObject(payload, operation);
 
   return {
@@ -583,13 +860,14 @@ function validateLogAgentProgressInput(inputOrTaskId, maybePayload) {
 
 function validateReportBlockerPayload(payload) {
   const operation = 'report_blocker';
-  assertPayloadObject(payload, operation);
+  const preparedPayload = prepareOperationPayload(payload, operation, ['task_id', 'project_url', 'agent_name']);
+  assertPayloadObject(preparedPayload, operation);
 
   return {
-    project_url: requiredString(payload, 'project_url', operation, { unwrapQuotes: true }),
-    task_id: requiredUuid(payload, 'task_id', operation),
-    error_message: requiredString(payload, 'error_message', operation),
-    agent_name: requiredString(payload, 'agent_name', operation),
+    project_url: requiredString(preparedPayload, 'project_url', operation, { unwrapQuotes: true }),
+    task_id: requiredUuid(preparedPayload, 'task_id', operation),
+    error_message: requiredString(preparedPayload, 'error_message', operation),
+    agent_name: requiredString(preparedPayload, 'agent_name', operation),
   };
 }
 
@@ -605,6 +883,8 @@ function validateHeartbeatInput(inputOrTaskId, maybePayload) {
   } else {
     payload = inputOrTaskId;
   }
+
+  payload = prepareOperationPayload(payload, operation, ['task_id', 'project_url', 'agent_name']);
 
   assertPayloadObject(payload, operation);
 
@@ -671,14 +951,26 @@ function normalizeBatchPayload(input, operationName, itemValidator, options) {
 
 async function registerTask(payload, options) {
   const { isBatch, items, options: batchOptions } = normalizeBatchPayload(payload, 'register_task', validateRegisterTaskPayload, options);
-  return request(buildBatchPath('/projects/tasks', isBatch ? batchOptions : { strict: false }), {
+  const response = await request(buildBatchPath('/projects/tasks', isBatch ? batchOptions : { strict: false }), {
     method: 'POST',
     body: JSON.stringify(isBatch ? items : items[0]),
   });
+
+  if (!isBatch) {
+    const responseTaskId = normalizeString(response?.task_id, { unwrapQuotes: true });
+    const persistedPayload = {
+      ...items[0],
+      task_id: typeof responseTaskId === 'string' && UUID_REGEX.test(responseTaskId) ? responseTaskId : items[0]?.task_id,
+    };
+    persistExecutionContextFromPayload(persistedPayload);
+  }
+
+  return response;
 }
 
 async function readProjectContext(urlOrOptions, limitOrOptions = 5) {
   const options = validateReadProjectContextInput(urlOrOptions, limitOrOptions);
+  persistExecutionContextFromPayload({ project_url: options.url });
   const params = new URLSearchParams({
     url: options.url,
     limit: String(options.limit ?? 5),
@@ -695,6 +987,7 @@ async function readProjectContext(urlOrOptions, limitOrOptions = 5) {
 
 async function listBacklogItems(urlOrOptions, statusOrOptions = null) {
   const options = validateListBacklogItemsInput(urlOrOptions, statusOrOptions);
+  persistExecutionContextFromPayload({ project_url: options.url });
   const params = new URLSearchParams({ url: options.url });
 
   if (options.status) {
@@ -712,10 +1005,16 @@ async function listBacklogItems(urlOrOptions, statusOrOptions = null) {
 
 async function createBacklogItem(payload, options) {
   const { isBatch, items, options: batchOptions } = normalizeBatchPayload(payload, 'create_backlog_item', validateCreateBacklogItemPayload, options);
-  return request(buildBatchPath('/projects/backlog', isBatch ? batchOptions : { strict: false }), {
+  const response = await request(buildBatchPath('/projects/backlog', isBatch ? batchOptions : { strict: false }), {
     method: 'POST',
     body: JSON.stringify(isBatch ? items : items[0]),
   });
+
+  if (!isBatch) {
+    persistExecutionContextFromPayload(items[0]);
+  }
+
+  return response;
 }
 
 async function updateBacklogItem(inputOrBacklogId, payload, options) {
@@ -795,6 +1094,7 @@ async function updateTaskStatus(inputOrTaskId, payload, options) {
   }
 
   const normalizedPayload = validateUpdateTaskStatusInput(inputOrTaskId, payload);
+  persistExecutionContextFromPayload(normalizedPayload);
   const { task_id: taskId, ...body } = normalizedPayload;
 
   return request(`/tasks/${taskId}/status`, {
@@ -829,6 +1129,7 @@ async function logAgentProgress(inputOrTaskId, payload, options) {
   }
 
   const normalizedPayload = validateLogAgentProgressInput(inputOrTaskId, payload);
+  persistExecutionContextFromPayload(normalizedPayload);
   const { task_id: taskId, project_url: _projectUrl, ...body } = normalizedPayload;
 
   return request(`/tasks/${taskId}/logs`, {
@@ -839,6 +1140,10 @@ async function logAgentProgress(inputOrTaskId, payload, options) {
 
 async function reportBlocker(payload, options) {
   const { isBatch, items, options: batchOptions } = normalizeBatchPayload(payload, 'report_blocker', validateReportBlockerPayload, options);
+  if (!isBatch) {
+    persistExecutionContextFromPayload(items[0]);
+  }
+
   return request(buildBatchPath('/projects/blockers', isBatch ? batchOptions : { strict: false }), {
     method: 'POST',
     body: JSON.stringify(isBatch ? items : items[0]),
@@ -871,6 +1176,7 @@ async function heartbeat(inputOrTaskId, payload, options) {
   }
 
   const normalizedPayload = validateHeartbeatInput(inputOrTaskId, payload);
+  persistExecutionContextFromPayload(normalizedPayload);
   const { task_id: taskId, ...body } = normalizedPayload;
 
   return request(`/tasks/${taskId}/heartbeat`, {
@@ -881,15 +1187,19 @@ async function heartbeat(inputOrTaskId, payload, options) {
 
 module.exports = {
   AptsClientError,
+  clearStoredExecutionContext,
   createBacklogItem,
   deleteBacklogItem,
+  getExecutionContext,
   heartbeat,
   listBacklogItems,
   logAgentProgress,
   readProjectContext,
   registerTask,
   reportBlocker,
+  resolveExecutionIdentity,
   resolveGitIdentity,
+  setExecutionContext,
   updateBacklogItem,
   updateTaskStatus,
 };

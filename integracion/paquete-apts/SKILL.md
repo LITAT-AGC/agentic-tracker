@@ -53,7 +53,12 @@ Note: in this repository, it is published as integration material under the repo
 6. If your runtime requires a specific discovery path, add a thin adapter under `.github/skills/apts/`, `.agents/skills/apts/`, or `.claude/skills/apts/` that delegates to `.ia/apts/`.
 7. Apply the AGENTS setup policy: create `AGENTS.md` when no instruction file exists, or merge/update one APTS-managed section in `AGENTS.md` or `.github/copilot-instructions.md` when a file already exists.
 8. Configure `APTS_BASE_URL` and `APTS_API_KEY` in a `.env` file at the client project root (or an equivalent secret manager that exposes them as environment variables).
+8.1. Optional but recommended: set `APTS_PROJECT_URL`, `APTS_AGENT_NAME`, `APTS_AGENT_EMAIL`, `APTS_BRANCH`, `APTS_TASK_ID`, and `APTS_CONTEXT_FILE` to reduce repeated protocol payload fields in official client/CLI calls.
 9. Validate the integration by running `register_task`, then `log_agent_progress`, and then `heartbeat`.
+
+Official client/CLI identity autofill note: when payload fields are omitted, the official scripts resolve identity from env first, then local managed execution context file, and then local Git (`project_url/url`, `agent_name`, `agent_email`, `branch`), and resolve `task_id` from `APTS_TASK_ID` or managed context for execution calls.
+
+Managed execution context note: official scripts persist execution context at `.apts/execution-context.json` by default (override with `APTS_CONTEXT_FILE`). CLI exposes `show-execution-context`, `set-execution-context`, and `clear-execution-context` to inspect or control that state.
 
 Task recovery note: during backlog execution, call `register_task` with `backlog_item_id` so APTS can resume interrupted `todo`/`in_progress`/`stalled` tasks instead of creating duplicates.
 

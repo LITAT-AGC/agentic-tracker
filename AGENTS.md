@@ -53,13 +53,15 @@ This section is the short operational summary for agents integrating with APTS. 
 
 ### Common Required Fields
 
+When using the official APTS client or CLI, identity fields are auto-filled from env, local managed execution context, and Git if omitted in payloads. The table below reflects raw API required fields.
+
 | Field | Required by | Notes |
 | --- | --- | --- |
 | `project_url` | `register_task`, `create_backlog_item`, `read_project_context` (`url` query), `list_backlog_items` (`url` query), `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` | Resolve it from `git remote get-url origin`. |
 | `agent_name` | `register_task`, `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` | Resolve it from `git config user.name`. |
 | `agent_email` | `register_task`, `update_task_status` | Resolve it from `git config user.email`. |
 | `branch` | `log_agent_progress` | Resolve it from `git branch --show-current`. |
-| `task_id` | `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` | Returned by `register_task` or resumed from a linked backlog item. |
+| `task_id` | `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` | Returned by `register_task`, or resolved from `APTS_TASK_ID`, or from managed execution context (`.apts/execution-context.json` by default). |
 | `backlog_item_id` | `register_task` when executing tracked work, `update_backlog_item`, `delete_backlog_item` | Use it to bind execution to backlog and avoid duplicate work. |
 
 ### Backlog Reuse Rule
@@ -73,7 +75,7 @@ If there is no active backlog item that describes exactly the change you are abo
 
 ### Happy Path
 
-1. Resolve Git identity locally: `project_url`, `agent_name`, `agent_email`, `branch`.
+1. Ensure identity context is available: official client/CLI auto-resolves `project_url`, `agent_name`, `agent_email`, and `branch` from env/local context/Git.
 2. List backlog and decide whether to reuse an existing item or create a new one.
 3. Call `register_task` and keep the returned `task_id`.
 4. Call `read_project_context` before editing.

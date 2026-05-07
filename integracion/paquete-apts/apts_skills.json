@@ -2,7 +2,7 @@
   "skills": [
     {
       "name": "register_task",
-      "description": "Create or resume a task in the project. Minimum payload: project_url, title, agent_name, and agent_email. When backlog_item_id points to an active task in todo, in_progress, or stalled, APTS resumes that task instead of creating a duplicate.",
+      "description": "Create or resume a task in the project. Minimum payload in official client/CLI: title (project_url, agent_name, and agent_email are auto-resolved from env/local managed context/Git when omitted). When backlog_item_id points to an active task in todo, in_progress, or stalled, APTS resumes that task instead of creating a duplicate.",
       "parameters": {
         "oneOf": [
           {
@@ -28,10 +28,7 @@
               }
             },
             "required": [
-              "project_url",
-              "title",
-              "agent_name",
-              "agent_email"
+              "title"
             ]
           },
           {
@@ -60,10 +57,7 @@
                 }
               },
               "required": [
-                "project_url",
-                "title",
-                "agent_name",
-                "agent_email"
+                "title"
               ]
             }
           }
@@ -72,7 +66,7 @@
     },
     {
       "name": "read_project_context",
-      "description": "Read current project state, backlog items, pending tasks, and recent history. Minimum payload: url. Optional: limit and backlog_status.",
+      "description": "Read current project state, backlog items, pending tasks, and recent history. Minimum payload in official client/CLI: none for identity (url auto-resolves from env/local managed context/Git when omitted). Optional: limit and backlog_status.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -97,14 +91,12 @@
             ]
           }
         },
-        "required": [
-          "url"
-        ]
+        "required": []
       }
     },
     {
       "name": "list_backlog_items",
-      "description": "List backlog items for a project ordered by priority and sort order. Minimum payload: url. Use this before direct implementation to detect whether a reported bug, error, or regression is already tracked.",
+      "description": "List backlog items for a project ordered by priority and sort order. Minimum payload in official client/CLI: none for identity (url auto-resolves from env/local managed context/Git when omitted). Use this before direct implementation to detect whether a reported bug, error, or regression is already tracked.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -129,14 +121,12 @@
             "default": false
           }
         },
-        "required": [
-          "url"
-        ]
+        "required": []
       }
     },
     {
       "name": "create_backlog_item",
-      "description": "Create a managed backlog item for a project. Minimum payload: project_url and title. Mandatory before direct implementation when a chat introduces a new bug, error, or regression not yet tracked in APTS; use item_type 'bug' for defect intake.",
+      "description": "Create a managed backlog item for a project. Minimum payload in official client/CLI: title (project_url auto-resolves from env/local managed context/Git when omitted). Mandatory before direct implementation when a chat introduces a new bug, error, or regression not yet tracked in APTS; use item_type 'bug' for defect intake.",
       "parameters": {
         "oneOf": [
           {
@@ -190,7 +180,6 @@
               }
             },
             "required": [
-              "project_url",
               "title"
             ]
           },
@@ -248,7 +237,6 @@
                 }
               },
               "required": [
-                "project_url",
                 "title"
               ]
             }
@@ -418,7 +406,7 @@
     },
     {
       "name": "update_task_status",
-      "description": "Update the status of a task. Minimum payload: task_id, status, project_url, agent_name, and agent_email. Use strict transitions: close with review first, then done only from review and with recent execution activity.",
+      "description": "Update the status of a task. Minimum payload in official client/CLI: status (task_id auto-resolves from APTS_TASK_ID or local managed execution context when omitted; project_url, agent_name, and agent_email auto-resolve from env/local managed context/Git). Use strict transitions: close with review first, then done only from review and with recent execution activity.",
       "parameters": {
         "oneOf": [
           {
@@ -448,11 +436,7 @@
               }
             },
             "required": [
-              "task_id",
-              "status",
-              "project_url",
-              "agent_name",
-              "agent_email"
+              "status"
             ]
           },
           {
@@ -485,11 +469,7 @@
                 }
               },
               "required": [
-                "task_id",
-                "status",
-                "project_url",
-                "agent_name",
-                "agent_email"
+                "status"
               ]
             }
           }
@@ -498,7 +478,7 @@
     },
     {
       "name": "log_agent_progress",
-      "description": "Log agent progress, bugs fixed, architectural decisions. Minimum payload: task_id, project_url, agent_name, branch, and message.",
+      "description": "Log agent progress, bugs fixed, architectural decisions. Minimum payload in official client/CLI: message (task_id auto-resolves from APTS_TASK_ID or local managed execution context when omitted; project_url, agent_name, and branch auto-resolve from env/local managed context/Git).",
       "parameters": {
         "oneOf": [
           {
@@ -545,10 +525,6 @@
               }
             },
             "required": [
-              "task_id",
-              "project_url",
-              "agent_name",
-              "branch",
               "message"
             ]
           },
@@ -599,10 +575,6 @@
                 }
               },
               "required": [
-                "task_id",
-                "project_url",
-                "agent_name",
-                "branch",
                 "message"
               ]
             }
@@ -612,7 +584,7 @@
     },
     {
       "name": "report_blocker",
-      "description": "Emergency skill to use when blocked. Minimum payload: project_url, task_id, error_message, and agent_name.",
+      "description": "Emergency skill to use when blocked. Minimum payload in official client/CLI: error_message (task_id auto-resolves from APTS_TASK_ID or local managed execution context when omitted; project_url and agent_name auto-resolve from env/local managed context/Git).",
       "parameters": {
         "oneOf": [
           {
@@ -632,10 +604,7 @@
               }
             },
             "required": [
-              "project_url",
-              "task_id",
-              "error_message",
-              "agent_name"
+              "error_message"
             ]
           },
           {
@@ -658,10 +627,7 @@
                 }
               },
               "required": [
-                "project_url",
-                "task_id",
-                "error_message",
-                "agent_name"
+                "error_message"
               ]
             }
           }
@@ -670,7 +636,7 @@
     },
     {
       "name": "heartbeat",
-      "description": "Periodic life signal sent every 5 minutes. Minimum payload: task_id, agent_name, and project_url.",
+      "description": "Periodic life signal sent every 5 minutes. Minimum payload in official client/CLI: none when APTS_TASK_ID or local managed execution context is available (task_id auto-resolves from env/context; agent_name and project_url auto-resolve from env/Git/context).",
       "parameters": {
         "oneOf": [
           {
@@ -686,11 +652,7 @@
                 "type": "string"
               }
             },
-            "required": [
-              "task_id",
-              "agent_name",
-              "project_url"
-            ]
+            "required": []
           },
           {
             "type": "array",
@@ -708,11 +670,7 @@
                   "type": "string"
                 }
               },
-              "required": [
-                "task_id",
-                "agent_name",
-                "project_url"
-              ]
+              "required": []
             }
           }
         ]

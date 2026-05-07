@@ -770,10 +770,34 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.16';
+const integrationManifestSchemaVersion = '2.0.19';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.19',
+    date: '2026-05-07',
+    changes: [
+      'Official APTS clients now persist managed execution context locally and reuse it as fallback for automatic payload field resolution across commands.',
+      'Official CLI now exposes execution-context commands and updated help to keep repeated execution calls near-zero payload after register_task.'
+    ]
+  },
+  {
+    version: '2.0.18',
+    date: '2026-05-07',
+    changes: [
+      'Official APTS clients now auto-resolve task_id from APTS_TASK_ID for repeated execution calls, further reducing protocol payload overhead in agents.',
+      'Official skills contract and CLI guidance now publish reduced minimum payloads for update_task_status, log_agent_progress, report_blocker, and heartbeat under the managed client/CLI flow.'
+    ]
+  },
+  {
+    version: '2.0.17',
+    date: '2026-05-07',
+    changes: [
+      'Official APTS clients now auto-resolve missing identity fields (project_url/url, agent_name, agent_email, branch) from environment variables first and local Git as fallback.',
+      'Official CLI command guidance and skills contract now publish reduced minimum payloads aligned with identity auto-fill in managed client scripts.'
+    ]
+  },
   {
     version: '2.0.16',
     date: '2026-05-06',
@@ -1019,8 +1043,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts_skills.json'),
     fileName: 'apts_skills.json',
     contentType: 'application/json; charset=utf-8',
-    artifactVersion: '2.0.16',
-    updatedInSchemaVersion: '2.0.16',
+    artifactVersion: '2.0.19',
+    updatedInSchemaVersion: '2.0.19',
     kind: 'skills_contract',
     recommended: true,
     syncAction: 'overwrite',
@@ -1032,8 +1056,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'SKILL.md'),
     fileName: 'SKILL.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.16',
-    updatedInSchemaVersion: '2.0.16',
+    artifactVersion: '2.0.19',
+    updatedInSchemaVersion: '2.0.19',
     kind: 'skill_package',
     recommended: false,
     syncAction: 'overwrite',
@@ -1045,8 +1069,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-agent-guidelines.md'),
     fileName: 'apts-agent-guidelines.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.15',
-    updatedInSchemaVersion: '2.0.15',
+    artifactVersion: '2.0.19',
+    updatedInSchemaVersion: '2.0.19',
     kind: 'agent_guidelines',
     recommended: true,
     syncAction: 'overwrite',
@@ -1102,8 +1126,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-client.js'),
     fileName: 'apts-client.js',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.0.7',
-    updatedInSchemaVersion: '2.0.7',
+    artifactVersion: '2.0.19',
+    updatedInSchemaVersion: '2.0.19',
     kind: 'reference_client',
     recommended: false,
     optional: true,
@@ -1118,8 +1142,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-client.mjs'),
     fileName: 'apts-client.mjs',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.0.7',
-    updatedInSchemaVersion: '2.0.7',
+    artifactVersion: '2.0.19',
+    updatedInSchemaVersion: '2.0.19',
     kind: 'reference_client',
     recommended: false,
     optional: true,
@@ -1134,8 +1158,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-cli.js'),
     fileName: 'apts-cli.js',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.0.16',
-    updatedInSchemaVersion: '2.0.16',
+    artifactVersion: '2.0.19',
+    updatedInSchemaVersion: '2.0.19',
     kind: 'reference_cli',
     recommended: false,
     optional: true,
@@ -1151,8 +1175,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-cli.mjs'),
     fileName: 'apts-cli.mjs',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.0.16',
-    updatedInSchemaVersion: '2.0.16',
+    artifactVersion: '2.0.19',
+    updatedInSchemaVersion: '2.0.19',
     kind: 'reference_cli',
     recommended: false,
     optional: true,
@@ -1375,6 +1399,8 @@ const buildIntegrationManifest = (req) => ({
     'If the runtime supports custom agents, install and use APTS Bugfix Intake as the first entrypoint for chat-triggered defect intake.',
     'Choose the reference client that matches the client project module system: apts-client.js for CommonJS or apts-client.mjs for ESM.',
     'If the runtime prefers shellable command entrypoints over importing JavaScript modules, download the matching CLI as well: apts-cli.js for CommonJS or apts-cli.mjs for ESM, keeping it beside the matching client file.',
+    'Official APTS client/CLI auto-fills missing identity fields from environment variables first, local managed execution context second, and local Git as fallback; provide explicit identity fields only when raw API calls are used.',
+    'Official client/CLI persist managed execution context in .apts/execution-context.json by default (override with APTS_CONTEXT_FILE) so repeated execution calls can omit task_id and identity fields.',
     'Use register_task with backlog_item_id to resume interrupted work for that backlog item before creating additional execution tasks.',
     'Do not force task status done for interrupted executions: pass through review first and ensure recent heartbeat or progress logs exist before closing as done.',
     'For base APTS operations, use only official scripts published by this manifest and never merge legacy wrapper code into downloaded managed scripts.',
@@ -1383,10 +1409,11 @@ const buildIntegrationManifest = (req) => ({
     'Use APTS_BASE_URL with the published /api base path.'
   ],
   identity_requirements: [
-    { field: 'project_url', resolve_with: 'git remote get-url origin' },
-    { field: 'agent_name', resolve_with: 'git config user.name' },
-    { field: 'agent_email', resolve_with: 'git config user.email' },
-    { field: 'branch', resolve_with: 'git branch --show-current' }
+    { field: 'project_url', resolve_with: 'APTS_PROJECT_URL, managed execution context, or git remote get-url origin' },
+    { field: 'agent_name', resolve_with: 'APTS_AGENT_NAME, managed execution context, or git config user.name' },
+    { field: 'agent_email', resolve_with: 'APTS_AGENT_EMAIL, managed execution context, or git config user.email' },
+    { field: 'branch', resolve_with: 'APTS_BRANCH, managed execution context, or git branch --show-current' },
+    { field: 'task_id', resolve_with: 'APTS_TASK_ID or managed execution context (for repeated execution calls)' }
   ],
   artifacts: Object.entries(integrationArtifacts).map(([id, artifact]) => ({
     id,

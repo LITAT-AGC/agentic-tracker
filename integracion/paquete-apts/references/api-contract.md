@@ -13,7 +13,30 @@ Todas las llamadas de agentes deben incluir:
 Authorization: Bearer <APTS_API_KEY>
 ```
 
-## Identidad que el agente debe resolver desde Git
+## Resolucion de identidad
+
+En cliente/CLI oficial APTS, los campos de identidad se autocompletan cuando faltan en el payload usando este orden: variables de entorno -> contexto local gestionado -> Git local.
+
+```env
+APTS_PROJECT_URL=https://github.com/org/repo
+APTS_AGENT_NAME=Copilot
+APTS_AGENT_EMAIL=copilot@example.com
+APTS_BRANCH=main
+APTS_TASK_ID=22222222-2222-2222-2222-222222222222
+APTS_CONTEXT_FILE=.apts/execution-context.json
+```
+
+`APTS_TASK_ID` lets the official client/CLI omit `task_id` in repeated execution calls such as `heartbeat`, `log_agent_progress`, `report_blocker`, and `update_task_status`.
+`APTS_CONTEXT_FILE` can override where official client/CLI store managed execution context used for automatic field resolution.
+
+By default, official client/CLI persist execution context in `.apts/execution-context.json` and use it as an additional fallback source after env variables.
+
+CLI helpers for managed context:
+- `show-execution-context` to inspect resolved context and file path.
+- `set-execution-context` to persist `task_id` or identity fields once.
+- `clear-execution-context` to reset local managed context.
+
+Fallback Git cuando no existen esas variables:
 
 ```bash
 project_url=$(git remote get-url origin)
@@ -22,7 +45,11 @@ agent_email=$(git config user.email)
 branch=$(git branch --show-current)
 ```
 
+Si llamas la API HTTP sin pasar por el cliente/CLI oficial, debes enviar explicitamente todos los campos requeridos por endpoint.
+
 ## Campos comunes obligatorios
+
+La tabla refleja campos obligatorios a nivel de API. El cliente/CLI oficial puede completar los campos de identidad automaticamente.
 
 | Campo | Operaciones |
 | --- | --- |

@@ -78,7 +78,7 @@ Authorization: Bearer <APTS_API_KEY>
 
 ## Flujo esperado de un agente
 
-1. Resolver identidad desde Git local.
+1. Verificar contexto de identidad (el cliente/CLI oficial lo autocompleta desde env, contexto local gestionado y luego Git local).
 2. Consultar backlog (`list_backlog_items`) y seleccionar un item pendiente o crear uno nuevo si corresponde.
 3. Crear la tarea de ejecucion con `register_task` y asociarla al `backlog_item_id`.
 4. Leer el contexto del proyecto antes de trabajar (`read_project_context`).
@@ -86,7 +86,22 @@ Authorization: Bearer <APTS_API_KEY>
 6. Reportar blocker si no puede continuar.
 7. Marcar la tarea como `done` o `review` cuando termina; APTS sincroniza el estado del backlog vinculado.
 
-Valores que el agente debe resolver localmente antes de llamar las skills:
+Fuentes de identidad usadas por el cliente/CLI oficial cuando faltan campos en payload:
+
+```env
+APTS_PROJECT_URL=https://github.com/org/repo
+APTS_AGENT_NAME=Copilot
+APTS_AGENT_EMAIL=copilot@example.com
+APTS_BRANCH=main
+APTS_TASK_ID=22222222-2222-2222-2222-222222222222
+APTS_CONTEXT_FILE=.apts/execution-context.json
+```
+
+Con `APTS_TASK_ID` configurado, las llamadas repetitivas (`heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status`) pueden omitir `task_id` en el payload cuando se usa el cliente/CLI oficial.
+Ademas, el cliente/CLI oficial persiste contexto de ejecucion en `.apts/execution-context.json` por defecto (o la ruta definida en `APTS_CONTEXT_FILE`), por lo que luego de `register_task` las llamadas repetitivas pueden omitir `task_id` incluso sin reexportar variables.
+La CLI oficial tambien incluye `show-execution-context`, `set-execution-context` y `clear-execution-context` para inspeccionar o controlar ese estado local.
+
+Fallback en Git local:
 
 ```bash
 project_url=$(git remote get-url origin)

@@ -66,11 +66,15 @@ This local journal is not a source of truth and does not replace APTS. It is onl
 
 Record at least: execution start, important milestones, blockers, APTS synchronization failures, and task completion. Never store `APTS_API_KEY` or any other secret in this journal.
 
-Before using any skill, resolve from the local Git environment:
-- project_url: `git remote get-url origin`
-- agent_name: `git config user.name`
-- agent_email: `git config user.email`
-- branch: `git branch --show-current`
+For the official APTS client/CLI, identity fields are auto-resolved from environment variables first, then managed local execution context, and then local Git when omitted in payloads:
+- project_url/url: `APTS_PROJECT_URL` or `git remote get-url origin`
+- agent_name: `APTS_AGENT_NAME` or `git config user.name`
+- agent_email: `APTS_AGENT_EMAIL` or `git config user.email`
+- branch: `APTS_BRANCH` or `git branch --show-current`
+- task_id for active execution calls: `APTS_TASK_ID` (optional but recommended to avoid repeating it in every payload)
+- local context file fallback: `.apts/execution-context.json` (or the path in `APTS_CONTEXT_FILE`)
+
+If you call the raw HTTP API directly (without the official client/CLI), you must still send all required identity fields explicitly.
 
 Mandatory rules:
 0. If the user asks for "next task", "continue backlog", "run backlog", or equivalent requests, you must invoke `APTS Backlog Orchestrator` first and not run direct implementation from the general agent.
@@ -89,7 +93,7 @@ Mandatory rules:
 6. If you cannot continue, use `report_blocker` and stop work.
 7. If you are refining scope, planning, or capturing a new defect request from chat, use `create_backlog_item` or `update_backlog_item` instead of inventing work outside APTS.
 8. At completion, set `review` first; use `done` only from review and only when recent execution activity exists.
-9. Never invent `project_url`, `agent_name`, or `branch`; always resolve them from Git.
+9. Never invent `project_url`, `agent_name`, or `branch`; let the official client/CLI auto-resolve them from env/local context/Git or provide them explicitly with real values.
 10. If `APTS_API_KEY` is missing, stop operational integration, request it from the operator, and continue only after it is stored as an environment secret.
 11. Keep a local append-only resilience journal, but never use it to replace APTS as official tracking.
 12. If `APTS Backlog Orchestrator` is not installed or cannot be invoked, stop task execution and ask the operator to install/fix it; do not proceed with an alternative flow without the orchestrator.
@@ -104,6 +108,8 @@ Mandatory rules:
 Use `integracion/paquete-apts/apts_skills.json` as the formal contract and `integracion/paquete-apts/references/api-contract.md` as the human-readable source of truth.
 
 ### Common Required Fields
+
+When you use the official client/CLI, missing identity fields are auto-filled from env/local context/Git. The table below still lists server-required fields for raw API calls.
 
 | Field | Required by |
 | --- | --- |
@@ -124,9 +130,9 @@ Use `integracion/paquete-apts/apts_skills.json` as the formal contract and `inte
 
 ### Happy Path
 
-1. Resolve `project_url`, `agent_name`, `agent_email`, and `branch` from Git.
+1. Ensure identity context is available (official client/CLI resolves from env/local context/Git automatically).
 2. Call `list_backlog_items` and choose to reuse or create an item.
-3. Call `register_task` and keep the returned `task_id`.
+3. Call `register_task`; official client/CLI persists the returned `task_id` in local managed context for subsequent calls.
 4. Call `read_project_context` before editing.
 5. Call `heartbeat` while the task is active.
 6. Call `log_agent_progress` on meaningful milestones.
@@ -138,66 +144,49 @@ Use `integracion/paquete-apts/apts_skills.json` as the formal contract and `inte
 ```json
 {
 	"create_backlog_item": {
-		"project_url": "https://github.com/org/repo",
 		"title": "Document APTS command payloads"
 	},
 	"register_task": {
-		"project_url": "https://github.com/org/repo",
-		"title": "Document APTS command payloads",
-		"agent_name": "Copilot",
-		"agent_email": "copilot@example.com"
+		"title": "Document APTS command payloads"
 	},
 	"read_project_context": {
-		"url": "https://github.com/org/repo",
 		"limit": 5
 	},
 	"heartbeat": {
-		"task_id": "22222222-2222-2222-2222-222222222222",
-		"agent_name": "Copilot",
-		"project_url": "https://github.com/org/repo"
+	},
+	"set_execution_context": {
+		"task_id": "22222222-2222-2222-2222-222222222222"
 	},
 	"log_agent_progress": {
-		"task_id": "22222222-2222-2222-2222-222222222222",
-		"project_url": "https://github.com/org/repo",
-		"agent_name": "Copilot",
-		"branch": "main",
 		"message": "Updated APTS docs with explicit payload examples."
 	},
 	"update_task_status": {
-		"task_id": "22222222-2222-2222-2222-222222222222",
-		"status": "review",
-		"project_url": "https://github.com/org/repo",
-		"agent_name": "Copilot",
-		"agent_email": "copilot@example.com"
+		"status": "review"
 	}
 }
 ```
+
+For `heartbeat`, `log_agent_progress`, `report_blocker`, and `update_task_status`, minimum payloads above assume `task_id` is already available through `APTS_TASK_ID` or managed execution context.
 
 ### PowerShell Examples
 
 ```powershell
 $heartbeat = @'
 {
-	"task_id": "22222222-2222-2222-2222-222222222222",
-	"agent_name": "Copilot",
-	"project_url": "https://github.com/org/repo"
+	"task_id": "22222222-2222-2222-2222-222222222222"
 }
 '@
 
-$heartbeat | node .ia/apts/apts-cli.mjs heartbeat --stdin --pretty
+$heartbeat | node .ia/apts/apts-cli.mjs set-execution-context --stdin --pretty
 ```
 
 ```powershell
 @'
 {
-	"project_url": "https://github.com/org/repo",
-	"title": "Document APTS command payloads",
-	"agent_name": "Copilot",
-	"agent_email": "copilot@example.com"
 }
-'@ | Set-Content -Path register-task.json
+'@ | Set-Content -Path heartbeat.json
 
-Get-Content .\register-task.json | node .ia/apts/apts-cli.mjs register-task --stdin --pretty
+Get-Content .\heartbeat.json | node .ia/apts/apts-cli.mjs heartbeat --stdin --pretty
 ```
 
 ### Frequent Errors
