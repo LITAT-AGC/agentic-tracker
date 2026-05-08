@@ -1216,10 +1216,18 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.20';
+const integrationManifestSchemaVersion = '2.0.21';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.21',
+    date: '2026-05-08',
+    changes: [
+      'Public integration manifest now declares explicit runtime agent discovery metadata for VS Code, including discovery path, filename glob, and post-sync reload requirement.',
+      'APTS now publishes dedicated VS Code runtime adapter artifacts for orchestrator, executor, and bugfix intake under .github/agents so custom agents are discoverable and invocable after sync.'
+    ]
+  },
   {
     version: '2.0.20',
     date: '2026-05-08',
@@ -1575,6 +1583,66 @@ const integrationArtifacts = {
     deprecatedFilenames: [],
     description: 'Bug intake agent template that creates or reuses a tracked APTS bug item before implementation starts.'
   },
+  vscode_orchestrator_agent_adapter: {
+    route: `${publicIntegrationBasePath}/agentes/vscode/apts-backlog-orchestrator.agent.md`,
+    filePath: path.join(integrationRoot, 'paquete-apts', 'runtime-adapters', 'vscode', 'agents', 'apts-backlog-orchestrator.agent.md'),
+    fileName: 'apts-backlog-orchestrator.agent.md',
+    contentType: 'text/markdown; charset=utf-8',
+    artifactVersion: '2.0.21',
+    updatedInSchemaVersion: '2.0.21',
+    kind: 'agent_runtime_adapter',
+    recommended: true,
+    syncAction: 'overwrite',
+    deprecatedFilenames: [],
+    runtime: 'vscode',
+    discoveryPath: '.github/agents',
+    requiredGlob: '*.agent.md',
+    targetRelativePath: '.github/agents/apts-backlog-orchestrator.agent.md',
+    canonicalSourceArtifactId: 'orchestrator_agent',
+    invocationName: 'APTS Backlog Orchestrator',
+    invocationAliases: ['Orquestador Backlog APTS'],
+    description: 'VS Code discovery adapter for the APTS backlog orchestrator agent.'
+  },
+  vscode_executor_agent_adapter: {
+    route: `${publicIntegrationBasePath}/agentes/vscode/backlog-item-executor-dev-test-commit.agent.md`,
+    filePath: path.join(integrationRoot, 'paquete-apts', 'runtime-adapters', 'vscode', 'agents', 'backlog-item-executor-dev-test-commit.agent.md'),
+    fileName: 'backlog-item-executor-dev-test-commit.agent.md',
+    contentType: 'text/markdown; charset=utf-8',
+    artifactVersion: '2.0.21',
+    updatedInSchemaVersion: '2.0.21',
+    kind: 'agent_runtime_adapter',
+    recommended: true,
+    syncAction: 'overwrite',
+    deprecatedFilenames: [],
+    runtime: 'vscode',
+    discoveryPath: '.github/agents',
+    requiredGlob: '*.agent.md',
+    targetRelativePath: '.github/agents/backlog-item-executor-dev-test-commit.agent.md',
+    canonicalSourceArtifactId: 'executor_agent',
+    invocationName: 'Backlog Item Executor Dev Test Commit',
+    invocationAliases: ['Ejecutor Item Backlog Dev Test Commit'],
+    description: 'VS Code discovery adapter for the backlog item worker agent.'
+  },
+  vscode_bugfix_intake_agent_adapter: {
+    route: `${publicIntegrationBasePath}/agentes/vscode/apts-bugfix-intake.agent.md`,
+    filePath: path.join(integrationRoot, 'paquete-apts', 'runtime-adapters', 'vscode', 'agents', 'apts-bugfix-intake.agent.md'),
+    fileName: 'apts-bugfix-intake.agent.md',
+    contentType: 'text/markdown; charset=utf-8',
+    artifactVersion: '2.0.21',
+    updatedInSchemaVersion: '2.0.21',
+    kind: 'agent_runtime_adapter',
+    recommended: true,
+    syncAction: 'overwrite',
+    deprecatedFilenames: [],
+    runtime: 'vscode',
+    discoveryPath: '.github/agents',
+    requiredGlob: '*.agent.md',
+    targetRelativePath: '.github/agents/apts-bugfix-intake.agent.md',
+    canonicalSourceArtifactId: 'bugfix_intake_agent',
+    invocationName: 'APTS Bugfix Intake',
+    invocationAliases: ['Intake Bugfix APTS'],
+    description: 'VS Code discovery adapter for the bugfix intake agent.'
+  },
   js_client_commonjs: {
     route: `${publicIntegrationBasePath}/apts-client.js`,
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-client.js'),
@@ -1754,6 +1822,47 @@ const buildIntegrationManifest = (req) => ({
       runtime_adapter_paths: ['.github/skills/apts', '.agents/skills/apts', '.claude/skills/apts'],
       policy: 'Keep APTS integration artifacts local to each repository and avoid user-global skill installation for project integrations.'
     },
+    runtime_agent_discovery: {
+      runtime: 'vscode',
+      discovery_path: '.github/agents',
+      required_glob: '*.agent.md',
+      reload_required_after_sync: true,
+      validation_checklist: [
+        'Confirm orchestrator, executor, and bugfix intake adapters exist in .github/agents.',
+        'Validate YAML frontmatter for each adapter and ensure name is present and unique.',
+        'Reload VS Code window so the runtime reindexes custom agents.'
+      ]
+    },
+    agent_runtime_adapters: {
+      required_for_custom_agents: true,
+      installation_state_policy: 'If the runtime is VS Code and required adapters are missing in .github/agents, custom-agent installation is incomplete.',
+      mappings: [
+        {
+          runtime: 'vscode',
+          canonical_artifact_id: 'orchestrator_agent',
+          adapter_artifact_id: 'vscode_orchestrator_agent_adapter',
+          target_relative_path: '.github/agents/apts-backlog-orchestrator.agent.md',
+          invocation_name: 'APTS Backlog Orchestrator',
+          invocation_aliases: ['Orquestador Backlog APTS']
+        },
+        {
+          runtime: 'vscode',
+          canonical_artifact_id: 'executor_agent',
+          adapter_artifact_id: 'vscode_executor_agent_adapter',
+          target_relative_path: '.github/agents/backlog-item-executor-dev-test-commit.agent.md',
+          invocation_name: 'Backlog Item Executor Dev Test Commit',
+          invocation_aliases: ['Ejecutor Item Backlog Dev Test Commit']
+        },
+        {
+          runtime: 'vscode',
+          canonical_artifact_id: 'bugfix_intake_agent',
+          adapter_artifact_id: 'vscode_bugfix_intake_agent_adapter',
+          target_relative_path: '.github/agents/apts-bugfix-intake.agent.md',
+          invocation_name: 'APTS Bugfix Intake',
+          invocation_aliases: ['Intake Bugfix APTS']
+        }
+      ]
+    },
     agent_instruction_policy: {
       preferred_instruction_files: ['AGENTS.md', '.github/copilot-instructions.md'],
       missing_file_behavior: 'If neither AGENTS.md nor .github/copilot-instructions.md exists, create AGENTS.md from the downloaded apts-agent-guidelines.md before protected APTS calls.',
@@ -1814,6 +1923,7 @@ const buildIntegrationManifest = (req) => ({
       'Create or update a .env file at the client project root with APTS_BASE_URL and APTS_API_KEY before using protected APIs.',
       'Ensure the project has AGENTS.md or .github/copilot-instructions.md. Create AGENTS.md from apts-agent-guidelines.md if neither file exists, or merge/update one APTS-managed section if an instruction file already exists.',
       'Create a workspace-local integration folder such as .ia/apts, place the APTS contract and HTTP client there, and only then wire runtime-specific adapters if needed.',
+      'If the runtime is VS Code and custom agents are required, install runtime adapters in .github/agents before backlog execution and reload the editor window after sync.',
       'Treat interrupted execution as resumable work: call register_task with backlog_item_id so APTS can resume existing stalled/todo/in_progress tasks for that backlog item instead of creating duplicates.',
       'Do not merge legacy local wrappers into official APTS scripts; keep official scripts unchanged and move extra project logic to thin adapters when needed.',
       'If the project previously used ad-hoc APTS wrapper scripts for base operations, remove them once the official client or CLI is installed and keep only thin discovery adapters when the runtime still needs them.',
@@ -1845,6 +1955,7 @@ const buildIntegrationManifest = (req) => ({
     'Store APTS_BASE_URL and APTS_API_KEY in a .env file at the root of the client project, or in an equivalent project secret store.',
     'Install APTS integration artifacts in a workspace-local base folder such as .ia/apts.',
     'Use runtime-specific adapter paths only when needed for discovery (.github/skills/apts, .agents/skills/apts, or .claude/skills/apts), and avoid user-global skill installation.',
+    'If using VS Code custom agents, install the published agent runtime adapters into .github/agents and reload the window so those agents become discoverable.',
     'Maintain the local resilience log described in the bootstrap section; it is append-only and must not replace APTS as the source of truth.',
     'Download and install the skills contract first.',
     'Read the base agent guidelines before the first APTS API call.',
@@ -1882,6 +1993,13 @@ const buildIntegrationManifest = (req) => ({
     module_system: artifact.module_system || null,
     selection_rule: artifact.selection_rule || null,
     depends_on_artifact_ids: artifact.dependsOnArtifactIds || [],
+    runtime: artifact.runtime || null,
+    discovery_path: artifact.discoveryPath || null,
+    required_glob: artifact.requiredGlob || null,
+    target_relative_path: artifact.targetRelativePath || null,
+    canonical_source_artifact_id: artifact.canonicalSourceArtifactId || null,
+    invocation_name: artifact.invocationName || null,
+    invocation_aliases: artifact.invocationAliases || [],
     media_type: artifact.contentType,
     url: buildAbsoluteUrl(req, artifact.route),
     download_url: `${buildAbsoluteUrl(req, artifact.route)}?download=1`
@@ -1919,6 +2037,9 @@ app.get(`${publicIntegrationBasePath}/agent-guidelines.md`, async (req, res) => 
 app.get(`${publicIntegrationBasePath}/agentes/ejecutor-item-backlog-dev-test-commit.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'executor_agent'));
 app.get(`${publicIntegrationBasePath}/agentes/orquestador-backlog-apts.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'orchestrator_agent'));
 app.get(`${publicIntegrationBasePath}/agentes/intake-bugfix-apts.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'bugfix_intake_agent'));
+app.get(`${publicIntegrationBasePath}/agentes/vscode/apts-backlog-orchestrator.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'vscode_orchestrator_agent_adapter'));
+app.get(`${publicIntegrationBasePath}/agentes/vscode/backlog-item-executor-dev-test-commit.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'vscode_executor_agent_adapter'));
+app.get(`${publicIntegrationBasePath}/agentes/vscode/apts-bugfix-intake.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'vscode_bugfix_intake_agent_adapter'));
 app.get(`${publicIntegrationBasePath}/apts-client.js`, async (req, res) => sendIntegrationArtifact(req, res, 'js_client_commonjs'));
 app.get(`${publicIntegrationBasePath}/apts-client.mjs`, async (req, res) => sendIntegrationArtifact(req, res, 'js_client_esm'));
 app.get(`${publicIntegrationBasePath}/apts-cli.js`, async (req, res) => sendIntegrationArtifact(req, res, 'js_cli_commonjs'));
