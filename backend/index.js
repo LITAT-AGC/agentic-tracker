@@ -701,6 +701,132 @@ const readOpenRouterResponse = async (response) => {
   return data;
 };
 
+const toNonNegativeInteger = (value) => {
+  const parsed = Math.floor(Number(value));
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return parsed;
+};
+
+const toNonNegativeNumber = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return parsed;
+};
+
+const persistOpenRouterUsage = async ({
+  usageType,
+  model,
+  usage,
+  projectUrl = null,
+  backlogItemId = null
+}) => {
+  if (!usage || typeof usage !== 'object') {
+    return;
+  }
+
+  const normalizedUsageType = normalizeTextField(usageType) || 'unknown';
+  const normalizedModel = normalizeTextField(model) || 'unknown';
+
+  try {
+    await db('openrouter_usage_logs').insert({
+      usage_type: normalizedUsageType,
+      model: normalizedModel,
+      project_url: normalizeTextField(projectUrl) || null,
+      backlog_item_id: backlogItemId || null,
+      prompt_tokens: toNonNegativeInteger(usage.prompt_tokens),
+      completion_tokens: toNonNegativeInteger(usage.completion_tokens),
+      total_tokens: toNonNegativeInteger(usage.total_tokens),
+      cost: toNonNegativeNumber(usage.cost),
+      is_byok: typeof usage.is_byok === 'boolean' ? usage.is_byok : null,
+      raw_usage: usage
+    });
+  } catch (error) {
+    logger.warn({ error: error.message, usage_type: normalizedUsageType, model: normalizedModel }, 'Unable to persist OpenRouter usage');
+  }
+};
+
+const normalizeUsageDate = (value) => {
+  if (value instanceof Date) {
+    return value.toISOString().slice(0, 10);
+  }
+
+  if (typeof value === 'string') {
+    return value.slice(0, 10);
+  }
+
+  return '';
+};
+
+const getOpenRouterUsageSummary = async ({ days = 14 } = {}) => {
+  const parsedDays = Number.parseInt(days, 10);
+  const safeDays = Number.isFinite(parsedDays)
+    ? Math.max(1, Math.min(90, parsedDays))
+    : 14;
+
+  const startDate = new Date();
+  startDate.setUTCHours(0, 0, 0, 0);
+  startDate.setUTCDate(startDate.getUTCDate() - (safeDays - 1));
+
+  const rows = await db('openrouter_usage_logs')
+    .where('created_at', '>=', startDate)
+    .select(db.raw('DATE(created_at) AS usage_date'))
+    .sum({ prompt_tokens: 'prompt_tokens' })
+    .sum({ completion_tokens: 'completion_tokens' })
+    .sum({ total_tokens: 'total_tokens' })
+    .sum({ total_cost: 'cost' })
+    .groupByRaw('DATE(created_at)')
+    .orderBy('usage_date', 'asc');
+
+  const byDate = new Map();
+  for (const row of rows) {
+    const usageDate = normalizeUsageDate(row.usage_date);
+    if (!usageDate) continue;
+
+    byDate.set(usageDate, {
+      date: usageDate,
+      prompt_tokens: toNonNegativeInteger(row.prompt_tokens),
+      completion_tokens: toNonNegativeInteger(row.completion_tokens),
+      total_tokens: toNonNegativeInteger(row.total_tokens),
+      total_cost: toNonNegativeNumber(row.total_cost)
+    });
+  }
+
+  const tokensByDay = [];
+  for (let offset = safeDays - 1; offset >= 0; offset -= 1) {
+    const day = new Date();
+    day.setUTCHours(0, 0, 0, 0);
+    day.setUTCDate(day.getUTCDate() - offset);
+    const dateKey = day.toISOString().slice(0, 10);
+
+    const existing = byDate.get(dateKey);
+    tokensByDay.push(existing || {
+      date: dateKey,
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      total_tokens: 0,
+      total_cost: 0
+    });
+  }
+
+  const totals = tokensByDay.reduce((accumulator, row) => ({
+    prompt_tokens: accumulator.prompt_tokens + row.prompt_tokens,
+    completion_tokens: accumulator.completion_tokens + row.completion_tokens,
+    total_tokens: accumulator.total_tokens + row.total_tokens,
+    total_cost: accumulator.total_cost + row.total_cost
+  }), {
+    prompt_tokens: 0,
+    completion_tokens: 0,
+    total_tokens: 0,
+    total_cost: 0
+  });
+
+  return {
+    days: safeDays,
+    tokens_by_day: tokensByDay,
+    totals
+  };
+};
+
 const fetchOpenRouterModels = async () => {
   const response = await fetch(OPENROUTER_MODELS_URL, {
     headers: getOpenRouterHeaders()
@@ -777,7 +903,11 @@ const buildBugEmbeddingText = (backlogItem) => {
     .slice(0, 16000);
 };
 
-const requestOpenRouterEmbedding = async (inputText) => {
+const requestOpenRouterEmbedding = async (inputText, {
+  usageType = 'embedding',
+  projectUrl = null,
+  backlogItemId = null
+} = {}) => {
   const normalizedInput = normalizeTextField(inputText);
   if (!normalizedInput) {
     throw createHttpError(400, 'Embedding input text is required');
@@ -795,6 +925,13 @@ const requestOpenRouterEmbedding = async (inputText) => {
   });
 
   const data = await readOpenRouterResponse(response);
+  await persistOpenRouterUsage({
+    usageType,
+    model,
+    usage: data?.usage,
+    projectUrl,
+    backlogItemId
+  });
   const embedding = parseEmbeddingVector(data?.data?.[0]?.embedding);
 
   if (!embedding.length) {
@@ -836,7 +973,11 @@ const persistBugEmbeddingForBacklogItem = async (backlogItemId, { connection = d
     return { status: 'skipped', backlog_item_id: backlogItemId };
   }
 
-  const embeddingResult = await requestOpenRouterEmbedding(embeddingInput);
+  const embeddingResult = await requestOpenRouterEmbedding(embeddingInput, {
+    usageType: 'bug_embedding',
+    projectUrl: backlogItem.project_url,
+    backlogItemId: backlogItem.id
+  });
 
   await connection('backlog_items')
     .where({ id: backlogItemId })
@@ -1097,6 +1238,13 @@ const requestBacklogAnalysis = async (backlogItem) => {
     })
   });
   const data = await readOpenRouterResponse(response);
+  await persistOpenRouterUsage({
+    usageType: 'backlog_analysis',
+    model,
+    usage: data?.usage,
+    projectUrl: backlogItem.project_url,
+    backlogItemId: backlogItem.id
+  });
   const content = data?.choices?.[0]?.message?.content;
   const analysis = normalizeBacklogAnalysis(extractJsonObject(Array.isArray(content)
     ? content.map((chunk) => chunk?.text || '').join('')
@@ -1182,7 +1330,10 @@ const searchSimilarBugReports = async ({
     throw createHttpError(400, 'Project url is required');
   }
 
-  const embeddingResult = await requestOpenRouterEmbedding(queryText);
+  const embeddingResult = await requestOpenRouterEmbedding(queryText, {
+    usageType: 'semantic_search_embedding',
+    projectUrl: normalizedProjectUrl
+  });
 
   const candidateQuery = db('backlog_items')
     .where({ project_url: normalizedProjectUrl, item_type: 'bug' })
@@ -3055,15 +3206,24 @@ const requireAuth = (req, res, next) => {
 
 app.get('/api/dashboard/overview', requireAuth, async (req, res) => {
   try {
-    const projects = await db('projects').select('*');
-    const tasks = await db('tasks').select('*');
-    const feed = await db('agent_logs')
-      .join('tasks', 'agent_logs.task_id', 'tasks.id')
-      .orderBy('agent_logs.created_at', 'desc')
-      .limit(20)
-      .select('agent_logs.*', 'tasks.title as task_title', 'tasks.project_url');
+    const usageDays = req.query.usage_days;
+    const [projects, tasks, feed, openRouterUsage] = await Promise.all([
+      db('projects').select('*'),
+      db('tasks').select('*'),
+      db('agent_logs')
+        .join('tasks', 'agent_logs.task_id', 'tasks.id')
+        .orderBy('agent_logs.created_at', 'desc')
+        .limit(20)
+        .select('agent_logs.*', 'tasks.title as task_title', 'tasks.project_url'),
+      getOpenRouterUsageSummary({ days: usageDays })
+    ]);
 
-    res.json({ projects, tasks, feed });
+    res.json({
+      projects,
+      tasks,
+      feed,
+      openrouter_usage: openRouterUsage
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
