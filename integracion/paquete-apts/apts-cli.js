@@ -151,12 +151,20 @@ const COMMAND_HELP_DETAILS = {
   },
   'update-backlog-item': {
     requiredFields: ['backlog_item_id'],
+    notes: [
+      'Use backlog_item_id in payloads. Do not send id for this command.',
+      'In PowerShell, validate with a short status-only payload first, then apply long acceptance_criteria text via file + --stdin if needed.',
+    ],
     examples: [
       "node .ia/apts/apts-cli.js update-backlog-item --json '{\"backlog_item_id\":\"11111111-1111-1111-1111-111111111111\",\"status\":\"review\"}'",
+      'Get-Content backlog-update.json | node .ia/apts/apts-cli.js update-backlog-item --stdin --pretty',
     ],
   },
   'delete-backlog-item': {
     requiredFields: ['backlog_item_id'],
+    notes: [
+      'Use backlog_item_id in payloads. Do not send id for this command.',
+    ],
     examples: [
       "node .ia/apts/apts-cli.js delete-backlog-item --json '{\"backlog_item_id\":\"11111111-1111-1111-1111-111111111111\"}'",
     ],
@@ -289,6 +297,7 @@ function buildHelp(commandName) {
       ...(details
         ? ['', `Minimum payload fields: ${details.requiredFields.length ? details.requiredFields.join(', ') : 'none (resolved automatically from env, local context, or Git)'}`]
         : []),
+      ...(details?.notes?.length ? ['', 'Command notes:', ...details.notes.map((note) => `  - ${note}`)] : []),
       '',
       'Flags:',
       '  --json <payload>     Inline JSON payload matching the contract-first shape.',
@@ -324,6 +333,7 @@ function buildHelp(commandName) {
     '  --json <payload>     Inline JSON payload matching the contract-first shape.',
     '  --stdin              Read the JSON payload from stdin.',
     '  --options <json>     Optional JSON options for batch strict mode.',
+    '  PowerShell tip:      Prefer file + --stdin for long payloads and multiline text; keep inline --json for short validation calls.',
     '',
     'Run `apts-cli help <command>` to see minimum required fields and copy-ready examples for that operation.',
     '',
