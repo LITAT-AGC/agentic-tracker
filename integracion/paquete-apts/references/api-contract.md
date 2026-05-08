@@ -100,6 +100,11 @@ La tabla refleja campos obligatorios a nivel de API. El cliente/CLI oficial pued
 - Metodo: `GET`
 - Ruta: `/projects/context?url=<project_url>&limit=5`
 - Query minima: `url`
+- Query params opcionales:
+  - `backlog_status=<draft|needs_details|ready|in_progress|review|blocked|done|archived>`
+  - `view=<full|compact>` para devolver resumenes compactos y omitir textos largos, contexto completo de tareas y `technical_details` completos de logs
+- Default actual para agentes e integraciones oficiales: `compact`.
+- Recomendacion para agentes: usar el default compacto y volver a leer en `view=full` solo cuando haga falta detalle bruto.
 
 Ejemplo:
 
@@ -107,7 +112,8 @@ Ejemplo:
 {
   "url": "https://github.com/org/repo",
   "limit": 5,
-  "backlog_status": "in_progress"
+  "backlog_status": "in_progress",
+  "view": "compact"
 }
 ```
 
@@ -119,13 +125,17 @@ Ejemplo:
 - Query params opcionales:
   - `status=<draft|needs_details|ready|in_progress|review|blocked|done|archived>`
   - `include_deleted=true` para incluir items eliminados por soft-delete
+  - `view=<full|compact>` para listar solo campos resumen cuando todavia no necesitas descripciones completas ni criterios de aceptacion
+- Default actual para agentes e integraciones oficiales: `compact`.
+- Recomendacion para agentes: usar el default compacto durante loops de seleccion o deduplicacion y escalar a `full` solo para el item elegido o cuando falte contexto.
 
 Ejemplo:
 
 ```json
 {
   "url": "https://github.com/org/repo",
-  "status": "ready"
+  "status": "ready",
+  "view": "compact"
 }
 ```
 

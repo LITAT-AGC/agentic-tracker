@@ -179,6 +179,40 @@ const DEFAULT_SEMANTIC_SEARCH_THRESHOLD = 0.78;
 const MAX_OPEN_BUGS_FOR_STARTUP_EMBEDDING = 10;
 const MAX_BATCH_SIZE = 100;
 const SQLITE_LEGACY_BATCH_SIZE = 200;
+const RESPONSE_VIEW_MODES = ['full', 'compact'];
+const DEFAULT_RESPONSE_VIEW = 'compact';
+const COMPACT_TEXT_EXCERPT_LIMIT = 240;
+const BACKLOG_COMPACT_SELECT_COLUMNS = [
+  'id',
+  'project_url',
+  'title',
+  'description',
+  'acceptance_criteria',
+  'item_type',
+  'status',
+  'priority',
+  'sort_order',
+  'source_kind',
+  'source_ref',
+  'active_task_id',
+  'llm_analysis_summary',
+  'llm_confidence',
+  'llm_recommendation_status',
+  'created_at',
+  'updated_at',
+  'deleted_at'
+];
+const TASK_COMPACT_SELECT_COLUMNS = [
+  'id',
+  'project_url',
+  'title',
+  'agent_name',
+  'status',
+  'context',
+  'last_heartbeat',
+  'created_at',
+  'updated_at'
+];
 const SQLITE_LEGACY_TABLES = [
   { name: 'projects', primaryKey: 'url' },
   { name: 'tasks', primaryKey: 'id' },
@@ -297,6 +331,19 @@ const normalizeInputString = (value, { unwrapQuotes = false, lowercase = false }
     normalized = normalized.toLowerCase();
   }
 
+  return normalized;
+};
+
+const normalizeResponseView = (value) => {
+  const normalized = normalizeInputString(value, { lowercase: true });
+  return normalized || DEFAULT_RESPONSE_VIEW;
+};
+
+const validateResponseView = (value) => {
+  const normalized = normalizeResponseView(value);
+  if (!RESPONSE_VIEW_MODES.includes(normalized)) {
+    throw createHttpError(400, `Invalid view. Supported values: ${RESPONSE_VIEW_MODES.join(', ')}`);
+  }
   return normalized;
 };
 
@@ -615,8 +662,87 @@ const backlogCreatePayloadSchema = z.object({
 
 const backlogUpdatePayloadSchema = backlogCreatePayloadSchema.partial();
 
-const mapBacklogItemRecord = (item) => {
+const normalizeCompactTextPart = (value) => {
+  if (typeof value !== 'string') return '';
+  return value.replace(/\s+/g, ' ').trim();
+};
+
+const buildCompactTextExcerpt = (parts, { limit = COMPACT_TEXT_EXCERPT_LIMIT } = {}) => {
+  const mergedText = (Array.isArray(parts) ? parts : [parts])
+    .map(normalizeCompactTextPart)
+    .filter(Boolean)
+    .join(' | ');
+
+  if (!mergedText) return '';
+  if (mergedText.length <= limit) return mergedText;
+  return `${mergedText.slice(0, Math.max(0, limit - 3)).trimEnd()}...`;
+};
+
+const mapTaskRecord = (task, { view = DEFAULT_RESPONSE_VIEW } = {}) => {
+  if (!task || view !== 'compact') return task;
+
+  const context = normalizeCompactTextPart(task.context);
+
+  return {
+    id: task.id,
+    project_url: task.project_url,
+    title: task.title,
+    agent_name: task.agent_name || null,
+    status: task.status,
+    last_heartbeat: task.last_heartbeat,
+    created_at: task.created_at,
+    updated_at: task.updated_at,
+    context_excerpt: buildCompactTextExcerpt(context),
+    has_context: Boolean(context)
+  };
+};
+
+const mapAgentLogRecord = (log, { view = DEFAULT_RESPONSE_VIEW } = {}) => {
+  if (!log || view !== 'compact') return log;
+
+  return {
+    id: log.id,
+    task_id: log.task_id,
+    action_type: log.action_type,
+    agent_name: log.agent_name || null,
+    branch: log.branch || null,
+    created_at: log.created_at,
+    updated_at: log.updated_at,
+    message_excerpt: buildCompactTextExcerpt(log.message, { limit: 180 }),
+    has_technical_details: parseBooleanFlag(log.has_technical_details)
+  };
+};
+
+const mapBacklogItemRecord = (item, { view = DEFAULT_RESPONSE_VIEW } = {}) => {
   if (!item) return item;
+
+  if (view === 'compact') {
+    const description = normalizeCompactTextPart(item.description);
+    const acceptanceCriteria = normalizeCompactTextPart(item.acceptance_criteria);
+    const analysisSummary = normalizeCompactTextPart(item.llm_analysis_summary);
+
+    return {
+      id: item.id,
+      project_url: item.project_url,
+      title: item.title,
+      item_type: item.item_type,
+      status: item.status,
+      priority: item.priority,
+      sort_order: item.sort_order,
+      source_kind: item.source_kind || null,
+      source_ref: item.source_ref || null,
+      active_task_id: item.active_task_id || null,
+      created_at: item.created_at,
+      updated_at: item.updated_at,
+      deleted_at: item.deleted_at ?? null,
+      text_excerpt: buildCompactTextExcerpt([description, acceptanceCriteria, analysisSummary]),
+      has_description: Boolean(description),
+      has_acceptance_criteria: Boolean(acceptanceCriteria),
+      has_llm_analysis: Boolean(analysisSummary),
+      llm_confidence: toNumberOrNull(item.llm_confidence),
+      llm_recommendation_status: item.llm_recommendation_status || null
+    };
+  }
 
   const { bug_embedding: _bugEmbedding, ...safeItem } = item;
 
@@ -1296,7 +1422,7 @@ const ensureProjectExists = async (url, { connection = db } = {}) => {
     .onConflict('url').merge();
 };
 
-const listBacklogItems = async (projectUrl, status, { includeDeleted = false } = {}) => {
+const listBacklogItems = async (projectUrl, status, { includeDeleted = false, view = DEFAULT_RESPONSE_VIEW } = {}) => {
   const query = db('backlog_items')
     .where({ project_url: projectUrl })
     .orderBy([
@@ -1313,8 +1439,11 @@ const listBacklogItems = async (projectUrl, status, { includeDeleted = false } =
     query.andWhere({ status });
   }
 
-  const items = await query.select('*');
-  return items.map(mapBacklogItemRecord);
+  const items = view === 'compact'
+    ? await query.select(BACKLOG_COMPACT_SELECT_COLUMNS)
+    : await query.select('*');
+
+  return items.map((item) => mapBacklogItemRecord(item, { view }));
 };
 
 const searchSimilarBugReports = async ({
@@ -1409,10 +1538,26 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.22';
+const integrationManifestSchemaVersion = '2.0.24';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.24',
+    date: '2026-05-08',
+    changes: [
+      'APTS agent-facing reads now default to compact summaries at both the HTTP API and official client layers; explicit view=full remains available for follow-up detail fetches.',
+      'Public integration docs, skills metadata, and agent templates now describe compact as the default operating mode for agents and full as an on-demand escalation path.'
+    ]
+  },
+  {
+    version: '2.0.23',
+    date: '2026-05-08',
+    changes: [
+      'read_project_context and list_backlog_items now support view=compact to return summary-oriented payloads that omit long text fields, full task context, and full log technical_details.',
+      'Official APTS clients, CLI help, skills contract, and agent guidance now expose and recommend compact reads for token-sensitive agent loops, escalating to full payloads only when needed.'
+    ]
+  },
   {
     version: '2.0.22',
     date: '2026-05-08',
@@ -1706,8 +1851,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts_skills.json'),
     fileName: 'apts_skills.json',
     contentType: 'application/json; charset=utf-8',
-    artifactVersion: '2.0.20',
-    updatedInSchemaVersion: '2.0.20',
+    artifactVersion: '2.0.24',
+    updatedInSchemaVersion: '2.0.24',
     kind: 'skills_contract',
     recommended: true,
     syncAction: 'overwrite',
@@ -1732,8 +1877,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-agent-guidelines.md'),
     fileName: 'apts-agent-guidelines.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.22',
-    updatedInSchemaVersion: '2.0.22',
+    artifactVersion: '2.0.24',
+    updatedInSchemaVersion: '2.0.24',
     kind: 'agent_guidelines',
     recommended: true,
     syncAction: 'overwrite',
@@ -1745,8 +1890,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'plantillas-agentes', 'ejecutor-item-backlog-dev-test-commit.agent.md'),
     fileName: 'ejecutor-item-backlog-dev-test-commit.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.15',
-    updatedInSchemaVersion: '2.0.15',
+    artifactVersion: '2.0.24',
+    updatedInSchemaVersion: '2.0.24',
     kind: 'agent_template',
     recommended: false,
     syncAction: 'overwrite',
@@ -1760,8 +1905,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'plantillas-agentes', 'orquestador-backlog-apts.agent.md'),
     fileName: 'orquestador-backlog-apts.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.15',
-    updatedInSchemaVersion: '2.0.15',
+    artifactVersion: '2.0.24',
+    updatedInSchemaVersion: '2.0.24',
     kind: 'agent_template',
     recommended: false,
     syncAction: 'overwrite',
@@ -1776,8 +1921,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'plantillas-agentes', 'intake-bugfix-apts.agent.md'),
     fileName: 'intake-bugfix-apts.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.12',
-    updatedInSchemaVersion: '2.0.12',
+    artifactVersion: '2.0.24',
+    updatedInSchemaVersion: '2.0.24',
     kind: 'agent_template',
     recommended: false,
     syncAction: 'overwrite',
@@ -1789,8 +1934,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'runtime-adapters', 'vscode', 'agents', 'apts-backlog-orchestrator.agent.md'),
     fileName: 'apts-backlog-orchestrator.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.21',
-    updatedInSchemaVersion: '2.0.21',
+    artifactVersion: '2.0.24',
+    updatedInSchemaVersion: '2.0.24',
     kind: 'agent_runtime_adapter',
     recommended: true,
     syncAction: 'overwrite',
@@ -1809,8 +1954,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'runtime-adapters', 'vscode', 'agents', 'backlog-item-executor-dev-test-commit.agent.md'),
     fileName: 'backlog-item-executor-dev-test-commit.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.21',
-    updatedInSchemaVersion: '2.0.21',
+    artifactVersion: '2.0.24',
+    updatedInSchemaVersion: '2.0.24',
     kind: 'agent_runtime_adapter',
     recommended: true,
     syncAction: 'overwrite',
@@ -1829,8 +1974,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'runtime-adapters', 'vscode', 'agents', 'apts-bugfix-intake.agent.md'),
     fileName: 'apts-bugfix-intake.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.21',
-    updatedInSchemaVersion: '2.0.21',
+    artifactVersion: '2.0.24',
+    updatedInSchemaVersion: '2.0.24',
     kind: 'agent_runtime_adapter',
     recommended: true,
     syncAction: 'overwrite',
@@ -1849,8 +1994,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-client.js'),
     fileName: 'apts-client.js',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.0.20',
-    updatedInSchemaVersion: '2.0.20',
+    artifactVersion: '2.0.24',
+    updatedInSchemaVersion: '2.0.24',
     kind: 'reference_client',
     recommended: false,
     optional: true,
@@ -1865,8 +2010,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-client.mjs'),
     fileName: 'apts-client.mjs',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.0.20',
-    updatedInSchemaVersion: '2.0.20',
+    artifactVersion: '2.0.24',
+    updatedInSchemaVersion: '2.0.24',
     kind: 'reference_client',
     recommended: false,
     optional: true,
@@ -1881,8 +2026,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-cli.js'),
     fileName: 'apts-cli.js',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.0.22',
-    updatedInSchemaVersion: '2.0.22',
+    artifactVersion: '2.0.24',
+    updatedInSchemaVersion: '2.0.24',
     kind: 'reference_cli',
     recommended: false,
     optional: true,
@@ -1898,8 +2043,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-cli.mjs'),
     fileName: 'apts-cli.mjs',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.0.22',
-    updatedInSchemaVersion: '2.0.22',
+    artifactVersion: '2.0.23',
+    updatedInSchemaVersion: '2.0.23',
     kind: 'reference_cli',
     recommended: false,
     optional: true,
@@ -2724,16 +2869,37 @@ app.post('/api/projects/tasks', apiLimiter, authenticateAgent, async (req, res) 
 app.get('/api/projects/context', apiLimiter, authenticateAgent, async (req, res) => {
   const url = normalizeUrl(req.query.url);
   const limit = parseInt(req.query.limit) || 5;
+  const view = validateResponseView(req.query.view);
 
   try {
-    const tasks = await db('tasks').where({ project_url: url });
-    const backlog = await listBacklogItems(url, req.query.backlog_status);
-    const logs = await db('agent_logs')
+    const tasksQuery = db('tasks').where({ project_url: url });
+    const tasks = (view === 'compact'
+      ? await tasksQuery.select(TASK_COMPACT_SELECT_COLUMNS)
+      : await tasksQuery.select('*'))
+      .map((task) => mapTaskRecord(task, { view }));
+
+    const backlog = await listBacklogItems(url, req.query.backlog_status, { view });
+
+    const logsQuery = db('agent_logs')
       .join('tasks', 'agent_logs.task_id', 'tasks.id')
       .where('tasks.project_url', url)
       .orderBy('agent_logs.created_at', 'desc')
-      .limit(limit)
-      .select('agent_logs.*');
+      .limit(limit);
+
+    const logs = (view === 'compact'
+      ? await logsQuery.select(
+        'agent_logs.id',
+        'agent_logs.task_id',
+        'agent_logs.action_type',
+        'agent_logs.agent_name',
+        'agent_logs.branch',
+        'agent_logs.message',
+        'agent_logs.created_at',
+        'agent_logs.updated_at',
+        db.raw("CASE WHEN agent_logs.technical_details IS NULL THEN 'false' ELSE 'true' END AS has_technical_details")
+      )
+      : await logsQuery.select('agent_logs.*'))
+      .map((log) => mapAgentLogRecord(log, { view }));
 
     res.json({ tasks, backlog, logs });
   } catch (error) {
@@ -2746,6 +2912,7 @@ app.get('/api/projects/backlog', apiLimiter, authenticateAgent, async (req, res)
   const url = normalizeUrl(req.query.url);
   const status = req.query.status;
   const includeDeleted = parseBooleanFlag(req.query.include_deleted);
+  const view = validateResponseView(req.query.view);
 
   if (!url) {
     return res.status(400).json({ error: 'Project url is required' });
@@ -2756,7 +2923,7 @@ app.get('/api/projects/backlog', apiLimiter, authenticateAgent, async (req, res)
   }
 
   try {
-    const backlog = await listBacklogItems(url, status, { includeDeleted });
+    const backlog = await listBacklogItems(url, status, { includeDeleted, view });
     res.json({ backlog });
   } catch (error) {
     res.status(500).json({ error: error.message });

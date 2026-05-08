@@ -98,6 +98,36 @@ function getBatchDataList(result) {
   return (result.data.results || []).map((item) => item.data);
 }
 
+async function runCompactViewRegression({ projectUrl, backlogId, taskId }) {
+  const compactBacklog = await request(`/projects/backlog?url=${encodeURIComponent(projectUrl)}`);
+  const fullBacklog = await request(`/projects/backlog?url=${encodeURIComponent(projectUrl)}&view=full`);
+  const fullBacklogItem = (fullBacklog.data.backlog || []).find((item) => item.id === backlogId);
+  const compactBacklogItem = (compactBacklog.data.backlog || []).find((item) => item.id === backlogId);
+
+  assert(fullBacklogItem?.description, 'full backlog view should include description');
+  assert(fullBacklogItem?.acceptance_criteria, 'full backlog view should include acceptance_criteria');
+  assert(compactBacklogItem?.text_excerpt, 'compact backlog view should include text_excerpt');
+  assert(compactBacklogItem.description === undefined, 'compact backlog view should omit description');
+  assert(compactBacklogItem.acceptance_criteria === undefined, 'compact backlog view should omit acceptance_criteria');
+  assert(compactBacklogItem.has_description === true, 'compact backlog view should flag existing description');
+  assert(compactBacklogItem.has_acceptance_criteria === true, 'compact backlog view should flag existing acceptance criteria');
+
+  const compactContext = await request(`/projects/context?url=${encodeURIComponent(projectUrl)}&limit=20`);
+  const fullContext = await request(`/projects/context?url=${encodeURIComponent(projectUrl)}&limit=20&view=full`);
+  const fullTask = (fullContext.data.tasks || []).find((task) => task.id === taskId);
+  const compactTask = (compactContext.data.tasks || []).find((task) => task.id === taskId);
+  const fullDetailedLog = (fullContext.data.logs || []).find((log) => log.task_id === taskId && log.technical_details);
+  const compactDetailedLog = (compactContext.data.logs || []).find((log) => log.task_id === taskId && log.has_technical_details === true);
+
+  assert(fullTask?.context, 'full project context should include task context');
+  assert(compactTask?.context_excerpt, 'compact project context should include task context excerpt');
+  assert(compactTask.context === undefined, 'compact project context should omit raw task context');
+  assert(compactTask.has_context === true, 'compact project context should flag existing task context');
+  assert(fullDetailedLog?.technical_details, 'full project context should include technical_details when present');
+  assert(compactDetailedLog?.has_technical_details === true, 'compact project context should preserve technical_details presence as a flag');
+  assert(compactDetailedLog.technical_details === undefined, 'compact project context should omit raw technical_details');
+}
+
 async function runBlockerAndResumeRegression({ projectUrl, agentName, agentEmail }) {
   const createBacklog = await request('/projects/backlog', {
     method: 'POST',
@@ -252,13 +282,15 @@ async function runBatchSmoke() {
       {
         project_url: projectUrl,
         title: 'Batch Backlog Item 1',
-        description: 'Created from batch smoke test',
+        description: 'Created from batch smoke test with a detailed description to validate compact response pruning.',
+        acceptance_criteria: 'The compact response should keep only summary fields and omit the full description and acceptance criteria payloads.',
         item_type: 'feature',
       },
       {
         project_url: projectUrl,
         title: 'Batch Backlog Item 2',
-        description: 'Created from batch smoke test',
+        description: 'Created from batch smoke test with additional detail to validate compact list responses.',
+        acceptance_criteria: 'The second backlog item should also support compact summary output.',
         item_type: 'chore',
       },
     ],
@@ -276,6 +308,7 @@ async function runBatchSmoke() {
         title: 'Batch Task 1',
         agent_name: agentName,
         agent_email: agentEmail,
+        context: 'Detailed task context for compact response validation on task payloads.',
         backlog_item_id: backlogIds[0],
       },
       {
@@ -283,6 +316,7 @@ async function runBatchSmoke() {
         title: 'Batch Task 2',
         agent_name: agentName,
         agent_email: agentEmail,
+        context: 'Second detailed task context for compact response validation.',
         backlog_item_id: backlogIds[1],
       },
     ],
@@ -299,6 +333,10 @@ async function runBatchSmoke() {
         agent_name: agentName,
         branch: 'batch/smoke-1',
         message: 'batch log entry 1',
+        technical_details: {
+          commands_run: ['node scripts/test_agent_api_batch.js'],
+          outcome: 'success',
+        },
       },
       {
         task_id: taskIds[1],
@@ -306,6 +344,10 @@ async function runBatchSmoke() {
         agent_name: agentName,
         branch: 'batch/smoke-2',
         message: 'batch log entry 2',
+        technical_details: {
+          commands_run: ['node scripts/test_agent_api_batch.js'],
+          outcome: 'success',
+        },
       },
     ],
   });
@@ -375,6 +417,12 @@ async function runBatchSmoke() {
   const projectContext = await request(`/projects/context?url=${encodeURIComponent(projectUrl)}&limit=10`);
   const firstTask = (projectContext.data.tasks || []).find((task) => task.id === taskIds[0]);
   assert(firstTask?.status === 'review', 'strict rollback should keep first task in review status');
+
+  await runCompactViewRegression({
+    projectUrl,
+    backlogId: backlogIds[0],
+    taskId: taskIds[0],
+  });
 
   const updateBacklogBatch = await request('/backlog', {
     method: 'PATCH',

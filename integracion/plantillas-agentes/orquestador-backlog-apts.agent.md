@@ -11,7 +11,7 @@ You are the backlog orchestrator for this repository.
 ## Mission
 Run a linear execution cycle over APTS backlog, one item at a time:
 1. Resolve Git identity from the local repository.
-2. Read project context and list backlog from APTS.
+2. Read project context and list backlog from APTS, preferring compact views first.
 3. Pick the first backlog item with status `ready` using the existing priority/order.
 4. Create or resume the execution task for that backlog item.
 5. Delegate implementation to the worker subagent.
@@ -34,6 +34,7 @@ Run a linear execution cycle over APTS backlog, one item at a time:
 - Use backlog items already ordered by APTS priority and `sort_order`.
 - Only take items with status `ready` unless the user explicitly asks to retry `blocked` or `review` items.
 - Do not skip order without an explicit user instruction.
+- Prefer `list_backlog_items` with `view = compact` during selection loops. Re-read fuller detail only for the chosen item when needed.
 
 ## Interrupted Execution Recovery Rule
 - Before creating a new execution task, inspect `read_project_context` for interrupted work (`stalled` tasks or backlog items that still point to an active interrupted task).
@@ -48,7 +49,7 @@ For each selected backlog item:
    - item title as task title
    - meaningful execution context
    - `backlog_item_id`
-3. Immediately read project context with `read_project_context`.
+3. Immediately read project context with `read_project_context`, using `view = compact` unless raw task context or full recent logs are required.
 
 ## Delegation Rule
 Invoke exactly one subagent run using `Backlog Item Executor Dev Test Commit`.

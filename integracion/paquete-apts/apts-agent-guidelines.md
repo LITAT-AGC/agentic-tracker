@@ -132,18 +132,26 @@ When you use the official client/CLI, missing identity fields are auto-filled fr
 ### Happy Path
 
 1. Ensure identity context is available (official client/CLI resolves from env/local context/Git automatically).
-2. Call `list_backlog_items` and choose to reuse or create an item.
+2. Call `list_backlog_items`, preferably with `view = compact`, and choose to reuse or create an item.
 3. Call `register_task`; official client/CLI persists the returned `task_id` in local managed context for subsequent calls.
-4. Call `read_project_context` before editing.
+4. Call `read_project_context`, preferably with `view = compact`, before editing.
 5. Call `heartbeat` while the task is active.
 6. Call `log_agent_progress` on meaningful milestones.
 7. If blocked, call `report_blocker` and stop.
 8. Finish with `update_task_status` to `review`, then `done` only after review and recent activity.
 
+### Compact Response Mode
+
+- `list_backlog_items` and `read_project_context` now default to compact summaries in official agent flows.
+- Re-read with `view = full` only for the selected backlog item or when you specifically need raw descriptions, acceptance criteria, full task context, or full log `technical_details`.
+
 ### Minimum Payloads
 
 ```json
 {
+	"list_backlog_items": {
+		"status": "ready"
+	},
 	"create_backlog_item": {
 		"title": "Document APTS command payloads"
 	},

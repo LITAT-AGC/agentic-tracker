@@ -6,6 +6,8 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-
 const TASK_STATUSES = ['todo', 'in_progress', 'review', 'done', 'stalled'];
 const BACKLOG_STATUSES = ['draft', 'needs_details', 'ready', 'in_progress', 'review', 'blocked', 'done', 'archived'];
 const BACKLOG_ITEM_TYPES = ['feature', 'bug', 'chore', 'research'];
+const RESPONSE_VIEWS = ['full', 'compact'];
+const DEFAULT_RESPONSE_VIEW = 'compact';
 const DEFAULT_EXECUTION_CONTEXT_FILE = path.join('.apts', 'execution-context.json');
 const STORED_EXECUTION_CONTEXT_KEYS = ['project_url', 'agent_name', 'agent_email', 'branch', 'task_id', 'backlog_item_id'];
 const EXECUTION_IDENTITY_ENV_KEYS = {
@@ -670,6 +672,7 @@ function validateReadProjectContextInput(urlOrOptions, limitOrOptions = 5) {
       url: requiredString(payload, 'url', operation, { unwrapQuotes: true }),
       limit: optionalInteger(payload, 'limit', operation) ?? 5,
       backlog_status: optionalEnum(payload, 'backlog_status', BACKLOG_STATUSES, operation),
+      view: optionalEnum(payload, 'view', RESPONSE_VIEWS, operation) ?? DEFAULT_RESPONSE_VIEW,
     };
   }
 
@@ -689,6 +692,7 @@ function validateReadProjectContextInput(urlOrOptions, limitOrOptions = 5) {
       BACKLOG_STATUSES,
       operation
     ),
+    view: optionalEnum(options, 'view', RESPONSE_VIEWS, operation) ?? DEFAULT_RESPONSE_VIEW,
   };
 }
 
@@ -703,6 +707,7 @@ function validateListBacklogItemsInput(urlOrOptions, statusOrOptions = null) {
       url: requiredString(payload, 'url', operation, { unwrapQuotes: true }),
       status: optionalEnum(payload, 'status', BACKLOG_STATUSES, operation),
       include_deleted: optionalBoolean(payload, 'include_deleted', operation) ?? false,
+      view: optionalEnum(payload, 'view', RESPONSE_VIEWS, operation) ?? DEFAULT_RESPONSE_VIEW,
     };
   }
 
@@ -721,6 +726,7 @@ function validateListBacklogItemsInput(urlOrOptions, statusOrOptions = null) {
       'include_deleted',
       operation
     ) ?? false,
+    view: optionalEnum(options, 'view', RESPONSE_VIEWS, operation) ?? DEFAULT_RESPONSE_VIEW,
   };
 }
 
@@ -1037,6 +1043,10 @@ async function readProjectContext(urlOrOptions, limitOrOptions = 5) {
     params.set('backlog_status', options.backlog_status);
   }
 
+  if (options.view) {
+    params.set('view', options.view);
+  }
+
   return request(`/projects/context?${params.toString()}`, {
     method: 'GET',
   });
@@ -1053,6 +1063,10 @@ async function listBacklogItems(urlOrOptions, statusOrOptions = null) {
 
   if (options.include_deleted) {
     params.set('include_deleted', 'true');
+  }
+
+  if (options.view) {
+    params.set('view', options.view);
   }
 
   return request(`/projects/backlog?${params.toString()}`, {

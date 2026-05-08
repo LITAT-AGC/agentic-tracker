@@ -34,7 +34,7 @@ The orchestrator should pass at least:
   - `agent_email` from `git config user.email`
   - `branch` from `git branch --show-current`
 - Call `register_task` with `backlog_item_id` before editing; treat its response as create-or-resume and always continue with the returned `task_id`.
-- Before editing code, call `read_project_context`.
+- Before editing code, call `read_project_context`, preferring `view = compact` unless you explicitly need raw task context or full recent logs.
 - Send `log_agent_progress` at meaningful milestones.
 - Send `heartbeat` while executing longer tasks.
 - If blocked, use `report_blocker` before returning `BLOCKED`.

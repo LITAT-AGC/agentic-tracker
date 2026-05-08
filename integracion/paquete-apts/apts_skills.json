@@ -66,7 +66,7 @@
     },
     {
       "name": "read_project_context",
-      "description": "Read current project state, backlog items, pending tasks, and recent history. Minimum payload in official client/CLI: none for identity (url auto-resolves from env/local managed context/Git when omitted). Optional: limit and backlog_status.",
+      "description": "Read current project state, backlog items, pending tasks, and recent history. Minimum payload in official client/CLI: none for identity (url auto-resolves from env/local managed context/Git when omitted). Optional: limit, backlog_status, and view. Agent flows now default to compact summaries; request view=full only when raw detail is needed.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -89,6 +89,14 @@
               "done",
               "archived"
             ]
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "full",
+              "compact"
+            ],
+            "default": "compact"
           }
         },
         "required": []
@@ -96,7 +104,7 @@
     },
     {
       "name": "list_backlog_items",
-      "description": "List backlog items for a project ordered by priority and sort order. Minimum payload in official client/CLI: none for identity (url auto-resolves from env/local managed context/Git when omitted). Use this before direct implementation to detect whether a reported bug, error, or regression is already tracked.",
+      "description": "List backlog items for a project ordered by priority and sort order. Minimum payload in official client/CLI: none for identity (url auto-resolves from env/local managed context/Git when omitted). Use this before direct implementation to detect whether a reported bug, error, or regression is already tracked. Agent flows now default to compact summaries; request view=full only for the chosen item or when summary data is insufficient.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -119,6 +127,14 @@
           "include_deleted": {
             "type": "boolean",
             "default": false
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "full",
+              "compact"
+            ],
+            "default": "compact"
           }
         },
         "required": []

@@ -127,14 +127,20 @@ const COMMAND_HELP_DETAILS = {
   },
   'read-project-context': {
     requiredFields: [],
+    notes: [
+      'Use view=compact for agent loops that only need a summary and want to reduce token usage.',
+    ],
     examples: [
-      "node .ia/apts/apts-cli.js read-project-context --json '{\"limit\":5}'",
+      "node .ia/apts/apts-cli.js read-project-context --json '{\"limit\":5,\"view\":\"compact\"}'",
     ],
   },
   'list-backlog-items': {
     requiredFields: [],
+    notes: [
+      'Use view=compact to list backlog with summary fields only when the agent does not need full descriptions yet.',
+    ],
     examples: [
-      "node .ia/apts/apts-cli.js list-backlog-items --json '{\"status\":\"ready\"}'",
+      "node .ia/apts/apts-cli.js list-backlog-items --json '{\"status\":\"ready\",\"view\":\"compact\"}'",
     ],
   },
   'search-similar-bug-reports': {
