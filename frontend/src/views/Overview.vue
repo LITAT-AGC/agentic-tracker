@@ -61,6 +61,40 @@
         <p class="text-4xl font-black text-amber-400 mt-4 tracking-tight">{{ dashboard.stalledAgentsCount }}</p>
       </div>
     </div>
+
+    <section class="bg-gray-900/60 backdrop-blur-xl p-6 rounded-2xl border border-gray-800 shadow-xl">
+      <div class="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h3 class="text-xl font-bold text-gray-100">Consumo OpenRouter</h3>
+          <p class="text-sm text-gray-400 mt-1">Tokens usados por día (últimos {{ dashboard.openrouterUsage.days || 14 }} días)</p>
+        </div>
+        <div class="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-gray-400">
+          <p>Prompt: <span class="text-gray-200 font-semibold">{{ formatTokens(dashboard.openrouterTotals.prompt_tokens) }}</span></p>
+          <p>Completion: <span class="text-gray-200 font-semibold">{{ formatTokens(dashboard.openrouterTotals.completion_tokens) }}</span></p>
+          <p>Total tokens: <span class="text-white font-bold">{{ formatTokens(dashboard.openrouterTotals.total_tokens) }}</span></p>
+          <p>Costo: <span class="text-emerald-300 font-semibold">{{ formatCredits(dashboard.openrouterTotals.total_cost) }}</span></p>
+        </div>
+      </div>
+
+      <div class="mt-5 space-y-3" v-if="dashboard.openrouterTokensByDay.length">
+        <div
+          v-for="row in dashboard.openrouterTokensByDay"
+          :key="row.date"
+          class="grid grid-cols-[74px_minmax(0,1fr)_96px] items-center gap-3"
+        >
+          <span class="text-xs text-gray-500 font-medium">{{ formatDayLabel(row.date) }}</span>
+          <div class="h-2.5 rounded-full bg-gray-800 overflow-hidden">
+            <div
+              class="h-full rounded-full bg-gradient-to-r from-cyan-500 to-indigo-500 transition-all"
+              :style="{ width: `${Math.max(2, Math.round((row.total_tokens / maxDailyTokens) * 100))}%` }"
+            ></div>
+          </div>
+          <span class="text-right text-xs text-gray-300 font-semibold">{{ formatTokens(row.total_tokens) }}</span>
+        </div>
+      </div>
+
+      <p v-else class="mt-5 text-sm text-gray-500">Aún no hay consumo registrado de OpenRouter.</p>
+    </section>
     
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
       <!-- Task Kanban -->
@@ -260,7 +294,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useDashboardStore } from '../stores/dashboard'
 
 const dashboard = useDashboardStore()
@@ -280,6 +314,27 @@ const refreshData = async () => {
     await dashboard.fetchOverview()
   } catch (_err) {
   }
+}
+
+const maxDailyTokens = computed(() => {
+  const values = dashboard.openrouterTokensByDay.map((row) => Number(row.total_tokens) || 0)
+  return Math.max(...values, 1)
+})
+
+const formatTokens = (value) => {
+  return new Intl.NumberFormat('es-ES').format(Number(value) || 0)
+}
+
+const formatCredits = (value) => {
+  const amount = Number(value) || 0
+  return `${amount.toFixed(6)} créditos`
+}
+
+const formatDayLabel = (isoDate) => {
+  if (!isoDate) return '--/--'
+  const parsed = new Date(`${isoDate}T00:00:00Z`)
+  if (Number.isNaN(parsed.getTime())) return isoDate
+  return parsed.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' })
 }
 
 // Helpers

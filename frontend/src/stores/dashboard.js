@@ -6,6 +6,16 @@ export const useDashboardStore = defineStore('dashboard', () => {
   const projects = ref([])
   const tasks = ref([])
   const feed = ref([])
+  const openrouterUsage = ref({
+    days: 14,
+    tokens_by_day: [],
+    totals: {
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      total_tokens: 0,
+      total_cost: 0
+    }
+  })
   const isLoading = ref(false)
   const error = ref(null)
 
@@ -19,6 +29,19 @@ export const useDashboardStore = defineStore('dashboard', () => {
 
   const stalledAgentsCount = computed(() => {
     return tasks.value.filter(t => t.status === 'stalled').length
+  })
+
+  const openrouterTokensByDay = computed(() => {
+    return openrouterUsage.value.tokens_by_day || []
+  })
+
+  const openrouterTotals = computed(() => {
+    return openrouterUsage.value.totals || {
+      prompt_tokens: 0,
+      completion_tokens: 0,
+      total_tokens: 0,
+      total_cost: 0
+    }
   })
 
   const fetchOverview = async () => {
@@ -37,6 +60,16 @@ export const useDashboardStore = defineStore('dashboard', () => {
       projects.value = data.projects || []
       tasks.value = data.tasks || []
       feed.value = data.feed || []
+      openrouterUsage.value = data.openrouter_usage || {
+        days: 14,
+        tokens_by_day: [],
+        totals: {
+          prompt_tokens: 0,
+          completion_tokens: 0,
+          total_tokens: 0,
+          total_cost: 0
+        }
+      }
     } catch (err) {
       error.value = err.message
       throw err
@@ -68,11 +101,14 @@ export const useDashboardStore = defineStore('dashboard', () => {
     projects,
     tasks,
     feed,
+    openrouterUsage,
     isLoading,
     error,
     activeProjectsCount,
     blockedProjectsCount,
     stalledAgentsCount,
+    openrouterTokensByDay,
+    openrouterTotals,
     fetchOverview,
     resolveBlocker
   }
