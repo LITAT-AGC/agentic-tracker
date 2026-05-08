@@ -190,6 +190,30 @@ $heartbeat | node .ia/apts/apts-cli.mjs set-execution-context --stdin --pretty
 Get-Content .\heartbeat.json | node .ia/apts/apts-cli.mjs heartbeat --stdin --pretty
 ```
 
+### PowerShell Reliability Checklist
+
+1. For `update-backlog-item` and `delete-backlog-item`, always use `backlog_item_id` (never `id`).
+2. If inline `--json` starts failing with parsing or unexpected extra arguments, reduce to a minimal payload and retry first.
+3. Do not write here-strings in a single line after `@'`; keep the JSON body on following lines and close with `'@` on its own line.
+4. If `--stdin` appears stuck, verify the command with a short `--json` payload, then return to file-piped stdin.
+5. For long texts (`acceptance_criteria`, multiline notes), use staged updates: minimal field first, full text second.
+6. After every mutating call, read the item again and verify persisted fields.
+
+### Staged PowerShell Update Example (Backlog)
+
+```powershell
+node .ia/apts/apts-cli.mjs update-backlog-item --json '{"backlog_item_id":"11111111-1111-1111-1111-111111111111","status":"review"}' --pretty
+
+@'
+{
+	"backlog_item_id": "11111111-1111-1111-1111-111111111111",
+	"acceptance_criteria": "FE: shows retry state and validation hints. BE: persists normalized payload and status transitions."
+}
+'@ | Set-Content -Path backlog-update.json
+
+Get-Content .\backlog-update.json | node .ia/apts/apts-cli.mjs update-backlog-item --stdin --pretty
+```
+
 ### Frequent Errors
 
 | Error | Meaning | Retry |

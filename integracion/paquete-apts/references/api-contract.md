@@ -325,6 +325,36 @@ $heartbeat | node .ia/apts/apts-cli.mjs heartbeat --stdin --pretty
 Get-Content .\register-task.json | node .ia/apts/apts-cli.mjs register-task --stdin --pretty
 ```
 
+## Troubleshooting PowerShell (sin sorpresas)
+
+Problemas mas comunes y regla de resolucion:
+
+1. Campo incorrecto en update/delete de backlog: usar siempre `backlog_item_id` y no `id`.
+2. Parseo roto con `--json`: empezar por payload minimo y luego escalar.
+3. Here-string invalido: no usar `@' ... '@` en la misma linea con otros comandos.
+4. Flujo `--stdin` colgado: validar primero con `--json` corto y luego volver a `--stdin` con archivo.
+5. Texto largo con caracteres especiales: aplicar update por etapas (primero estado, luego texto completo).
+
+Secuencia recomendada para `update-backlog-item`:
+
+```powershell
+node .ia/apts/apts-cli.mjs update-backlog-item --json '{"backlog_item_id":"11111111-1111-1111-1111-111111111111","status":"review"}' --pretty
+
+@'
+{
+  "backlog_item_id": "11111111-1111-1111-1111-111111111111",
+  "acceptance_criteria": "FE: estado visible y mensajes claros. BE: persistencia y validacion consistente."
+}
+'@ | Set-Content -Path backlog-update.json
+
+Get-Content .\backlog-update.json | node .ia/apts/apts-cli.mjs update-backlog-item --stdin --pretty
+```
+
+Validacion final obligatoria:
+
+- Confirmar que el comando respondio con exito.
+- Volver a leer el backlog item y verificar que los campos persistidos coinciden con lo esperado.
+
 ## Politica anti-loop de reintentos
 
 - No reintentar en `400`, `401`, `403` o `404`.
