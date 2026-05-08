@@ -13,6 +13,9 @@ const TABLES = [
   { name: 'agent_logs', primaryKey: 'id' },
   { name: 'config', primaryKey: 'key' }
 ];
+const POSTGRES_AUTOINCREMENT_TABLES = [
+  { tableName: 'agent_logs', columnName: 'id' }
+];
 
 const BATCH_SIZE = 200;
 
@@ -33,6 +36,42 @@ const normalizeSourceRow = (tableName, row) => {
     ...row,
     technical_details: null
   };
+};
+
+const syncPostgresSequence = async (connection, { tableName, columnName = 'id' }) => {
+  if (connection.client.config.client !== 'pg') {
+    return false;
+  }
+
+  const sequenceResult = await connection.raw(
+    'SELECT pg_get_serial_sequence(?, ?) AS sequence_name',
+    [tableName, columnName]
+  );
+  const sequenceName = sequenceResult.rows?.[0]?.sequence_name;
+
+  if (!sequenceName) {
+    return false;
+  }
+
+  await connection.raw(
+    'SELECT setval(?::regclass, COALESCE((SELECT MAX(??) FROM ??), 0) + 1, false)',
+    [sequenceName, columnName, tableName]
+  );
+
+  return true;
+};
+
+const syncPostgresAutoIncrementSequences = async (connection, sequenceTargets) => {
+  const synced = [];
+
+  for (const sequenceTarget of sequenceTargets) {
+    const didSync = await syncPostgresSequence(connection, sequenceTarget);
+    if (didSync) {
+      synced.push(`${sequenceTarget.tableName}.${sequenceTarget.columnName || 'id'}`);
+    }
+  }
+
+  return synced;
 };
 
 const main = async () => {
@@ -94,6 +133,12 @@ const main = async () => {
         console.log(`Migrated ${rows.length} row(s) for table ${table.name}`);
       }
     });
+
+    const syncedSequences = await syncPostgresAutoIncrementSequences(targetDb, POSTGRES_AUTOINCREMENT_TABLES);
+
+    if (syncedSequences.length > 0) {
+      console.log('Synced PostgreSQL sequences:', syncedSequences.join(', '));
+    }
 
     console.log('SQLite -> PostgreSQL migration completed successfully.');
   } finally {

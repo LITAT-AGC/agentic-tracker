@@ -98,6 +98,144 @@ function getBatchDataList(result) {
   return (result.data.results || []).map((item) => item.data);
 }
 
+async function runBlockerAndResumeRegression({ projectUrl, agentName, agentEmail }) {
+  const createBacklog = await request('/projects/backlog', {
+    method: 'POST',
+    body: {
+      project_url: projectUrl,
+      title: 'Regression: blocker then log should work',
+      description: 'Validates log insert works before and after report_blocker',
+      item_type: 'bug',
+      status: 'ready',
+    },
+    expectedStatuses: [201],
+  });
+
+  const blockerBacklogId = createBacklog.data.backlog_item?.id;
+  assert(blockerBacklogId, 'regression backlog item should be created');
+
+  const registerTask = await request('/projects/tasks', {
+    method: 'POST',
+    body: {
+      project_url: projectUrl,
+      title: 'Regression task for blocker/log flow',
+      agent_name: agentName,
+      agent_email: agentEmail,
+      backlog_item_id: blockerBacklogId,
+    },
+  });
+
+  const taskId = registerTask.data.task_id;
+  assert(taskId, 'regression task should be created');
+
+  const logBeforeBlocker = await request(`/tasks/${taskId}/logs`, {
+    method: 'POST',
+    body: {
+      agent_name: agentName,
+      branch: 'batch/regression-blocker-log',
+      message: 'regression log before blocker',
+      technical_details: {
+        phase: 'before_blocker',
+        outcome: 'success',
+      },
+    },
+  });
+  assert(logBeforeBlocker.data.success === true, 'log before blocker should succeed');
+
+  const blocker = await request('/projects/blockers', {
+    method: 'POST',
+    body: {
+      project_url: projectUrl,
+      task_id: taskId,
+      error_message: 'regression blocker to validate agent_logs inserts',
+      agent_name: agentName,
+    },
+  });
+  assert(blocker.data.success === true, 'report_blocker should succeed');
+
+  const logAfterBlocker = await request(`/tasks/${taskId}/logs`, {
+    method: 'POST',
+    body: {
+      agent_name: agentName,
+      branch: 'batch/regression-blocker-log',
+      message: 'regression log after blocker',
+      technical_details: {
+        phase: 'after_blocker',
+        outcome: 'success',
+      },
+    },
+  });
+  assert(logAfterBlocker.data.success === true, 'log after blocker should succeed');
+
+  const createResumeBacklog = await request('/projects/backlog', {
+    method: 'POST',
+    body: {
+      project_url: projectUrl,
+      title: 'Regression: register_task resumes same task',
+      description: 'Validates register_task with backlog_item_id resumes stalled task',
+      item_type: 'chore',
+      status: 'ready',
+    },
+    expectedStatuses: [201],
+  });
+
+  const resumeBacklogId = createResumeBacklog.data.backlog_item?.id;
+  assert(resumeBacklogId, 'resume regression backlog item should be created');
+
+  const registerResume1 = await request('/projects/tasks', {
+    method: 'POST',
+    body: {
+      project_url: projectUrl,
+      title: 'Regression resume first register',
+      agent_name: agentName,
+      agent_email: agentEmail,
+      backlog_item_id: resumeBacklogId,
+    },
+  });
+  const firstTaskId = registerResume1.data.task_id;
+  assert(firstTaskId, 'first register for resume regression should return task_id');
+
+  const blockerForResume = await request('/projects/blockers', {
+    method: 'POST',
+    body: {
+      project_url: projectUrl,
+      task_id: firstTaskId,
+      error_message: 'regression blocker before resume',
+      agent_name: agentName,
+    },
+  });
+  assert(blockerForResume.data.success === true, 'blocker before resume should succeed');
+
+  const registerResume2 = await request('/projects/tasks', {
+    method: 'POST',
+    body: {
+      project_url: projectUrl,
+      title: 'Regression resume second register',
+      agent_name: agentName,
+      agent_email: agentEmail,
+      backlog_item_id: resumeBacklogId,
+    },
+  });
+
+  assert(registerResume2.data.resumed === true, 'second register should resume existing task');
+  assert(registerResume2.data.previous_status === 'stalled', 'resumed task previous_status should be stalled');
+  assert(registerResume2.data.task_id === firstTaskId, 'second register should return the same task_id');
+
+  const logAfterResume = await request(`/tasks/${registerResume2.data.task_id}/logs`, {
+    method: 'POST',
+    body: {
+      agent_name: agentName,
+      branch: 'batch/regression-resume',
+      message: 'regression log after resume',
+      technical_details: {
+        phase: 'after_resume',
+        outcome: 'success',
+      },
+    },
+  });
+  assert(logAfterResume.data.success === true, 'log after resume should succeed');
+}
+
 async function runBatchSmoke() {
   const seed = Date.now();
   const projectUrl = `https://github.com/agentic-org/apts-batch-${seed}`;
@@ -267,8 +405,11 @@ async function runBatchSmoke() {
   assert(deleteBacklogPartial.data.failed === 1, 'partial delete should fail exactly one item');
   assert(deleteBacklogPartial.data.succeeded === 2, 'partial delete should succeed in two items');
 
+  await runBlockerAndResumeRegression({ projectUrl, agentName, agentEmail });
+
   console.log('Batch success checks: OK');
   console.log('Strict all-or-nothing rollback check: OK');
+  console.log('Blocker/log and resume regressions: OK');
   console.log('--- Batch Smoke Completed ---');
 }
 

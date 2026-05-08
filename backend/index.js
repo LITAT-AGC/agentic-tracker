@@ -186,6 +186,9 @@ const SQLITE_LEGACY_TABLES = [
   { name: 'agent_logs', primaryKey: 'id' },
   { name: 'config', primaryKey: 'key' }
 ];
+const POSTGRES_AUTOINCREMENT_TABLES = [
+  { tableName: 'agent_logs', columnName: 'id' }
+];
 
 const parseJsonArray = (value) => {
   if (!value) return [];
@@ -218,6 +221,42 @@ const normalizeSqliteLegacyRow = (tableName, row) => {
     ...row,
     technical_details: null
   };
+};
+
+const syncPostgresSequence = async (connection, { tableName, columnName = 'id' }) => {
+  if (connection.client.config.client !== 'pg') {
+    return false;
+  }
+
+  const sequenceResult = await connection.raw(
+    'SELECT pg_get_serial_sequence(?, ?) AS sequence_name',
+    [tableName, columnName]
+  );
+  const sequenceName = sequenceResult.rows?.[0]?.sequence_name;
+
+  if (!sequenceName) {
+    return false;
+  }
+
+  await connection.raw(
+    'SELECT setval(?::regclass, COALESCE((SELECT MAX(??) FROM ??), 0) + 1, false)',
+    [sequenceName, columnName, tableName]
+  );
+
+  return true;
+};
+
+const syncPostgresAutoIncrementSequences = async (connection, sequenceTargets) => {
+  const synced = [];
+
+  for (const sequenceTarget of sequenceTargets) {
+    const didSync = await syncPostgresSequence(connection, sequenceTarget);
+    if (didSync) {
+      synced.push(`${sequenceTarget.tableName}.${sequenceTarget.columnName || 'id'}`);
+    }
+  }
+
+  return synced;
 };
 
 const toNumberOrNull = (value) => {
@@ -960,6 +999,8 @@ const copyLegacySQLiteIntoPostgresAtStartup = async () => {
       }
     });
 
+    const syncedSequences = await syncPostgresAutoIncrementSequences(db, POSTGRES_AUTOINCREMENT_TABLES);
+
     await sqliteLegacyDb.destroy();
     const removedLegacyFile = await fs.unlink(sqliteLegacyFilePath)
       .then(() => true)
@@ -973,7 +1014,8 @@ const copyLegacySQLiteIntoPostgresAtStartup = async () => {
       migrated: true,
       file_removed: removedLegacyFile,
       file_path: sqliteLegacyFilePath,
-      source_counts: sourceCounts
+      source_counts: sourceCounts,
+      synced_sequences: syncedSequences
     };
   } catch (error) {
     await sqliteLegacyDb.destroy();
@@ -3355,6 +3397,9 @@ const startServer = async () => {
 
     const legacyMigrationResult = await copyLegacySQLiteIntoPostgresAtStartup();
     logger.info({ legacy_migration: legacyMigrationResult }, 'Legacy SQLite bootstrap checked');
+
+    const startupSyncedSequences = await syncPostgresAutoIncrementSequences(db, POSTGRES_AUTOINCREMENT_TABLES);
+    logger.info({ synced_sequences: startupSyncedSequences }, 'PostgreSQL autoincrement sequences checked');
 
     const embeddingBackfillResult = await backfillOpenBugEmbeddingsAtStartup();
     logger.info({ embedding_backfill: embeddingBackfillResult }, 'Open bug embedding backfill checked');
