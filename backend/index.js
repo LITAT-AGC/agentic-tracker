@@ -1258,10 +1258,18 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.21';
+const integrationManifestSchemaVersion = '2.0.22';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.22',
+    date: '2026-05-08',
+    changes: [
+      'Bootstrap metadata now publishes explicit PowerShell CLI reliability guidance, including staged minimal payload strategy, known parser pitfalls, and post-write verification rules.',
+      'Official integration documentation and CLI help now emphasize update_backlog_item must use backlog_item_id (not id) and provide safer Windows examples for --json and --stdin usage.'
+    ]
+  },
   {
     version: '2.0.21',
     date: '2026-05-08',
@@ -1573,8 +1581,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-agent-guidelines.md'),
     fileName: 'apts-agent-guidelines.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.20',
-    updatedInSchemaVersion: '2.0.20',
+    artifactVersion: '2.0.22',
+    updatedInSchemaVersion: '2.0.22',
     kind: 'agent_guidelines',
     recommended: true,
     syncAction: 'overwrite',
@@ -1722,8 +1730,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-cli.js'),
     fileName: 'apts-cli.js',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.0.20',
-    updatedInSchemaVersion: '2.0.20',
+    artifactVersion: '2.0.22',
+    updatedInSchemaVersion: '2.0.22',
     kind: 'reference_cli',
     recommended: false,
     optional: true,
@@ -1739,8 +1747,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-cli.mjs'),
     fileName: 'apts-cli.mjs',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.0.20',
-    updatedInSchemaVersion: '2.0.20',
+    artifactVersion: '2.0.22',
+    updatedInSchemaVersion: '2.0.22',
     kind: 'reference_cli',
     recommended: false,
     optional: true,
@@ -1842,6 +1850,25 @@ const buildIntegrationManifest = (req) => ({
       adapter_exception_rule: 'If runtime-specific glue is still needed, keep it as a thin adapter that delegates to the official script unchanged.',
       legacy_wrapper_cleanup_rule: 'After installing the official client or CLI, remove older project-local scripts that only wrapped base APTS operations such as register_task, read_project_context, update_task_status, log_agent_progress, report_blocker, or heartbeat. Keep only thin runtime-specific adapters when discovery requires them.',
       default_rule: 'If in doubt, inspect package.json and the client project code before choosing an artifact. Download the CLI only together with the matching client artifact.'
+    },
+    powershell_cli_safety: {
+      applies_to: ['apts-cli.js', 'apts-cli.mjs'],
+      mandatory_field_reminders: {
+        update_backlog_item: 'Use backlog_item_id in payloads. Do not send id for update-backlog-item or delete-backlog-item operations.',
+        update_payload_shape: 'Use one JSON object for single update calls, or a non-empty JSON array for batch calls.'
+      },
+      common_failure_modes: [
+        'Inline escaped JSON in PowerShell can be split into extra arguments when quoting is inconsistent.',
+        'Single-line here-string declarations are invalid and trigger parser errors.',
+        'stdin-based calls can appear hung if the input stream remains open or no JSON payload is piped.'
+      ],
+      recommended_execution_pattern: [
+        'Validate command semantics first with a minimal payload (for example status-only update) before sending long acceptance_criteria text.',
+        'When payload content is large or includes special characters, write JSON to a temporary file and pipe it with Get-Content ... | node ... --stdin.',
+        'If a stdin flow appears stuck, retry with a short --json payload to verify command response before reattempting the full payload.',
+        'Apply multi-step updates for high-risk text: first minimal field update, then full content update after the first call succeeds.'
+      ],
+      post_write_verification: 'After mutating calls, read backlog/task state and confirm persisted fields match expected values instead of relying only on process exit success.'
     },
     artifact_sync_policy: {
       source_of_truth: 'manifest_artifacts',
