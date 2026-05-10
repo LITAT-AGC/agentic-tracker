@@ -1711,10 +1711,18 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.30';
+const integrationManifestSchemaVersion = '2.0.31';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.31',
+    date: '2026-05-10',
+    changes: [
+      'Executor agent artifacts now publish explicit invocation compatibility metadata (`user-invocable: true` and `disable-model-invocation: false`) to reduce cross-runtime subagent launch failures in heterogeneous integrations.',
+      'The update keeps orchestrator-to-executor delegation deterministic when the same APTS-integrated project is executed from runtimes that interpret invocability flags differently.'
+    ]
+  },
   {
     version: '2.0.30',
     date: '2026-05-10',
@@ -2111,8 +2119,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'plantillas-agentes', 'ejecutor-item-backlog-dev-test-commit.agent.md'),
     fileName: 'ejecutor-item-backlog-dev-test-commit.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.29',
-    updatedInSchemaVersion: '2.0.29',
+    artifactVersion: '2.0.31',
+    updatedInSchemaVersion: '2.0.31',
     kind: 'agent_template',
     recommended: false,
     syncAction: 'overwrite',
@@ -2175,8 +2183,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'runtime-adapters', 'vscode', 'agents', 'backlog-item-executor-dev-test-commit.agent.md'),
     fileName: 'backlog-item-executor-dev-test-commit.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.29',
-    updatedInSchemaVersion: '2.0.29',
+    artifactVersion: '2.0.31',
+    updatedInSchemaVersion: '2.0.31',
     kind: 'agent_runtime_adapter',
     recommended: true,
     syncAction: 'overwrite',
