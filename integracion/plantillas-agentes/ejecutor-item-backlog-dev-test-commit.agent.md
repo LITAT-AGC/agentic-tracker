@@ -58,6 +58,9 @@ The orchestrator should pass at least:
 ## Validation Policy
 - Prefer the most relevant targeted validation first.
 - Before commit, run the strongest practical validation available for the touched slice.
+- If validation requires one or more servers (for example backend API, Playwright web server, or app dev server), start them in background mode (non-blocking) so tests can run in parallel terminal steps.
+- Never block the workflow by leaving required test servers in foreground mode while expecting subsequent commands in the same run.
+- Confirm the server is ready before running tests, and stop background servers after validation completes.
 - If `npm test` is not a valid command for this repository slice, do not invent success; run the best available targeted validation and report it explicitly.
 - If any required validation fails, do not commit.
 

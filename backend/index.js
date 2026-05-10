@@ -1711,10 +1711,18 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.26';
+const integrationManifestSchemaVersion = '2.0.27';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.27',
+    date: '2026-05-10',
+    changes: [
+      'Executor and orchestrator downloadable agent templates now state explicitly that any server required for validation must be started in background mode, verified as ready, and stopped after tests.',
+      'VS Code runtime adapter artifacts for orchestrator and executor were updated to mirror the same background-mode server-testing requirement for delegated backlog execution flows.'
+    ]
+  },
   {
     version: '2.0.26',
     date: '2026-05-10',
@@ -2079,8 +2087,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'plantillas-agentes', 'ejecutor-item-backlog-dev-test-commit.agent.md'),
     fileName: 'ejecutor-item-backlog-dev-test-commit.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.24',
-    updatedInSchemaVersion: '2.0.24',
+    artifactVersion: '2.0.27',
+    updatedInSchemaVersion: '2.0.27',
     kind: 'agent_template',
     recommended: false,
     syncAction: 'overwrite',
@@ -2094,8 +2102,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'plantillas-agentes', 'orquestador-backlog-apts.agent.md'),
     fileName: 'orquestador-backlog-apts.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.24',
-    updatedInSchemaVersion: '2.0.24',
+    artifactVersion: '2.0.27',
+    updatedInSchemaVersion: '2.0.27',
     kind: 'agent_template',
     recommended: false,
     syncAction: 'overwrite',
@@ -2123,8 +2131,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'runtime-adapters', 'vscode', 'agents', 'apts-backlog-orchestrator.agent.md'),
     fileName: 'apts-backlog-orchestrator.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.24',
-    updatedInSchemaVersion: '2.0.24',
+    artifactVersion: '2.0.27',
+    updatedInSchemaVersion: '2.0.27',
     kind: 'agent_runtime_adapter',
     recommended: true,
     syncAction: 'overwrite',
@@ -2143,8 +2151,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'runtime-adapters', 'vscode', 'agents', 'backlog-item-executor-dev-test-commit.agent.md'),
     fileName: 'backlog-item-executor-dev-test-commit.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.24',
-    updatedInSchemaVersion: '2.0.24',
+    artifactVersion: '2.0.27',
+    updatedInSchemaVersion: '2.0.27',
     kind: 'agent_runtime_adapter',
     recommended: true,
     syncAction: 'overwrite',

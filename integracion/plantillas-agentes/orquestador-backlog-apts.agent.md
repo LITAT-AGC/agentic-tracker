@@ -60,6 +60,7 @@ Pass:
 - backlog description
 - acceptance criteria
 - repository constraints
+- explicit reminder that any server required for validation must be started in background mode and stopped after tests
 
 ## Success Rule
 Treat a subagent result as success only when all are true:
