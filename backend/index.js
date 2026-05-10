@@ -10,6 +10,15 @@ const pino = require('pino');
 const pinoHttp = require('pino-http');
 const { z } = require('zod');
 const knexConfig = require('./knexfile');
+const {
+  deleteSemanticDocumentsForBacklogItem,
+  estimateEmbeddingCost,
+  getProjectBacklogCoverageStatus,
+  searchProjectBacklogCoverage,
+  syncBacklogCoverageDocument,
+  syncBacklogCoverageDocuments,
+  syncProjectBacklogCoverageDocuments
+} = require('./scripts/lib/semantic_documents');
 const rootPackage = require('../package.json');
 const db = createKnex(knexConfig[process.env.NODE_ENV || 'development']);
 
@@ -176,6 +185,7 @@ const OPEN_BUG_BACKLOG_STATUSES = new Set(['draft', 'needs_details', 'ready', 'i
 const MAX_SEMANTIC_SEARCH_TOP_K = 20;
 const DEFAULT_SEMANTIC_SEARCH_TOP_K = 5;
 const DEFAULT_SEMANTIC_SEARCH_THRESHOLD = 0.78;
+const DEFAULT_BACKLOG_COVERAGE_SEARCH_THRESHOLD = 0.6;
 const MAX_OPEN_BUGS_FOR_STARTUP_EMBEDDING = 10;
 const MAX_BATCH_SIZE = 100;
 const SQLITE_LEGACY_BATCH_SIZE = 200;
@@ -442,10 +452,160 @@ const normalizeSchemaInputString = (value, options = {}) => {
 
 const zodErrorMessage = (validationError) => validationError.issues?.[0]?.message || 'Invalid request payload';
 
-const createHttpError = (statusCode, message) => {
+const createHttpError = (statusCode, message, options = {}) => {
   const error = new Error(message);
   error.statusCode = statusCode;
+  error.code = options.code || null;
+  error.expose = typeof options.expose === 'boolean'
+    ? options.expose
+    : statusCode < 500;
+  error.details = options.details || null;
+  error.cause = options.cause || null;
   return error;
+};
+
+const getErrorStatusCode = (error) => {
+  const parsedStatusCode = Number(error?.statusCode);
+  if (!Number.isInteger(parsedStatusCode) || parsedStatusCode < 400 || parsedStatusCode > 599) {
+    return 500;
+  }
+
+  return parsedStatusCode;
+};
+
+const shouldExposeError = (error, statusCode = getErrorStatusCode(error)) => {
+  if (typeof error?.expose === 'boolean') {
+    return error.expose;
+  }
+
+  return statusCode < 500;
+};
+
+const serializeErrorForLog = (error) => ({
+  message: error?.message || 'Unknown error',
+  status_code: getErrorStatusCode(error),
+  code: error?.code || null,
+  details: error?.details || null,
+  cause: error?.cause?.message || null,
+  stack: error?.stack || null
+});
+
+const sendApiError = (res, error, {
+  fallbackMessage = 'Internal server error',
+  logMessage = 'Request failed',
+  logContext = {},
+  responseBody = {}
+} = {}) => {
+  const statusCode = getErrorStatusCode(error);
+  const publicMessage = shouldExposeError(error, statusCode)
+    ? (error?.message || fallbackMessage)
+    : fallbackMessage;
+
+  const payload = {
+    error: publicMessage,
+    ...responseBody
+  };
+
+  if (error?.code) {
+    payload.code = error.code;
+  }
+
+  if (error?.details && statusCode < 500) {
+    payload.details = error.details;
+  }
+
+  const logPayload = {
+    ...logContext,
+    error: serializeErrorForLog(error)
+  };
+
+  if (statusCode >= 500) {
+    logger.error(logPayload, logMessage);
+  } else {
+    logger.warn(logPayload, logMessage);
+  }
+
+  return res.status(statusCode).json(payload);
+};
+
+const sendBatchRouteError = (res, error, {
+  strict = false,
+  fallbackMessage = 'Batch operation failed',
+  logMessage = 'Batch operation failed',
+  logContext = {}
+} = {}) => {
+  if (strict) {
+    return sendApiError(res, error, {
+      fallbackMessage,
+      logMessage,
+      logContext,
+      responseBody: {
+        strict: true,
+        failed_index: Number.isInteger(error?.failedIndex) ? error.failedIndex : null
+      }
+    });
+  }
+
+  return sendApiError(res, error, {
+    fallbackMessage,
+    logMessage,
+    logContext
+  });
+};
+
+const isSemanticProviderError = (error) => {
+  const message = String(error?.message || '').toLowerCase();
+  return message.includes('openrouter')
+    || message.includes('embedding')
+    || message.includes('api key is required');
+};
+
+const normalizeSemanticError = (error, {
+  unavailableMessage = 'Semantic processing is temporarily unavailable',
+  internalMessage = 'Semantic processing failed',
+  unavailableCode = 'SEMANTIC_SERVICE_UNAVAILABLE',
+  internalCode = 'SEMANTIC_PROCESSING_FAILED'
+} = {}) => {
+  if (error?.statusCode) {
+    return error;
+  }
+
+  if (isSemanticProviderError(error)) {
+    return createHttpError(503, unavailableMessage, {
+      code: unavailableCode,
+      expose: true,
+      cause: error
+    });
+  }
+
+  return createHttpError(500, internalMessage, {
+    code: internalCode,
+    expose: false,
+    cause: error
+  });
+};
+
+const runNonBlockingSemanticOperation = async (operation, logContext = {}) => {
+  try {
+    return await operation();
+  } catch (error) {
+    const normalizedError = normalizeSemanticError(error, {
+      unavailableMessage: 'Semantic indexing is temporarily unavailable',
+      internalMessage: 'Semantic indexing failed',
+      unavailableCode: 'SEMANTIC_SIDE_EFFECT_UNAVAILABLE',
+      internalCode: 'SEMANTIC_SIDE_EFFECT_FAILED'
+    });
+
+    logger.warn({
+      ...logContext,
+      error: serializeErrorForLog(normalizedError)
+    }, 'Non-blocking semantic operation failed');
+
+    return {
+      status: 'failed',
+      code: normalizedError.code
+    };
+  }
 };
 
 const normalizeBatchRequestBody = (body) => {
@@ -732,6 +892,60 @@ const semanticBugSearchBodySchema = z.object({
   ),
   exclude_backlog_item_id: uuidFieldSchema('exclude_backlog_item_id must be a valid UUID', { optional: true, nullable: true })
 });
+
+const dashboardSemanticSearchBodySchema = z.object({
+  query_text: nonEmptyStringSchema('Query text is required', 'Query text must be a string'),
+  top_k: integerFieldSchema('top_k must be an integer between 1 and 20', { optional: true }),
+  threshold: numberFieldSchema('threshold must be a number between 0 and 1', { optional: true, min: 0, max: 1 }),
+  item_types: z.array(enumFieldSchema(BACKLOG_ITEM_TYPES, 'Invalid backlog item type', 'Invalid backlog item type')).optional(),
+  statuses: z.array(enumFieldSchema(BACKLOG_STATUSES, 'Invalid backlog status', 'Invalid backlog status')).optional()
+});
+
+const enrichSemanticStatusWithPricing = async (semanticStatus) => {
+  if (!semanticStatus?.embedding_model) {
+    return semanticStatus;
+  }
+
+  try {
+    const models = await fetchOpenRouterModels();
+    const matchedModel = models.find((model) => model.id === semanticStatus.embedding_model) || null;
+    const estimatedFullInputCost = estimateEmbeddingCost(semanticStatus.estimated_input_tokens, matchedModel?.prompt_price);
+    const estimatedIncrementalInputCost = estimateEmbeddingCost(semanticStatus.estimated_incremental_input_tokens, matchedModel?.prompt_price);
+
+    return {
+      ...semanticStatus,
+      pricing: matchedModel
+        ? {
+          prompt_price: matchedModel.prompt_price,
+          completion_price: matchedModel.completion_price,
+          context_length: matchedModel.context_length,
+          estimated_input_cost: estimatedFullInputCost,
+          estimated_full_input_cost: estimatedFullInputCost,
+          estimated_incremental_input_cost: estimatedIncrementalInputCost
+        }
+        : {
+          prompt_price: null,
+          completion_price: null,
+          context_length: null,
+          estimated_input_cost: null,
+          estimated_full_input_cost: null,
+          estimated_incremental_input_cost: null
+        }
+    };
+  } catch (_error) {
+    return {
+      ...semanticStatus,
+      pricing: {
+        prompt_price: null,
+        completion_price: null,
+        context_length: null,
+        estimated_input_cost: null,
+        estimated_full_input_cost: null,
+        estimated_incremental_input_cost: null
+      }
+    };
+  }
+};
 
 const resolveTaskBodySchema = z.object({
   instruction: nonEmptyStringSchema('Instruction is required', 'Instruction must be a string')
@@ -2696,7 +2910,15 @@ const sendIntegrationArtifact = async (req, res, artifactKey) => {
     res.setHeader('Content-Type', artifact.contentType);
     return res.send(content);
   } catch (error) {
-    return res.status(500).json({ error: `Unable to read integration artifact: ${error.message}` });
+    return sendApiError(res, createHttpError(500, 'Unable to read integration artifact', {
+      code: 'INTEGRATION_ARTIFACT_READ_FAILED',
+      expose: true,
+      cause: error
+    }), {
+      fallbackMessage: 'Unable to read integration artifact',
+      logMessage: 'Integration artifact read failed',
+      logContext: { artifact_key: artifactKey }
+    });
   }
 };
 
@@ -2730,10 +2952,19 @@ const notifyWebhook = async (project_url, payload) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
-      }).catch(err => console.error('[Webhook Error]', err.message));
+      }).catch((err) => {
+        logger.warn({
+          project_url,
+          webhook_url: project.webhook_url,
+          error: serializeErrorForLog(err)
+        }, 'Webhook delivery failed');
+      });
     }
   } catch (error) {
-    console.error('[Webhook DB Error]', error.message);
+    logger.warn({
+      project_url,
+      error: serializeErrorForLog(error)
+    }, 'Webhook lookup failed');
   }
 };
 
@@ -2831,6 +3062,11 @@ const registerTaskInternal = async (payload, { connection = db } = {}) => {
             updated_at: connection.fn.now()
           });
 
+        await runNonBlockingSemanticOperation(
+          () => syncBacklogCoverageDocument(connection, backlogItemId),
+          { action: 'register_task.resume_backlog_sync', backlog_item_id: backlogItemId, project_url: url }
+        );
+
         return {
           task_id: activeTask.id,
           status: 'in_progress',
@@ -2863,6 +3099,11 @@ const registerTaskInternal = async (payload, { connection = db } = {}) => {
         active_task_id: task.id,
         updated_at: connection.fn.now()
       });
+
+    await runNonBlockingSemanticOperation(
+      () => syncBacklogCoverageDocument(connection, backlogItemId),
+      { action: 'register_task.create_backlog_sync', backlog_item_id: backlogItemId, project_url: url }
+    );
   }
 
   return {
@@ -2898,6 +3139,10 @@ const createBacklogItemInternal = async (body, { connection = db } = {}) => {
   }).returning('*');
 
   await tryPersistBugEmbeddingForBacklogItem(backlogItem.id, { connection });
+  await runNonBlockingSemanticOperation(
+    () => syncBacklogCoverageDocument(connection, backlogItem.id),
+    { action: 'create_backlog_item.semantic_sync', backlog_item_id: backlogItem.id, project_url: url }
+  );
 
   const refreshedBacklogItem = await connection('backlog_items')
     .where({ id: backlogItem.id })
@@ -2934,6 +3179,10 @@ const updateBacklogItemInternal = async (backlogItemId, body, { connection = db 
   }
 
   await tryPersistBugEmbeddingForBacklogItem(backlogItem.id, { connection });
+  await runNonBlockingSemanticOperation(
+    () => syncBacklogCoverageDocument(connection, backlogItem.id),
+    { action: 'update_backlog_item.semantic_sync', backlog_item_id: backlogItem.id, project_url: backlogItem.project_url }
+  );
 
   const refreshedBacklogItem = await connection('backlog_items')
     .where({ id: backlogItem.id })
@@ -2961,6 +3210,8 @@ const deleteBacklogItemInternal = async (backlogItemId, { connection = db } = {}
   if (!backlogItem) {
     throw createHttpError(404, 'Backlog item not found');
   }
+
+  await deleteSemanticDocumentsForBacklogItem(connection, backlogItem.id);
 
   return { success: true, backlog_item: mapBacklogItemRecord(backlogItem) };
 };
@@ -3015,9 +3266,15 @@ const updateTaskStatusInternal = async (taskId, payload, { connection = db, defe
       backlogUpdate.active_task_id = null;
     }
 
-    await connection('backlog_items')
+    const affectedBacklogItems = await connection('backlog_items')
       .where({ active_task_id: taskId })
-      .update(backlogUpdate);
+      .update(backlogUpdate)
+      .returning(['id']);
+
+    await runNonBlockingSemanticOperation(
+      () => syncBacklogCoverageDocuments(connection, affectedBacklogItems.map((item) => item.id)),
+      { action: 'update_task_status.semantic_sync', task_id: taskId, project_url: projectUrl || task.project_url || null }
+    );
   }
 
   await queueWebhookNotification(projectUrl || task.project_url || '', {
@@ -3089,9 +3346,14 @@ const reportBlockerInternal = async (payload, { connection = db, deferredWebhook
     .update({ status: 'stalled', updated_at: connection.fn.now() });
 
   await connection('projects').where({ url }).update({ status: 'blocked' });
-  await connection('backlog_items')
+  const blockedBacklogItems = await connection('backlog_items')
     .where({ active_task_id: taskId })
-    .update({ status: 'blocked', updated_at: connection.fn.now() });
+    .update({ status: 'blocked', updated_at: connection.fn.now() })
+    .returning(['id']);
+  await runNonBlockingSemanticOperation(
+    () => syncBacklogCoverageDocuments(connection, blockedBacklogItems.map((item) => item.id)),
+    { action: 'report_blocker.semantic_sync', task_id: taskId, project_url: url }
+  );
   await connection('agent_logs').insert({
     task_id: taskId,
     agent_name: agentName || null,
@@ -3166,14 +3428,11 @@ app.post('/api/projects/tasks', apiLimiter, authenticateAgent, async (req, res) 
     const results = await executeBatchOperation(parsedItems, async (payload) => registerTaskInternal(payload));
     return sendBatchOperationResponse(res, results);
   } catch (routeError) {
-    if (useStrictBatchMode) {
-      return res.status(routeError.statusCode || 500).json({
-        error: routeError.message,
-        strict: true,
-        failed_index: routeError.failedIndex
-      });
-    }
-    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+    return sendBatchRouteError(res, routeError, {
+      strict: useStrictBatchMode,
+      fallbackMessage: 'Failed to register task',
+      logMessage: 'register_task failed'
+    });
   }
 });
 
@@ -3237,7 +3496,10 @@ app.get('/api/projects/context', apiLimiter, authenticateAgent, async (req, res)
 
     return res.json(responsePayload);
   } catch (routeError) {
-    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+    return sendApiError(res, routeError, {
+      fallbackMessage: 'Failed to read project context',
+      logMessage: 'read_project_context failed'
+    });
   }
 });
 
@@ -3246,7 +3508,10 @@ app.get('/api/projects', apiLimiter, authenticateAgent, async (_req, res) => {
     const projects = await listProjectsSummary();
     return res.json({ projects });
   } catch (routeError) {
-    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+    return sendApiError(res, routeError, {
+      fallbackMessage: 'Failed to list projects',
+      logMessage: 'list_projects failed'
+    });
   }
 });
 
@@ -3261,7 +3526,11 @@ app.get('/api/projects/:url/constraints', apiLimiter, authenticateAgent, async (
     const constraints = await getProjectConstraints(url);
     return res.json(constraints);
   } catch (routeError) {
-    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+    return sendApiError(res, routeError, {
+      fallbackMessage: 'Failed to read project constraints',
+      logMessage: 'read_project_constraints failed',
+      logContext: { project_url: req.params.url }
+    });
   }
 });
 
@@ -3303,7 +3572,10 @@ app.get('/api/projects/backlog', apiLimiter, authenticateAgent, async (req, res)
     });
     return res.json({ backlog });
   } catch (routeError) {
-    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+    return sendApiError(res, routeError, {
+      fallbackMessage: 'Failed to list backlog items',
+      logMessage: 'list_backlog_items failed'
+    });
   }
 });
 
@@ -3348,7 +3620,15 @@ app.post('/api/projects/backlog/semantic-search', apiLimiter, authenticateAgent,
       ...result
     });
   } catch (routeError) {
-    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+    return sendApiError(res, normalizeSemanticError(routeError, {
+      unavailableMessage: 'Semantic bug search is temporarily unavailable',
+      internalMessage: 'Semantic bug search failed',
+      unavailableCode: 'SEMANTIC_BUG_SEARCH_UNAVAILABLE',
+      internalCode: 'SEMANTIC_BUG_SEARCH_FAILED'
+    }), {
+      fallbackMessage: 'Failed to execute semantic bug search',
+      logMessage: 'semantic_bug_search failed'
+    });
   }
 });
 
@@ -3374,14 +3654,11 @@ app.post('/api/projects/backlog', apiLimiter, authenticateAgent, async (req, res
     const results = await executeBatchOperation(items, async (payload) => createBacklogItemInternal(payload));
     return sendBatchOperationResponse(res, results, { successStatus: 201 });
   } catch (routeError) {
-    if (useStrictBatchMode) {
-      return res.status(routeError.statusCode || 500).json({
-        error: routeError.message,
-        strict: true,
-        failed_index: routeError.failedIndex
-      });
-    }
-    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+    return sendBatchRouteError(res, routeError, {
+      strict: useStrictBatchMode,
+      fallbackMessage: 'Failed to create backlog item',
+      logMessage: 'create_backlog_item failed'
+    });
   }
 });
 
@@ -3410,7 +3687,11 @@ app.get('/api/backlog/:id', apiLimiter, authenticateAgent, async (req, res) => {
 
     return res.json({ backlog_item: mapBacklogItemRecord(backlogItem, { view }) });
   } catch (routeError) {
-    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+    return sendApiError(res, routeError, {
+      fallbackMessage: 'Failed to read backlog item',
+      logMessage: 'read_backlog_item failed',
+      logContext: { backlog_item_id: req.params.id }
+    });
   }
 });
 
@@ -3420,7 +3701,11 @@ app.patch('/api/backlog/:id', apiLimiter, authenticateAgent, async (req, res) =>
     const updated = await updateBacklogItemInternal(req.params.id, req.body);
     return res.json(updated);
   } catch (routeError) {
-    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+    return sendApiError(res, routeError, {
+      fallbackMessage: 'Failed to update backlog item',
+      logMessage: 'update_backlog_item failed',
+      logContext: { backlog_item_id: req.params.id }
+    });
   }
 });
 
@@ -3429,7 +3714,11 @@ app.delete('/api/backlog/:id', apiLimiter, authenticateAgent, async (req, res) =
     const deleted = await deleteBacklogItemInternal(req.params.id);
     return res.json(deleted);
   } catch (routeError) {
-    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+    return sendApiError(res, routeError, {
+      fallbackMessage: 'Failed to delete backlog item',
+      logMessage: 'delete_backlog_item failed',
+      logContext: { backlog_item_id: req.params.id }
+    });
   }
 });
 
@@ -3468,14 +3757,11 @@ app.patch('/api/backlog', apiLimiter, authenticateAgent, async (req, res) => {
     const results = await executeBatchOperation(normalizedItems, async (item) => updateBacklogItemInternal(item.backlog_item_id, item.body));
     return sendBatchOperationResponse(res, results);
   } catch (routeError) {
-    if (useStrictBatchMode) {
-      return res.status(routeError.statusCode || 500).json({
-        error: routeError.message,
-        strict: true,
-        failed_index: routeError.failedIndex
-      });
-    }
-    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+    return sendBatchRouteError(res, routeError, {
+      strict: useStrictBatchMode,
+      fallbackMessage: 'Failed to update backlog items',
+      logMessage: 'batch_update_backlog failed'
+    });
   }
 });
 
@@ -3509,14 +3795,11 @@ app.delete('/api/backlog', apiLimiter, authenticateAgent, async (req, res) => {
     const results = await executeBatchOperation(normalizedItems, async (backlogItemId) => deleteBacklogItemInternal(backlogItemId));
     return sendBatchOperationResponse(res, results);
   } catch (routeError) {
-    if (useStrictBatchMode) {
-      return res.status(routeError.statusCode || 500).json({
-        error: routeError.message,
-        strict: true,
-        failed_index: routeError.failedIndex
-      });
-    }
-    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+    return sendBatchRouteError(res, routeError, {
+      strict: useStrictBatchMode,
+      fallbackMessage: 'Failed to delete backlog items',
+      logMessage: 'batch_delete_backlog failed'
+    });
   }
 });
 
@@ -3591,7 +3874,11 @@ app.get('/api/tasks/:id', apiLimiter, authenticateAgent, async (req, res) => {
       logs
     });
   } catch (routeError) {
-    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+    return sendApiError(res, routeError, {
+      fallbackMessage: 'Failed to read task details',
+      logMessage: 'read_task_details failed',
+      logContext: { task_id: req.params.id }
+    });
   }
 });
 
@@ -3611,7 +3898,11 @@ app.patch('/api/tasks/:id/status', apiLimiter, authenticateAgent, async (req, re
     const updated = await updateTaskStatusInternal(parsedParams.data.id, parsedBody.data);
     return res.json(updated);
   } catch (routeError) {
-    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+    return sendApiError(res, routeError, {
+      fallbackMessage: 'Failed to update task status',
+      logMessage: 'update_task_status failed',
+      logContext: { task_id: parsedParams.data.id }
+    });
   }
 });
 
@@ -3653,14 +3944,11 @@ app.patch('/api/tasks/status', apiLimiter, authenticateAgent, async (req, res) =
 
     return sendBatchOperationResponse(res, results);
   } catch (routeError) {
-    if (useStrictBatchMode) {
-      return res.status(routeError.statusCode || 500).json({
-        error: routeError.message,
-        strict: true,
-        failed_index: routeError.failedIndex
-      });
-    }
-    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+    return sendBatchRouteError(res, routeError, {
+      strict: useStrictBatchMode,
+      fallbackMessage: 'Failed to update task statuses',
+      logMessage: 'batch_update_task_status failed'
+    });
   }
 });
 
@@ -3680,7 +3968,11 @@ app.post('/api/tasks/:id/logs', apiLimiter, authenticateAgent, async (req, res) 
     const logged = await logAgentProgressInternal(parsedParams.data.id, parsedBody.data);
     return res.json(logged);
   } catch (routeError) {
-    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+    return sendApiError(res, routeError, {
+      fallbackMessage: 'Failed to log agent progress',
+      logMessage: 'log_agent_progress failed',
+      logContext: { task_id: parsedParams.data.id }
+    });
   }
 });
 
@@ -3722,14 +4014,11 @@ app.post('/api/tasks/logs', apiLimiter, authenticateAgent, async (req, res) => {
 
     return sendBatchOperationResponse(res, results);
   } catch (routeError) {
-    if (useStrictBatchMode) {
-      return res.status(routeError.statusCode || 500).json({
-        error: routeError.message,
-        strict: true,
-        failed_index: routeError.failedIndex
-      });
-    }
-    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+    return sendBatchRouteError(res, routeError, {
+      strict: useStrictBatchMode,
+      fallbackMessage: 'Failed to log agent progress',
+      logMessage: 'batch_log_agent_progress failed'
+    });
   }
 });
 
@@ -3764,14 +4053,11 @@ app.post('/api/projects/blockers', apiLimiter, authenticateAgent, async (req, re
     const results = await executeBatchOperation(parsedItems, async (payload) => reportBlockerInternal(payload));
     return sendBatchOperationResponse(res, results);
   } catch (routeError) {
-    if (useStrictBatchMode) {
-      return res.status(routeError.statusCode || 500).json({
-        error: routeError.message,
-        strict: true,
-        failed_index: routeError.failedIndex
-      });
-    }
-    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+    return sendBatchRouteError(res, routeError, {
+      strict: useStrictBatchMode,
+      fallbackMessage: 'Failed to report blocker',
+      logMessage: 'report_blocker failed'
+    });
   }
 });
 
@@ -3791,7 +4077,11 @@ app.post('/api/tasks/:id/heartbeat', apiLimiter, authenticateAgent, async (req, 
     const updated = await heartbeatInternal(parsedParams.data.id);
     return res.json(updated);
   } catch (routeError) {
-    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+    return sendApiError(res, routeError, {
+      fallbackMessage: 'Failed to register heartbeat',
+      logMessage: 'heartbeat failed',
+      logContext: { task_id: parsedParams.data.id }
+    });
   }
 });
 
@@ -3825,14 +4115,11 @@ app.post('/api/tasks/heartbeat', apiLimiter, authenticateAgent, async (req, res)
     const results = await executeBatchOperation(parsedItems, async (payload) => heartbeatInternal(payload.task_id));
     return sendBatchOperationResponse(res, results);
   } catch (routeError) {
-    if (useStrictBatchMode) {
-      return res.status(routeError.statusCode || 500).json({
-        error: routeError.message,
-        strict: true,
-        failed_index: routeError.failedIndex
-      });
-    }
-    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+    return sendBatchRouteError(res, routeError, {
+      strict: useStrictBatchMode,
+      fallbackMessage: 'Failed to register heartbeat',
+      logMessage: 'batch_heartbeat failed'
+    });
   }
 });
 
@@ -3873,7 +4160,10 @@ app.get('/api/dashboard/overview', requireAuth, async (req, res) => {
       openrouter_usage: openRouterUsage
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to load dashboard overview',
+      logMessage: 'Dashboard overview failed'
+    });
   }
 });
 
@@ -3882,7 +4172,10 @@ app.get('/api/dashboard/projects', requireAuth, async (req, res) => {
     const projects = await listProjectsSummary();
     res.json({ projects });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to load projects',
+      logMessage: 'Dashboard projects failed'
+    });
   }
 });
 
@@ -3903,7 +4196,11 @@ app.get('/api/dashboard/projects/:url', requireAuth, async (req, res) => {
 
     res.json({ project, tasks, backlog, logs });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to load project details',
+      logMessage: 'Dashboard project details failed',
+      logContext: { project_url: req.params.url }
+    });
   }
 });
 
@@ -3914,90 +4211,169 @@ app.get('/api/dashboard/projects/:url/backlog', requireAuth, async (req, res) =>
     const backlog = await listBacklogItems(url, req.query.status, { includeDeleted });
     res.json({ backlog });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to load backlog',
+      logMessage: 'Dashboard backlog list failed',
+      logContext: { project_url: req.params.url }
+    });
+  }
+});
+
+app.get('/api/dashboard/projects/:url/semantic/backlog/status', requireAuth, async (req, res) => {
+  try {
+    const url = normalizeUrl(decodeURIComponent(req.params.url));
+    const project = await db('projects').where({ url }).first('url');
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const semantic = await enrichSemanticStatusWithPricing(await getProjectBacklogCoverageStatus(db, url));
+    return res.json({ semantic });
+  } catch (error) {
+    return sendApiError(res, normalizeSemanticError(error, {
+      unavailableMessage: 'Semantic status is temporarily unavailable',
+      internalMessage: 'Failed to calculate semantic status',
+      unavailableCode: 'SEMANTIC_STATUS_UNAVAILABLE',
+      internalCode: 'SEMANTIC_STATUS_FAILED'
+    }), {
+      fallbackMessage: 'Failed to calculate semantic status',
+      logMessage: 'Semantic status failed',
+      logContext: { project_url: req.params.url }
+    });
+  }
+});
+
+app.post('/api/dashboard/projects/:url/semantic/backlog/index', requireAuth, async (req, res) => {
+  try {
+    const url = normalizeUrl(decodeURIComponent(req.params.url));
+    const project = await db('projects').where({ url }).first('url');
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const before = await enrichSemanticStatusWithPricing(await getProjectBacklogCoverageStatus(db, url));
+    const results = await syncProjectBacklogCoverageDocuments(db, url).catch((error) => {
+      throw normalizeSemanticError(error, {
+        unavailableMessage: 'Semantic indexing is temporarily unavailable',
+        internalMessage: 'Semantic indexing failed',
+        unavailableCode: 'SEMANTIC_INDEX_UNAVAILABLE',
+        internalCode: 'SEMANTIC_INDEX_FAILED'
+      });
+    });
+    const semantic = await enrichSemanticStatusWithPricing(await getProjectBacklogCoverageStatus(db, url));
+
+    return res.json({
+      semantic,
+      sync: {
+        processed_documents: results.length,
+        embedded_documents: results.filter((result) => result.status === 'embedded').length,
+        unchanged_documents: results.filter((result) => result.status === 'unchanged').length,
+        deleted_documents: results.filter((result) => result.status === 'deleted').length,
+        skipped_documents: results.filter((result) => result.status === 'skipped').length,
+        previous_estimated_input_tokens: before.estimated_input_tokens
+      }
+    });
+  } catch (error) {
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to index semantic backlog',
+      logMessage: 'Semantic index failed',
+      logContext: { project_url: req.params.url }
+    });
+  }
+});
+
+app.post('/api/dashboard/projects/:url/semantic/backlog/search', requireAuth, async (req, res) => {
+  const parsedBody = dashboardSemanticSearchBodySchema.safeParse(req.body || {});
+  if (!parsedBody.success) {
+    return res.status(400).json({ error: zodErrorMessage(parsedBody.error) });
+  }
+
+  try {
+    const url = normalizeUrl(decodeURIComponent(req.params.url));
+    const project = await db('projects').where({ url }).first('url');
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const semantic = await enrichSemanticStatusWithPricing(await getProjectBacklogCoverageStatus(db, url));
+    if (semantic.indexed_documents === 0) {
+      return res.status(409).json({
+        error: 'Project backlog has not been semantically indexed yet',
+        semantic
+      });
+    }
+
+    const topK = Math.max(1, Math.min(MAX_SEMANTIC_SEARCH_TOP_K, parsedBody.data.top_k ?? DEFAULT_SEMANTIC_SEARCH_TOP_K));
+    const threshold = parsedBody.data.threshold ?? DEFAULT_BACKLOG_COVERAGE_SEARCH_THRESHOLD;
+    const result = await searchProjectBacklogCoverage(db, {
+      projectUrl: url,
+      queryText: parsedBody.data.query_text,
+      itemTypes: parsedBody.data.item_types || [],
+      statuses: parsedBody.data.statuses || [],
+      topK,
+      threshold
+    }).catch((error) => {
+      throw normalizeSemanticError(error, {
+        unavailableMessage: 'Semantic search is temporarily unavailable',
+        internalMessage: 'Semantic search failed',
+        unavailableCode: 'SEMANTIC_SEARCH_UNAVAILABLE',
+        internalCode: 'SEMANTIC_SEARCH_FAILED'
+      });
+    });
+
+    return res.json({
+      semantic,
+      search: result
+    });
+  } catch (error) {
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to execute semantic search',
+      logMessage: 'Semantic search failed',
+      logContext: { project_url: req.params.url }
+    });
   }
 });
 
 app.post('/api/dashboard/projects/:url/backlog', requireAuth, async (req, res) => {
-  const url = normalizeUrl(decodeURIComponent(req.params.url));
-  const { payload, error } = getBacklogPayload(req.body);
-
-  if (error) {
-    return res.status(400).json({ error });
-  }
-
   try {
-    await ensureProjectExists(url);
-
-    const [backlogItem] = await db('backlog_items').insert({
-      project_url: url,
-      priority: 100,
-      sort_order: 0,
-      ...payload
-    }).returning('*');
-
-    await tryPersistBugEmbeddingForBacklogItem(backlogItem.id);
-
-    const refreshedBacklogItem = await db('backlog_items')
-      .where({ id: backlogItem.id })
-      .first();
-
-    res.status(201).json({ backlog_item: mapBacklogItemRecord(refreshedBacklogItem || backlogItem) });
-  } catch (routeError) {
-    res.status(500).json({ error: routeError.message });
+    const url = normalizeUrl(decodeURIComponent(req.params.url));
+    const result = await createBacklogItemInternal({
+      ...req.body,
+      project_url: url
+    }, { connection: db });
+    return res.status(201).json(result);
+  } catch (error) {
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to create backlog item',
+      logMessage: 'Dashboard backlog creation failed',
+      logContext: { project_url: req.params.url }
+    });
   }
 });
 
 app.patch('/api/dashboard/backlog/:id', requireAuth, async (req, res) => {
-  const { payload, error } = getBacklogPayload(req.body, { partial: true });
-
-  if (error) {
-    return res.status(400).json({ error });
-  }
-
-  if (!Object.keys(payload).length) {
-    return res.status(400).json({ error: 'No backlog fields to update' });
-  }
-
   try {
-    const [backlogItem] = await db('backlog_items')
-      .where({ id: req.params.id })
-      .whereNull('deleted_at')
-      .update({
-        ...payload,
-        updated_at: db.fn.now()
-      })
-      .returning('*');
-
-    if (!backlogItem) {
-      return res.status(404).json({ error: 'Backlog item not found' });
-    }
-
-    await tryPersistBugEmbeddingForBacklogItem(backlogItem.id);
-
-    const refreshedBacklogItem = await db('backlog_items')
-      .where({ id: backlogItem.id })
-      .first();
-
-    res.json({ backlog_item: mapBacklogItemRecord(refreshedBacklogItem || backlogItem) });
-  } catch (routeError) {
-    res.status(500).json({ error: routeError.message });
+    const result = await updateBacklogItemInternal(req.params.id, req.body, { connection: db });
+    return res.json(result);
+  } catch (error) {
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to update backlog item',
+      logMessage: 'Dashboard backlog update failed',
+      logContext: { backlog_item_id: req.params.id }
+    });
   }
 });
 
 app.delete('/api/dashboard/backlog/:id', requireAuth, async (req, res) => {
   try {
-    const deletedRows = await db('backlog_items')
-      .where({ id: req.params.id })
-      .del();
-
-    if (!deletedRows) {
-      return res.status(404).json({ error: 'Backlog item not found' });
-    }
-
-    res.json({ success: true, deleted_rows: deletedRows });
+    const result = await deleteBacklogItemInternal(req.params.id, { connection: db });
+    return res.json(result);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to delete backlog item',
+      logMessage: 'Dashboard backlog delete failed',
+      logContext: { backlog_item_id: req.params.id }
+    });
   }
 });
 
@@ -4017,7 +4393,11 @@ app.post('/api/dashboard/backlog/:id/analyze', requireAuth, async (req, res) => 
     const analyzedItem = await persistBacklogAnalysis(backlogItem);
     res.json({ backlog_item: analyzedItem });
   } catch (error) {
-    res.status(error.statusCode || 500).json({ error: error.message });
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to analyze backlog item',
+      logMessage: 'Backlog analysis failed',
+      logContext: { backlog_item_id: req.params.id }
+    });
   }
 });
 
@@ -4051,7 +4431,11 @@ app.post('/api/dashboard/projects/:url/backlog/analyze', requireAuth, async (req
       analyzed_count: analyzed.length
     });
   } catch (error) {
-    res.status(error.statusCode || 500).json({ error: error.message });
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to analyze project backlog',
+      logMessage: 'Project backlog analysis failed',
+      logContext: { project_url: req.params.url }
+    });
   }
 });
 
@@ -4072,7 +4456,10 @@ app.get('/api/dashboard/config/openrouter', requireAuth, async (_req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to load OpenRouter config',
+      logMessage: 'OpenRouter config read failed'
+    });
   }
 });
 
@@ -4081,7 +4468,15 @@ app.get('/api/dashboard/config/openrouter/models', requireAuth, async (_req, res
     const models = await fetchOpenRouterModels();
     res.json({ models });
   } catch (error) {
-    res.status(error.statusCode || 500).json({ error: error.message });
+    return sendApiError(res, normalizeSemanticError(error, {
+      unavailableMessage: 'OpenRouter models are temporarily unavailable',
+      internalMessage: 'Failed to fetch OpenRouter models',
+      unavailableCode: 'OPENROUTER_MODELS_UNAVAILABLE',
+      internalCode: 'OPENROUTER_MODELS_FAILED'
+    }), {
+      fallbackMessage: 'Failed to fetch OpenRouter models',
+      logMessage: 'OpenRouter models read failed'
+    });
   }
 });
 
@@ -4116,7 +4511,10 @@ app.patch('/api/dashboard/config/openrouter', requireAuth, async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to update OpenRouter config',
+      logMessage: 'OpenRouter config update failed'
+    });
   }
 });
 
@@ -4161,7 +4559,11 @@ app.post('/api/tasks/:id/resolve', requireAuth, async (req, res) => {
 
     res.json({ success: true });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to resolve task blocker',
+      logMessage: 'Task resolve failed',
+      logContext: { task_id: taskId }
+    });
   }
 });
 

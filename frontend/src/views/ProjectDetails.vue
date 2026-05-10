@@ -35,6 +35,210 @@
     </div>
 
     <div v-else-if="selectedProject" class="space-y-8">
+      <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1.35fr)] gap-6">
+        <section class="rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-5 space-y-4">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div class="flex items-center gap-2">
+                <div class="w-1 h-5 bg-cyan-400 rounded-full"></div>
+                <h3 class="text-lg font-bold text-cyan-100">Indice Semantico</h3>
+              </div>
+              <p class="mt-1 text-sm text-cyan-50/70">Cobertura funcional del backlog disponible para el dashboard.</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button
+                @click="refreshSemanticStatus"
+                :disabled="semanticStatusLoading || isSemanticIndexing || !selectedProject?.url"
+                class="px-3 py-1.5 border border-cyan-400/30 bg-cyan-500/10 hover:bg-cyan-500/20 disabled:opacity-50 text-cyan-100 rounded-lg text-xs font-semibold transition-colors"
+              >
+                {{ semanticStatusLoading ? 'Analizando...' : 'Recalcular analisis' }}
+              </button>
+              <button
+                @click="runSemanticIndex"
+                :disabled="isSemanticIndexing || semanticStatusLoading || !semanticStatus || !selectedProject?.url"
+                class="px-3 py-1.5 bg-cyan-300 hover:bg-cyan-200 disabled:opacity-50 text-slate-950 rounded-lg text-xs font-bold transition-colors"
+              >
+                {{ isSemanticIndexing ? 'Indexando...' : semanticStatus?.fully_indexed ? 'Reindexar backlog' : 'Indexar backlog' }}
+              </button>
+            </div>
+          </div>
+
+          <div v-if="semanticStatusLoading && !semanticStatus" class="rounded-xl border border-cyan-400/10 bg-gray-950/40 p-4 text-sm text-gray-400">
+            Calculando cobertura e impacto estimado de tokens...
+          </div>
+
+          <div v-else-if="semanticStatus" class="space-y-4">
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div class="rounded-xl border border-white/5 bg-gray-950/50 p-3">
+                <p class="text-[11px] uppercase tracking-wider text-gray-500">Documentos</p>
+                <p class="mt-2 text-xl font-bold text-white">{{ semanticStatus.total_documents }}</p>
+              </div>
+              <div class="rounded-xl border border-white/5 bg-gray-950/50 p-3">
+                <p class="text-[11px] uppercase tracking-wider text-gray-500">Indexados</p>
+                <p class="mt-2 text-xl font-bold text-emerald-300">{{ semanticStatus.indexed_documents }}</p>
+              </div>
+              <div class="rounded-xl border border-white/5 bg-gray-950/50 p-3">
+                <p class="text-[11px] uppercase tracking-wider text-gray-500">Pendientes</p>
+                <p class="mt-2 text-xl font-bold text-amber-300">{{ semanticPendingDocuments }}</p>
+              </div>
+              <div class="rounded-xl border border-white/5 bg-gray-950/50 p-3">
+                <p class="text-[11px] uppercase tracking-wider text-gray-500">Tokens estimados</p>
+                <p class="mt-2 text-xl font-bold text-cyan-100">{{ formatNumber(semanticStatus.estimated_input_tokens) }}</p>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+              <div class="rounded-xl border border-white/5 bg-gray-950/50 p-3">
+                <p class="text-[11px] uppercase tracking-wider text-gray-500">Tokens reindexado total</p>
+                <p class="mt-2 text-xl font-bold text-cyan-100">{{ formatNumber(semanticStatus.estimated_input_tokens) }}</p>
+              </div>
+              <div class="rounded-xl border border-white/5 bg-gray-950/50 p-3">
+                <p class="text-[11px] uppercase tracking-wider text-gray-500">Tokens incrementales</p>
+                <p class="mt-2 text-xl font-bold text-amber-200">{{ formatNumber(semanticStatus.estimated_incremental_input_tokens) }}</p>
+              </div>
+              <div class="rounded-xl border border-white/5 bg-gray-950/50 p-3">
+                <p class="text-[11px] uppercase tracking-wider text-gray-500">Costo total estimado</p>
+                <p class="mt-2 text-xl font-bold text-cyan-50">
+                  {{ formatCurrency(semanticStatus.pricing?.estimated_full_input_cost) }}
+                </p>
+                <p class="mt-1 text-xs text-gray-500">
+                  {{ semanticStatus.pricing?.prompt_price != null
+                    ? `Precio input aprox: ${formatModelPrice(semanticStatus.pricing.prompt_price)}`
+                    : 'OpenRouter no devolvio pricing para este modelo.' }}
+                </p>
+              </div>
+              <div class="rounded-xl border border-white/5 bg-gray-950/50 p-3">
+                <p class="text-[11px] uppercase tracking-wider text-gray-500">Costo incremental</p>
+                <p class="mt-2 text-xl font-bold text-amber-100">{{ formatCurrency(semanticStatus.pricing?.estimated_incremental_input_cost) }}</p>
+                <p class="mt-1 text-xs text-gray-500">Solo documentos missing o stale.</p>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div class="rounded-xl border border-white/5 bg-gray-950/50 p-3">
+                <p class="text-[11px] uppercase tracking-wider text-gray-500">Contexto maximo</p>
+                <p class="mt-2 text-xl font-bold text-cyan-100">{{ formatNumber(semanticStatus.pricing?.context_length) }}</p>
+              </div>
+              <div class="rounded-xl border border-white/5 bg-gray-950/50 p-3">
+                <p class="text-[11px] uppercase tracking-wider text-gray-500">Estrategia recomendada</p>
+                <p class="mt-2 text-sm font-medium text-gray-200">
+                  {{ semanticStatus.estimated_incremental_input_tokens > 0
+                    ? 'Usar indexacion incremental cuando solo haya backlog nuevo o cambiado.'
+                    : 'No hay trabajo incremental pendiente; reindexar solo si cambias el modelo.' }}
+                </p>
+              </div>
+            </div>
+
+            <div class="rounded-xl border border-white/5 bg-gray-950/40 p-4 space-y-2 text-sm text-gray-300">
+              <div class="flex flex-wrap items-center gap-2">
+                <span :class="['px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider', semanticStatus.fully_indexed ? 'bg-emerald-500/10 text-emerald-300' : 'bg-amber-500/10 text-amber-300']">
+                  {{ semanticStatus.fully_indexed ? 'Indice listo' : 'Indice pendiente' }}
+                </span>
+                <span class="text-xs text-gray-500">Modelo: {{ semanticStatus.embedding_model }}</span>
+                <span v-if="semanticStatus.last_indexed_at" class="text-xs text-gray-500">Ultima indexacion: {{ formatDateTime(semanticStatus.last_indexed_at) }}</span>
+              </div>
+              <p>
+                {{ semanticStatus.fully_indexed
+                  ? 'La búsqueda semántica ya puede consultar todo el backlog indexado para este proyecto.'
+                  : 'Antes de indexar se muestra el volumen estimado de tokens del backlog actual. La acción de indexación usa ese mismo corpus.' }}
+              </p>
+            </div>
+          </div>
+
+          <div v-if="semanticStatusError" class="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">
+            {{ semanticStatusError }}
+          </div>
+        </section>
+
+        <section class="rounded-2xl border border-indigo-500/20 bg-indigo-500/5 p-5 space-y-4">
+          <div class="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div class="flex items-center gap-2">
+                <div class="w-1 h-5 bg-indigo-400 rounded-full"></div>
+                <h3 class="text-lg font-bold text-indigo-100">Busqueda Semantica</h3>
+              </div>
+              <p class="mt-1 text-sm text-indigo-50/70">Consulta cobertura funcional dentro del backlog del proyecto.</p>
+            </div>
+            <div class="text-right text-xs text-gray-500">
+              <p>Top K: {{ semanticSearchTopK }}</p>
+              <p>Threshold: {{ semanticSearchThreshold.toFixed(2) }}</p>
+            </div>
+          </div>
+
+          <div class="space-y-3">
+            <textarea
+              v-model="semanticSearchQuery"
+              rows="3"
+              placeholder="Ejemplo: matriculacion, roles, compatibilidad Moodle, dashboard docente..."
+              class="w-full bg-gray-950/60 border border-indigo-400/20 rounded-xl px-4 py-3 text-sm text-gray-100 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 resize-y"
+            ></textarea>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div>
+                <label class="block text-[11px] uppercase tracking-wider text-indigo-100/70 mb-1">Tipos incluidos</label>
+                <MultiSelect
+                  v-model="semanticSearchFilters.item_types"
+                  :options="backlogTypeOptions"
+                  :maxSelectedLabels="2"
+                  display="chip"
+                  class="w-full"
+                />
+              </div>
+              <div>
+                <label class="block text-[11px] uppercase tracking-wider text-indigo-100/70 mb-1">Estados incluidos</label>
+                <MultiSelect
+                  v-model="semanticSearchFilters.statuses"
+                  :options="backlogStatusOptions"
+                  :maxSelectedLabels="2"
+                  display="chip"
+                  class="w-full"
+                />
+              </div>
+            </div>
+            <div class="flex flex-wrap items-center gap-3">
+              <button
+                @click="runSemanticSearch"
+                :disabled="isSemanticSearching || !semanticSearchQuery.trim() || !semanticSearchReady"
+                class="px-4 py-2 bg-indigo-400 hover:bg-indigo-300 disabled:opacity-50 text-slate-950 rounded-lg text-sm font-bold transition-colors"
+              >
+                {{ isSemanticSearching ? 'Buscando...' : 'Buscar en backlog' }}
+              </button>
+              <span v-if="!semanticSearchReady" class="text-xs text-amber-200">Indexa el backlog primero para habilitar resultados.</span>
+              <span v-else-if="semanticSearchMeta" class="text-xs text-gray-500">{{ semanticSearchMeta.candidates_scanned }} documentos evaluados.</span>
+            </div>
+          </div>
+
+          <div v-if="semanticSearchError" class="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">
+            {{ semanticSearchError }}
+          </div>
+
+          <div v-if="semanticSearchResults.length" class="space-y-3">
+            <article
+              v-for="result in semanticSearchResults"
+              :key="result.scope_key"
+              class="rounded-xl border border-white/5 bg-gray-950/45 p-4 space-y-2"
+            >
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-indigo-500/10 text-indigo-200">
+                  score {{ Math.round(result.similarity_score * 100) }}%
+                </span>
+                <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-fuchsia-500/10 text-fuchsia-200">
+                  {{ result.metadata?.item_type || result.source_type }}
+                </span>
+                <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-200">
+                  {{ result.metadata?.coverage_state || 'match' }}
+                </span>
+              </div>
+              <h4 class="text-sm font-semibold text-white">{{ result.title }}</h4>
+              <p class="text-sm leading-relaxed text-gray-300">{{ result.content_excerpt }}</p>
+            </article>
+          </div>
+
+          <div v-else-if="semanticSearchMeta && !isSemanticSearching" class="rounded-xl border border-white/5 bg-gray-950/40 p-4 text-sm text-gray-400">
+            No hubo coincidencias para esta consulta con el umbral actual.
+          </div>
+        </section>
+      </div>
+
       <div>
         <div class="flex items-center space-x-2 mb-4">
           <div class="w-1 h-5 bg-indigo-500 rounded-full"></div>
@@ -465,7 +669,7 @@ import DataTable from 'primevue/datatable';
 import Column from 'primevue/column';
 import Dialog from 'primevue/dialog';
 import MultiSelect from 'primevue/multiselect';
-import { apiFetch } from '../config/api';
+import { apiFetchJson, getApiErrorMessage } from '../config/api';
 
 const route = useRoute();
 const router = useRouter();
@@ -485,6 +689,22 @@ const deletingBacklogId = ref(null);
 const editingBacklog = ref(null);
 const showEditBacklogDialog = ref(false);
 const backlogDialogMode = ref('edit');
+const semanticStatus = ref(null);
+const semanticStatusLoading = ref(false);
+const semanticStatusError = ref(null);
+const isSemanticIndexing = ref(false);
+const semanticSearchQuery = ref('');
+const semanticSearchFilters = ref({
+  item_types: [],
+  statuses: []
+});
+const semanticSearchResults = ref([]);
+const semanticSearchMeta = ref(null);
+const semanticSearchError = ref(null);
+const isSemanticSearching = ref(false);
+
+const semanticSearchTopK = 5;
+const semanticSearchThreshold = 0.6;
 
 const backlogTypeOptions = ['feature', 'bug', 'chore', 'research'];
 const backlogStatusOptions = ['draft', 'needs_details', 'ready', 'in_progress', 'review', 'blocked', 'done', 'archived'];
@@ -492,6 +712,18 @@ const taskStatusOptions = ['todo', 'in_progress', 'review', 'done', 'stalled'];
 
 const triageableBacklogCount = computed(() => {
   return projectBacklog.value.filter((item) => ['draft', 'needs_details', 'ready'].includes(item.status)).length;
+});
+
+const semanticPendingDocuments = computed(() => {
+  if (!semanticStatus.value) {
+    return 0;
+  }
+
+  return Number(semanticStatus.value.stale_documents || 0) + Number(semanticStatus.value.missing_documents || 0);
+});
+
+const semanticSearchReady = computed(() => {
+  return Number(semanticStatus.value?.indexed_documents || 0) > 0;
 });
 
 const taskFilters = ref({
@@ -542,6 +774,38 @@ const resetDetails = () => {
   isAnalyzingBacklog.value = false;
   analyzingBacklogId.value = null;
   deletingBacklogId.value = null;
+  semanticStatus.value = null;
+  semanticStatusLoading.value = false;
+  semanticStatusError.value = null;
+  isSemanticIndexing.value = false;
+  semanticSearchQuery.value = '';
+  semanticSearchFilters.value = {
+    item_types: [],
+    statuses: []
+  };
+  semanticSearchResults.value = [];
+  semanticSearchMeta.value = null;
+  semanticSearchError.value = null;
+  isSemanticSearching.value = false;
+};
+
+const fetchSemanticStatus = async (url) => {
+  semanticStatusLoading.value = true;
+  semanticStatusError.value = null;
+
+  try {
+    const encodedUrl = encodeURIComponent(url);
+    const { data } = await apiFetchJson(`/dashboard/projects/${encodedUrl}/semantic/backlog/status`, {
+      credentials: 'include'
+    }, 'No se pudo calcular el estado semántico del proyecto.');
+
+    semanticStatus.value = data.semantic || null;
+  } catch (error) {
+    semanticStatusError.value = getApiErrorMessage(error, 'No se pudo calcular el estado semántico del proyecto.');
+    console.error('Failed to load semantic status', error);
+  } finally {
+    semanticStatusLoading.value = false;
+  }
 };
 
 const fetchProjectDetails = async (url) => {
@@ -549,14 +813,9 @@ const fetchProjectDetails = async (url) => {
 
   try {
     const encodedUrl = encodeURIComponent(url);
-    const response = await apiFetch(`/dashboard/projects/${encodedUrl}`, {
+    const { data } = await apiFetchJson(`/dashboard/projects/${encodedUrl}`, {
       credentials: 'include'
-    });
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.error || 'Failed to fetch project details');
-    }
+    }, 'No se pudo cargar el detalle del proyecto.');
 
     selectedProject.value = data.project || { url };
     projectTasks.value = data.tasks || [];
@@ -572,7 +831,7 @@ const fetchProjectDetails = async (url) => {
       }
     };
   } catch (error) {
-    backlogError.value = error.message;
+    backlogError.value = getApiErrorMessage(error, 'No se pudo cargar el detalle del proyecto.');
     throw error;
   }
 };
@@ -590,6 +849,7 @@ const loadProject = async () => {
     }
 
     await fetchProjectDetails(routeProjectId);
+    await fetchSemanticStatus(routeProjectId);
   } catch (error) {
     loadError.value = error.message;
     console.error('Failed to load project', error);
@@ -631,18 +891,13 @@ const analyzeBacklogItem = async (item) => {
   backlogError.value = null;
 
   try {
-    const response = await apiFetch(`/dashboard/backlog/${item.id}/analyze`, {
+    const { data } = await apiFetchJson(`/dashboard/backlog/${item.id}/analyze`, {
       method: 'POST',
       credentials: 'include',
       headers: {
         'Content-Type': 'application/json'
       }
-    });
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.error || 'No se pudo analizar el backlog item');
-    }
+    }, 'No se pudo analizar el backlog item.');
 
     await fetchProjectDetails(selectedProject.value.url);
 
@@ -650,7 +905,7 @@ const analyzeBacklogItem = async (item) => {
       editingBacklog.value = { ...data.backlog_item };
     }
   } catch (error) {
-    backlogError.value = error.message;
+    backlogError.value = getApiErrorMessage(error, 'No se pudo analizar el backlog item.');
     console.error('Failed to analyze backlog item', error);
   } finally {
     analyzingBacklogId.value = null;
@@ -667,7 +922,7 @@ const analyzeProjectBacklog = async () => {
 
   try {
     const encodedUrl = encodeURIComponent(selectedProject.value.url);
-    const response = await apiFetch(`/dashboard/projects/${encodedUrl}/backlog/analyze`, {
+    await apiFetchJson(`/dashboard/projects/${encodedUrl}/backlog/analyze`, {
       method: 'POST',
       credentials: 'include',
       headers: {
@@ -676,19 +931,92 @@ const analyzeProjectBacklog = async () => {
       body: JSON.stringify({
         statuses: ['draft', 'needs_details', 'ready']
       })
-    });
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.error || 'No se pudo analizar el backlog del proyecto');
-    }
+    }, 'No se pudo analizar el backlog del proyecto.');
 
     await fetchProjectDetails(selectedProject.value.url);
   } catch (error) {
-    backlogError.value = error.message;
+    backlogError.value = getApiErrorMessage(error, 'No se pudo analizar el backlog del proyecto.');
     console.error('Failed to analyze project backlog', error);
   } finally {
     isAnalyzingBacklog.value = false;
+  }
+};
+
+const refreshSemanticStatus = async () => {
+  if (!selectedProject.value?.url) {
+    return;
+  }
+
+  await fetchSemanticStatus(selectedProject.value.url);
+};
+
+const runSemanticIndex = async () => {
+  if (!selectedProject.value?.url) {
+    return;
+  }
+
+  isSemanticIndexing.value = true;
+  semanticStatusError.value = null;
+  semanticSearchError.value = null;
+
+  try {
+    const encodedUrl = encodeURIComponent(selectedProject.value.url);
+    const { data } = await apiFetchJson(`/dashboard/projects/${encodedUrl}/semantic/backlog/index`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({})
+    }, 'No se pudo indexar semánticamente el backlog del proyecto.');
+
+    semanticStatus.value = data.semantic || null;
+  } catch (error) {
+    semanticStatusError.value = getApiErrorMessage(error, 'No se pudo indexar semánticamente el backlog del proyecto.');
+    console.error('Failed to index semantic backlog', error);
+  } finally {
+    isSemanticIndexing.value = false;
+  }
+};
+
+const runSemanticSearch = async () => {
+  if (!selectedProject.value?.url || !semanticSearchQuery.value.trim()) {
+    return;
+  }
+
+  isSemanticSearching.value = true;
+  semanticSearchError.value = null;
+  semanticSearchResults.value = [];
+  semanticSearchMeta.value = null;
+
+  try {
+    const encodedUrl = encodeURIComponent(selectedProject.value.url);
+    const { data } = await apiFetchJson(`/dashboard/projects/${encodedUrl}/semantic/backlog/search`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        query_text: semanticSearchQuery.value.trim(),
+        item_types: semanticSearchFilters.value.item_types,
+        statuses: semanticSearchFilters.value.statuses,
+        top_k: semanticSearchTopK,
+        threshold: semanticSearchThreshold
+      })
+    }, 'No se pudo ejecutar la búsqueda semántica.');
+
+    semanticStatus.value = data.semantic || semanticStatus.value;
+    semanticSearchMeta.value = data.search || null;
+    semanticSearchResults.value = data.search?.matches || [];
+  } catch (error) {
+    if (error?.data?.semantic) {
+      semanticStatus.value = error.data.semantic;
+    }
+    semanticSearchError.value = getApiErrorMessage(error, 'No se pudo ejecutar la búsqueda semántica.');
+    console.error('Failed to search semantic backlog', error);
+  } finally {
+    isSemanticSearching.value = false;
   }
 };
 
@@ -706,15 +1034,10 @@ const hardDeleteBacklogItem = async (item) => {
   backlogError.value = null;
 
   try {
-    const response = await apiFetch(`/dashboard/backlog/${item.id}`, {
+    await apiFetchJson(`/dashboard/backlog/${item.id}`, {
       method: 'DELETE',
       credentials: 'include'
-    });
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.error || 'No se pudo eliminar el backlog item');
-    }
+    }, 'No se pudo eliminar el backlog item.');
 
     if (editingBacklog.value?.id === item.id) {
       showEditBacklogDialog.value = false;
@@ -724,7 +1047,7 @@ const hardDeleteBacklogItem = async (item) => {
 
     await fetchProjectDetails(selectedProject.value.url);
   } catch (error) {
-    backlogError.value = error.message;
+    backlogError.value = getApiErrorMessage(error, 'No se pudo eliminar el backlog item.');
     console.error('Failed to hard-delete backlog item', error);
   } finally {
     deletingBacklogId.value = null;
@@ -751,7 +1074,7 @@ const saveBacklogItem = async () => {
     };
     const isCreate = backlogDialogMode.value === 'create';
     const encodedUrl = encodeURIComponent(selectedProject.value.url);
-    const response = await apiFetch(isCreate ? `/dashboard/projects/${encodedUrl}/backlog` : `/dashboard/backlog/${editingBacklog.value.id}`, {
+    await apiFetchJson(isCreate ? `/dashboard/projects/${encodedUrl}/backlog` : `/dashboard/backlog/${editingBacklog.value.id}`, {
       method: isCreate ? 'POST' : 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'include',
@@ -760,19 +1083,16 @@ const saveBacklogItem = async () => {
         source_kind: 'dashboard',
         source_ref: 'project-details-view'
       } : payload)
-    });
-    const data = await response.json();
-
-    if (!response.ok) {
-      throw new Error(data.error || (isCreate ? 'Failed to create backlog item' : 'Failed to update backlog item'));
-    }
+    }, isCreate ? 'No se pudo crear el backlog item.' : 'No se pudo actualizar el backlog item.');
 
     showEditBacklogDialog.value = false;
     editingBacklog.value = null;
     backlogDialogMode.value = 'edit';
     await fetchProjectDetails(selectedProject.value.url);
   } catch (error) {
-    backlogError.value = error.message;
+    backlogError.value = getApiErrorMessage(error, backlogDialogMode.value === 'create'
+      ? 'No se pudo crear el backlog item.'
+      : 'No se pudo actualizar el backlog item.');
     console.error('Failed to save backlog item', error);
   } finally {
     isSavingBacklog.value = false;
@@ -829,6 +1149,40 @@ const formatDateTime = (value) => {
   }
 
   return new Date(value).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' });
+};
+
+const formatNumber = (value) => {
+  if (value == null || value === '') {
+    return 'n/d';
+  }
+
+  return Number(value || 0).toLocaleString();
+};
+
+const formatCurrency = (value) => {
+  if (value == null || !Number.isFinite(Number(value))) {
+    return 'n/d';
+  }
+
+  return Number(value).toLocaleString(undefined, {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 6
+  });
+};
+
+const formatModelPrice = (value) => {
+  if (value == null || !Number.isFinite(Number(value))) {
+    return 'n/d';
+  }
+
+  return `${Number(value).toLocaleString(undefined, {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 8,
+    maximumFractionDigits: 8
+  })} por token`; 
 };
 
 watch(() => route.params.projectId, () => {

@@ -7,7 +7,11 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "migrate:test": "knex --env test migrate:latest",
     "start:test": "node scripts/start_test_server.js",
-    "migrate:sqlite-legacy-to-pg": "node scripts/migrate_sqlite_legacy_to_postgres.js"
+    "migrate:sqlite-legacy-to-pg": "node scripts/migrate_sqlite_legacy_to_postgres.js",
+    "import:apts-projects": "node scripts/import_projects_from_apts.js",
+    "reembed:bugs": "node scripts/reembed_bug_embeddings.js",
+    "reindex:semantic": "node scripts/reindex_semantic_documents.js",
+    "search:semantic": "node scripts/search_semantic_documents.js"
   },
   "keywords": [],
   "author": "",
