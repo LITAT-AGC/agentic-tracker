@@ -2372,310 +2372,310 @@ const buildIntegrationManifest = (req) => {
       recommendation_behavior: 'When runtime is provided, recommended artifacts are filtered to runtime-compatible entries first.'
     },
     bootstrap: {
-    manifest_updates: {
-      history_mode: 'append_only',
-      current_version: integrationManifestSchemaVersion,
-      latest_note: integrationManifestReleaseNotes[0],
-      notes: integrationManifestReleaseNotes
-    },
-    summary: 'APTS centralizes operational tracking for agent-executed projects and should become the source of truth for backlog and execution state.',
-    service_purpose: 'Use APTS to register backlog, active tasks, blockers, heartbeats, and technical logs through an automation-oriented REST API.',
-    source_of_truth: 'Once integration starts, backlog_items and tasks in APTS should replace local mirrors or checklists as the primary operational tracker.',
-    migration_goal: 'If the project still manages backlog or tracking in local files, read them first and migrate or sync those items into APTS before normal execution continues.',
-    local_tracking_inputs: [
-      'backlog markdown files',
-      'local project plans or roadmaps',
-      'todo lists or historical tracking mirrors',
-      'existing scope documents or acceptance criteria'
-    ],
-    chat_request_triage: {
-      bugfix_intake_required: true,
-      recommended_agent_entrypoint: 'APTS Bugfix Intake',
-      detect_as_bugfix_when_request_mentions: [
-        'bug fixes',
-        'errors or exceptions',
-        'failing behavior caused by an existing defect',
-        'regressions',
-        'incidents where existing functionality is broken'
-      ],
-      required_backlog_item_type: 'bug',
-      existing_item_policy: 'Before creating a new defect entry, inspect APTS backlog and reuse an existing non-deleted bug item when it already tracks the same symptom, scope, or failure. Prefer search_similar_bug_reports for semantic duplicate detection.',
-      new_item_policy: 'If no matching bug item exists, create one in APTS before implementation starts and capture the symptom, expected behavior, observed behavior, and any reproduction evidence available from the chat.',
-      task_link_policy: 'Only register or continue execution work after the task can reference that backlog_item_id.',
-      source_tracking: {
-        source_kind: 'chat_request',
-        source_ref_rule: 'Persist a stable conversation or thread identifier in source_ref when the runtime exposes one; otherwise omit source_ref.'
+      manifest_updates: {
+        history_mode: 'append_only',
+        current_version: integrationManifestSchemaVersion,
+        latest_note: integrationManifestReleaseNotes[0],
+        notes: integrationManifestReleaseNotes
       },
-      custom_agent_policy: 'If the client runtime supports custom agents and APTS Bugfix Intake is installed, invoke it first for new defect requests from chat. Otherwise follow the same backlog-first policy manually.',
-      bypass_rule: 'Do not jump directly into code changes for a new untracked bug report, error-fix request, or regression repair.'
+      summary: 'APTS centralizes operational tracking for agent-executed projects and should become the source of truth for backlog and execution state.',
+      service_purpose: 'Use APTS to register backlog, active tasks, blockers, heartbeats, and technical logs through an automation-oriented REST API.',
+      source_of_truth: 'Once integration starts, backlog_items and tasks in APTS should replace local mirrors or checklists as the primary operational tracker.',
+      migration_goal: 'If the project still manages backlog or tracking in local files, read them first and migrate or sync those items into APTS before normal execution continues.',
+      local_tracking_inputs: [
+        'backlog markdown files',
+        'local project plans or roadmaps',
+        'todo lists or historical tracking mirrors',
+        'existing scope documents or acceptance criteria'
+      ],
+      chat_request_triage: {
+        bugfix_intake_required: true,
+        recommended_agent_entrypoint: 'APTS Bugfix Intake',
+        detect_as_bugfix_when_request_mentions: [
+          'bug fixes',
+          'errors or exceptions',
+          'failing behavior caused by an existing defect',
+          'regressions',
+          'incidents where existing functionality is broken'
+        ],
+        required_backlog_item_type: 'bug',
+        existing_item_policy: 'Before creating a new defect entry, inspect APTS backlog and reuse an existing non-deleted bug item when it already tracks the same symptom, scope, or failure. Prefer search_similar_bug_reports for semantic duplicate detection.',
+        new_item_policy: 'If no matching bug item exists, create one in APTS before implementation starts and capture the symptom, expected behavior, observed behavior, and any reproduction evidence available from the chat.',
+        task_link_policy: 'Only register or continue execution work after the task can reference that backlog_item_id.',
+        source_tracking: {
+          source_kind: 'chat_request',
+          source_ref_rule: 'Persist a stable conversation or thread identifier in source_ref when the runtime exposes one; otherwise omit source_ref.'
+        },
+        custom_agent_policy: 'If the client runtime supports custom agents and APTS Bugfix Intake is installed, invoke it first for new defect requests from chat. Otherwise follow the same backlog-first policy manually.',
+        bypass_rule: 'Do not jump directly into code changes for a new untracked bug report, error-fix request, or regression repair.'
+      },
+      access_model: {
+        bootstrap: 'public',
+        agent_api: 'bearer_token_required'
+      },
+      credential_bootstrap: {
+        required_secret: 'APTS_API_KEY',
+        how_to_obtain: 'If APTS_API_KEY is not available in the project environment, explicitly request it from the human operator or integration owner before attempting protected calls.',
+        missing_secret_behavior: 'Do not attempt register_task, read_project_context, or any other protected call until APTS_API_KEY is provided.',
+        storage_recommendation: 'Define APTS_BASE_URL and APTS_API_KEY in a .env file at the client project root, or in an equivalent secret system that exposes them as runtime environment variables. Never hardcode them in source code, versioned prompts, JSON files, or backlog documents.',
+        preferred_env_file: '.env (client project root)',
+        env_example: [
+          'APTS_BASE_URL=https://apts.informaticos.ar/api',
+          'APTS_API_KEY=place-your-api-key-here'
+        ],
+        companion_env: 'APTS_BASE_URL must point to the /api base URL published by this manifest.'
+      },
+      client_download_guidance: {
+        decision_input: 'Review the client Node.js module configuration before downloading the HTTP client.',
+        choose_commonjs_when: [
+          'the project uses require(...)',
+          'package.json does not declare type=module',
+          'the runtime expects .js files treated as CommonJS modules'
+        ],
+        choose_esm_when: [
+          'the project uses import/export',
+          'package.json declares type=module',
+          'the runtime expects .mjs files or ESM modules'
+        ],
+        choose_cli_when: [
+          'the runtime can invoke shell commands more easily than loading JavaScript modules directly',
+          'you want one stable entrypoint instead of generating ad-hoc wrapper scripts around the APTS client',
+          'the matching reference client artifact is available in the same local folder as the CLI'
+        ],
+        cli_dependency_rule: 'apts-cli.js depends on apts-client.js and apts-cli.mjs depends on apts-client.mjs. Keep each CLI and its matching client artifact together in the same workspace-local folder.',
+        official_script_integrity_rule: 'For base APTS operations, use only official scripts published by this manifest (apts-client.js, apts-client.mjs, apts-cli.js, or apts-cli.mjs). Do not merge legacy wrapper snippets into those files.',
+        adapter_exception_rule: 'If runtime-specific glue is still needed, keep it as a thin adapter that delegates to the official script unchanged.',
+        legacy_wrapper_cleanup_rule: 'After installing the official client or CLI, remove older project-local scripts that only wrapped base APTS operations such as register_task, read_project_context, update_task_status, log_agent_progress, report_blocker, or heartbeat. Keep only thin runtime-specific adapters when discovery requires them.',
+        default_rule: 'If in doubt, inspect package.json and the client project code before choosing an artifact. Download the CLI only together with the matching client artifact.'
+      },
+      powershell_cli_safety: {
+        applies_to: ['apts-cli.js', 'apts-cli.mjs'],
+        mandatory_field_reminders: {
+          update_backlog_item: 'Use backlog_item_id in payloads. Do not send id for update-backlog-item or delete-backlog-item operations.',
+          update_payload_shape: 'Use one JSON object for single update calls, or a non-empty JSON array for batch calls.'
+        },
+        common_failure_modes: [
+          'Inline escaped JSON in PowerShell can be split into extra arguments when quoting is inconsistent.',
+          'Single-line here-string declarations are invalid and trigger parser errors.',
+          'stdin-based calls can appear hung if the input stream remains open or no JSON payload is piped.'
+        ],
+        recommended_execution_pattern: [
+          'Validate command semantics first with a minimal payload (for example status-only update) before sending long acceptance_criteria text.',
+          'When payload content is large or includes special characters, write JSON to a temporary file and pipe it with Get-Content ... | node ... --stdin.',
+          'If a stdin flow appears stuck, retry with a short --json payload to verify command response before reattempting the full payload.',
+          'Apply multi-step updates for high-risk text: first minimal field update, then full content update after the first call succeeds.'
+        ],
+        post_write_verification: 'After mutating calls, read backlog/task state and confirm persisted fields match expected values instead of relying only on process exit success.'
+      },
+      artifact_sync_policy: {
+        source_of_truth: 'manifest_artifacts',
+        compare_strategy: 'by_artifact_id_and_artifact_version',
+        when_version_changes: 'overwrite_local_file',
+        delete_known_legacy_files: true,
+        runtime_filtering_required_before_recommended: true,
+        runtime_filtering_rule: 'Before applying recommended artifacts, keep only entries where runtime is null or equals the active runtime. Then apply recommended=true on that filtered set.',
+        runtime_filter_query_param: 'runtime',
+        legacy_cleanup_targets: buildLegacyCleanupTargets(),
+        managed_artifact_integrity: 'Treat downloaded official APTS scripts as managed artifacts. Do not hand-edit them or splice legacy wrapper code into them; replace the full file when artifact_version changes.',
+        manual_cleanup_note: 'Automatic cleanup only applies to filenames explicitly published by APTS in legacy_cleanup_targets. If the client project previously created custom APTS wrapper scripts for base operations, remove them manually during migration unless APTS later publishes those filenames as deprecated.',
+        updater_contract: [
+          'For each manifest artifact id, compare local metadata with artifact_version from this manifest.',
+          'If local version differs from artifact_version, re-download and overwrite the local managed file.',
+          'Never compose mixed scripts by merging legacy local wrappers with downloaded official APTS artifacts.',
+          'If delete_known_legacy_files is true, remove local files listed under legacy_cleanup_targets before finishing sync.'
+        ]
+      },
+      skill_installation_paths: {
+        preferred_scope: 'workspace_local',
+        canonical_base_path: '.ia/apts',
+        runtime_adapter_paths: ['.github/skills/apts', '.agents/skills/apts', '.claude/skills/apts'],
+        policy: 'Keep APTS integration artifacts local to each repository and avoid user-global skill installation for project integrations.'
+      },
+      runtime_agent_discovery: {
+        runtime: 'vscode',
+        discovery_path: '.github/agents',
+        required_glob: '*.agent.md',
+        reload_required_after_sync: true,
+        validation_checklist: [
+          'Confirm orchestrator, executor, and bugfix intake adapters exist in .github/agents.',
+          'Validate YAML frontmatter for each adapter and ensure name is present and unique.',
+          'Reload VS Code window so the runtime reindexes custom agents.'
+        ]
+      },
+      agent_runtime_adapters: {
+        required_for_custom_agents: true,
+        installation_state_policy: 'If the runtime is VS Code and required adapters are missing in .github/agents, custom-agent installation is incomplete.',
+        mappings: [
+          {
+            runtime: 'vscode',
+            canonical_artifact_id: 'orchestrator_agent',
+            adapter_artifact_id: 'vscode_orchestrator_agent_adapter',
+            target_relative_path: '.github/agents/apts-backlog-orchestrator.agent.md',
+            invocation_name: 'APTS Backlog Orchestrator',
+            invocation_aliases: ['Orquestador Backlog APTS']
+          },
+          {
+            runtime: 'vscode',
+            canonical_artifact_id: 'executor_agent',
+            adapter_artifact_id: 'vscode_executor_agent_adapter',
+            target_relative_path: '.github/agents/backlog-item-executor-dev-test-commit.agent.md',
+            invocation_name: 'Backlog Item Executor Dev Test Commit',
+            invocation_aliases: ['Ejecutor Item Backlog Dev Test Commit']
+          },
+          {
+            runtime: 'vscode',
+            canonical_artifact_id: 'bugfix_intake_agent',
+            adapter_artifact_id: 'vscode_bugfix_intake_agent_adapter',
+            target_relative_path: '.github/agents/apts-bugfix-intake.agent.md',
+            invocation_name: 'APTS Bugfix Intake',
+            invocation_aliases: ['Intake Bugfix APTS']
+          }
+        ]
+      },
+      agent_instruction_policy: {
+        preferred_instruction_files: ['AGENTS.md', '.github/copilot-instructions.md'],
+        missing_file_behavior: 'If neither AGENTS.md nor .github/copilot-instructions.md exists, create AGENTS.md from the downloaded apts-agent-guidelines.md before protected APTS calls.',
+        existing_file_behavior: 'If an instruction file already exists, preserve project-specific rules and merge or refresh only one APTS-managed section instead of replacing the whole file.',
+        managed_section_markers: ['<!-- APTS:START -->', '<!-- APTS:END -->'],
+        update_strategy: [
+          'If an instruction file has no APTS managed section, append one managed section once.',
+          'If managed markers already exist, replace only the content between markers.',
+          'Do not duplicate multiple APTS managed sections in the same file.'
+        ]
+      },
+      official_integration_script_policy: {
+        required: true,
+        scope: 'base_apts_contract_operations',
+        allowed_artifact_ids: ['js_client_commonjs', 'js_client_esm', 'js_cli_commonjs', 'js_cli_esm'],
+        single_source_of_truth: 'For base integration operations, invoke only official scripts published by APTS in this manifest.',
+        mixed_script_forbidden: 'Do not merge, splice, or partially reuse legacy local wrapper code inside downloaded official scripts.',
+        migration_rule: 'If legacy wrappers still contain project-specific logic, extract that logic into a thin adapter and keep official scripts unchanged.'
+      },
+      task_recovery_policy: {
+        register_task_resume_rule: 'When register_task includes backlog_item_id and the linked backlog item already has an active task in todo, in_progress, or stalled, APTS resumes that task instead of creating a duplicate.',
+        done_transition_rule: 'Task status done is accepted only from review and only when recent execution activity exists (heartbeat or progress log within the freshness window).',
+        blocker_transition_rule: 'report_blocker sets task status to stalled and marks the linked backlog item as blocked.',
+        stale_heartbeat_rule: 'When heartbeat is stale, background monitoring marks in_progress tasks as stalled and marks linked backlog items as blocked.'
+      },
+      local_resilience_log: {
+        required: true,
+        source_of_truth: false,
+        purpose: 'Maintain a local append-only resilience journal in case APTS becomes temporarily unavailable or loses history, without replacing APTS as the primary operational tracker.',
+        recommended_path: '.apts/agent-resilience-log.jsonl',
+        format: 'jsonl',
+        write_on: [
+          'execution start',
+          'important milestones',
+          'blockers',
+          'APTS synchronization failures',
+          'task completion'
+        ],
+        recommended_fields: [
+          'timestamp',
+          'agent_role',
+          'project_url',
+          'backlog_item_id',
+          'task_id',
+          'branch',
+          'event',
+          'summary',
+          'files_modified',
+          'commands_run',
+          'apts_sync_status'
+        ],
+        replay_policy: 'If APTS is unavailable, keep the local journal and synchronize relevant milestones when service is restored. Do not use this journal for reprioritization or as official operational state.',
+        forbidden_content: ['APTS_API_KEY', 'other secrets', 'tokens', 'credentials']
+      },
+      recommended_first_steps: [
+        'Resolve project and agent identity from local Git.',
+        'If APTS_API_KEY is not yet present in the environment, request APTS_API_KEY from the operator and confirm APTS_BASE_URL as well.',
+        'Create or update a .env file at the client project root with APTS_BASE_URL and APTS_API_KEY before using protected APIs.',
+        'Ensure the project has AGENTS.md or .github/copilot-instructions.md. Create AGENTS.md from apts-agent-guidelines.md if neither file exists, or merge/update one APTS-managed section if an instruction file already exists.',
+        'Create a workspace-local integration folder such as .ia/apts, place the APTS contract and HTTP client there, and only then wire runtime-specific adapters if needed.',
+        'If the runtime is VS Code and custom agents are required, install runtime adapters in .github/agents before backlog execution and reload the editor window after sync.',
+        'Treat interrupted execution as resumable work: call register_task with backlog_item_id so APTS can resume existing stalled/todo/in_progress tasks for that backlog item instead of creating duplicates.',
+        'Do not merge legacy local wrappers into official APTS scripts; keep official scripts unchanged and move extra project logic to thin adapters when needed.',
+        'If the project previously used ad-hoc APTS wrapper scripts for base operations, remove them once the official client or CLI is installed and keep only thin discovery adapters when the runtime still needs them.',
+        'Prepare a local append-only resilience journal, for example at .apts/agent-resilience-log.jsonl, without treating it as a source of truth.',
+        'Inspect local files that currently contain backlog, planning, or operational tracking.',
+        'If the current chat request is a new bugfix, error investigation, or regression report, run search_similar_bug_reports and inspect APTS backlog for a matching bug item before creating a new item_type=bug.',
+        'Create or update backlog_items in APTS to reflect that initial state.',
+        'From that point onward, use APTS as the primary tracking system and do not invent work outside APTS.'
+      ],
+      operator_prompt_template: 'Read this public manifest, understand that APTS is the tracking source of truth, request APTS_BASE_URL and APTS_API_KEY from the operator if missing, store them in a .env file at the client project root (or equivalent secret store), prepare a local append-only resilience journal, and if the current user request is a new bug, error, or regression from chat, first ensure there is a corresponding APTS backlog item with item_type=bug before implementation starts.'
     },
-    access_model: {
-      bootstrap: 'public',
-      agent_api: 'bearer_token_required'
-    },
-    credential_bootstrap: {
+    entrypoint: buildAbsoluteUrl(req, publicIntegrationBasePath),
+    api_base_url: buildAbsoluteUrl(req, '/api'),
+    auth: {
+      type: 'bearer',
+      header: 'Authorization',
+      scheme: 'Bearer',
+      env: ['APTS_API_KEY', 'APTS_BASE_URL'],
       required_secret: 'APTS_API_KEY',
-      how_to_obtain: 'If APTS_API_KEY is not available in the project environment, explicitly request it from the human operator or integration owner before attempting protected calls.',
-      missing_secret_behavior: 'Do not attempt register_task, read_project_context, or any other protected call until APTS_API_KEY is provided.',
-      storage_recommendation: 'Define APTS_BASE_URL and APTS_API_KEY in a .env file at the client project root, or in an equivalent secret system that exposes them as runtime environment variables. Never hardcode them in source code, versioned prompts, JSON files, or backlog documents.',
-      preferred_env_file: '.env (client project root)',
-      env_example: [
-        'APTS_BASE_URL=https://apts.informaticos.ar/api',
-        'APTS_API_KEY=place-your-api-key-here'
-      ],
-      companion_env: 'APTS_BASE_URL must point to the /api base URL published by this manifest.'
+      request_secret_from_operator_when_missing: true,
+      secret_storage: {
+        recommended_locations: ['root_dotenv_file', 'environment_variables', 'project_secret_store'],
+        avoid: ['hardcoded_source_files', 'tracked_prompt_files', 'versioned_json_contracts', 'backlog_documents']
+      }
     },
-    client_download_guidance: {
-      decision_input: 'Review the client Node.js module configuration before downloading the HTTP client.',
-      choose_commonjs_when: [
-        'the project uses require(...)',
-        'package.json does not declare type=module',
-        'the runtime expects .js files treated as CommonJS modules'
-      ],
-      choose_esm_when: [
-        'the project uses import/export',
-        'package.json declares type=module',
-        'the runtime expects .mjs files or ESM modules'
-      ],
-      choose_cli_when: [
-        'the runtime can invoke shell commands more easily than loading JavaScript modules directly',
-        'you want one stable entrypoint instead of generating ad-hoc wrapper scripts around the APTS client',
-        'the matching reference client artifact is available in the same local folder as the CLI'
-      ],
-      cli_dependency_rule: 'apts-cli.js depends on apts-client.js and apts-cli.mjs depends on apts-client.mjs. Keep each CLI and its matching client artifact together in the same workspace-local folder.',
-      official_script_integrity_rule: 'For base APTS operations, use only official scripts published by this manifest (apts-client.js, apts-client.mjs, apts-cli.js, or apts-cli.mjs). Do not merge legacy wrapper snippets into those files.',
-      adapter_exception_rule: 'If runtime-specific glue is still needed, keep it as a thin adapter that delegates to the official script unchanged.',
-      legacy_wrapper_cleanup_rule: 'After installing the official client or CLI, remove older project-local scripts that only wrapped base APTS operations such as register_task, read_project_context, update_task_status, log_agent_progress, report_blocker, or heartbeat. Keep only thin runtime-specific adapters when discovery requires them.',
-      default_rule: 'If in doubt, inspect package.json and the client project code before choosing an artifact. Download the CLI only together with the matching client artifact.'
-    },
-    powershell_cli_safety: {
-      applies_to: ['apts-cli.js', 'apts-cli.mjs'],
-      mandatory_field_reminders: {
-        update_backlog_item: 'Use backlog_item_id in payloads. Do not send id for update-backlog-item or delete-backlog-item operations.',
-        update_payload_shape: 'Use one JSON object for single update calls, or a non-empty JSON array for batch calls.'
-      },
-      common_failure_modes: [
-        'Inline escaped JSON in PowerShell can be split into extra arguments when quoting is inconsistent.',
-        'Single-line here-string declarations are invalid and trigger parser errors.',
-        'stdin-based calls can appear hung if the input stream remains open or no JSON payload is piped.'
-      ],
-      recommended_execution_pattern: [
-        'Validate command semantics first with a minimal payload (for example status-only update) before sending long acceptance_criteria text.',
-        'When payload content is large or includes special characters, write JSON to a temporary file and pipe it with Get-Content ... | node ... --stdin.',
-        'If a stdin flow appears stuck, retry with a short --json payload to verify command response before reattempting the full payload.',
-        'Apply multi-step updates for high-risk text: first minimal field update, then full content update after the first call succeeds.'
-      ],
-      post_write_verification: 'After mutating calls, read backlog/task state and confirm persisted fields match expected values instead of relying only on process exit success.'
-    },
-    artifact_sync_policy: {
-      source_of_truth: 'manifest_artifacts',
-      compare_strategy: 'by_artifact_id_and_artifact_version',
-      when_version_changes: 'overwrite_local_file',
-      delete_known_legacy_files: true,
-      runtime_filtering_required_before_recommended: true,
-      runtime_filtering_rule: 'Before applying recommended artifacts, keep only entries where runtime is null or equals the active runtime. Then apply recommended=true on that filtered set.',
-      runtime_filter_query_param: 'runtime',
-      legacy_cleanup_targets: buildLegacyCleanupTargets(),
-      managed_artifact_integrity: 'Treat downloaded official APTS scripts as managed artifacts. Do not hand-edit them or splice legacy wrapper code into them; replace the full file when artifact_version changes.',
-      manual_cleanup_note: 'Automatic cleanup only applies to filenames explicitly published by APTS in legacy_cleanup_targets. If the client project previously created custom APTS wrapper scripts for base operations, remove them manually during migration unless APTS later publishes those filenames as deprecated.',
-      updater_contract: [
-        'For each manifest artifact id, compare local metadata with artifact_version from this manifest.',
-        'If local version differs from artifact_version, re-download and overwrite the local managed file.',
-        'Never compose mixed scripts by merging legacy local wrappers with downloaded official APTS artifacts.',
-        'If delete_known_legacy_files is true, remove local files listed under legacy_cleanup_targets before finishing sync.'
-      ]
-    },
-    skill_installation_paths: {
-      preferred_scope: 'workspace_local',
-      canonical_base_path: '.ia/apts',
-      runtime_adapter_paths: ['.github/skills/apts', '.agents/skills/apts', '.claude/skills/apts'],
-      policy: 'Keep APTS integration artifacts local to each repository and avoid user-global skill installation for project integrations.'
-    },
-    runtime_agent_discovery: {
-      runtime: 'vscode',
-      discovery_path: '.github/agents',
-      required_glob: '*.agent.md',
-      reload_required_after_sync: true,
-      validation_checklist: [
-        'Confirm orchestrator, executor, and bugfix intake adapters exist in .github/agents.',
-        'Validate YAML frontmatter for each adapter and ensure name is present and unique.',
-        'Reload VS Code window so the runtime reindexes custom agents.'
-      ]
-    },
-    agent_runtime_adapters: {
-      required_for_custom_agents: true,
-      installation_state_policy: 'If the runtime is VS Code and required adapters are missing in .github/agents, custom-agent installation is incomplete.',
-      mappings: [
-        {
-          runtime: 'vscode',
-          canonical_artifact_id: 'orchestrator_agent',
-          adapter_artifact_id: 'vscode_orchestrator_agent_adapter',
-          target_relative_path: '.github/agents/apts-backlog-orchestrator.agent.md',
-          invocation_name: 'APTS Backlog Orchestrator',
-          invocation_aliases: ['Orquestador Backlog APTS']
-        },
-        {
-          runtime: 'vscode',
-          canonical_artifact_id: 'executor_agent',
-          adapter_artifact_id: 'vscode_executor_agent_adapter',
-          target_relative_path: '.github/agents/backlog-item-executor-dev-test-commit.agent.md',
-          invocation_name: 'Backlog Item Executor Dev Test Commit',
-          invocation_aliases: ['Ejecutor Item Backlog Dev Test Commit']
-        },
-        {
-          runtime: 'vscode',
-          canonical_artifact_id: 'bugfix_intake_agent',
-          adapter_artifact_id: 'vscode_bugfix_intake_agent_adapter',
-          target_relative_path: '.github/agents/apts-bugfix-intake.agent.md',
-          invocation_name: 'APTS Bugfix Intake',
-          invocation_aliases: ['Intake Bugfix APTS']
-        }
-      ]
-    },
-    agent_instruction_policy: {
-      preferred_instruction_files: ['AGENTS.md', '.github/copilot-instructions.md'],
-      missing_file_behavior: 'If neither AGENTS.md nor .github/copilot-instructions.md exists, create AGENTS.md from the downloaded apts-agent-guidelines.md before protected APTS calls.',
-      existing_file_behavior: 'If an instruction file already exists, preserve project-specific rules and merge or refresh only one APTS-managed section instead of replacing the whole file.',
-      managed_section_markers: ['<!-- APTS:START -->', '<!-- APTS:END -->'],
-      update_strategy: [
-        'If an instruction file has no APTS managed section, append one managed section once.',
-        'If managed markers already exist, replace only the content between markers.',
-        'Do not duplicate multiple APTS managed sections in the same file.'
-      ]
-    },
-    official_integration_script_policy: {
-      required: true,
-      scope: 'base_apts_contract_operations',
-      allowed_artifact_ids: ['js_client_commonjs', 'js_client_esm', 'js_cli_commonjs', 'js_cli_esm'],
-      single_source_of_truth: 'For base integration operations, invoke only official scripts published by APTS in this manifest.',
-      mixed_script_forbidden: 'Do not merge, splice, or partially reuse legacy local wrapper code inside downloaded official scripts.',
-      migration_rule: 'If legacy wrappers still contain project-specific logic, extract that logic into a thin adapter and keep official scripts unchanged.'
-    },
-    task_recovery_policy: {
-      register_task_resume_rule: 'When register_task includes backlog_item_id and the linked backlog item already has an active task in todo, in_progress, or stalled, APTS resumes that task instead of creating a duplicate.',
-      done_transition_rule: 'Task status done is accepted only from review and only when recent execution activity exists (heartbeat or progress log within the freshness window).',
-      blocker_transition_rule: 'report_blocker sets task status to stalled and marks the linked backlog item as blocked.',
-      stale_heartbeat_rule: 'When heartbeat is stale, background monitoring marks in_progress tasks as stalled and marks linked backlog items as blocked.'
-    },
-    local_resilience_log: {
-      required: true,
-      source_of_truth: false,
-      purpose: 'Maintain a local append-only resilience journal in case APTS becomes temporarily unavailable or loses history, without replacing APTS as the primary operational tracker.',
-      recommended_path: '.apts/agent-resilience-log.jsonl',
-      format: 'jsonl',
-      write_on: [
-        'execution start',
-        'important milestones',
-        'blockers',
-        'APTS synchronization failures',
-        'task completion'
-      ],
-      recommended_fields: [
-        'timestamp',
-        'agent_role',
-        'project_url',
-        'backlog_item_id',
-        'task_id',
-        'branch',
-        'event',
-        'summary',
-        'files_modified',
-        'commands_run',
-        'apts_sync_status'
-      ],
-      replay_policy: 'If APTS is unavailable, keep the local journal and synchronize relevant milestones when service is restored. Do not use this journal for reprioritization or as official operational state.',
-      forbidden_content: ['APTS_API_KEY', 'other secrets', 'tokens', 'credentials']
-    },
-    recommended_first_steps: [
-      'Resolve project and agent identity from local Git.',
-      'If APTS_API_KEY is not yet present in the environment, request APTS_API_KEY from the operator and confirm APTS_BASE_URL as well.',
-      'Create or update a .env file at the client project root with APTS_BASE_URL and APTS_API_KEY before using protected APIs.',
-      'Ensure the project has AGENTS.md or .github/copilot-instructions.md. Create AGENTS.md from apts-agent-guidelines.md if neither file exists, or merge/update one APTS-managed section if an instruction file already exists.',
-      'Create a workspace-local integration folder such as .ia/apts, place the APTS contract and HTTP client there, and only then wire runtime-specific adapters if needed.',
-      'If the runtime is VS Code and custom agents are required, install runtime adapters in .github/agents before backlog execution and reload the editor window after sync.',
-      'Treat interrupted execution as resumable work: call register_task with backlog_item_id so APTS can resume existing stalled/todo/in_progress tasks for that backlog item instead of creating duplicates.',
-      'Do not merge legacy local wrappers into official APTS scripts; keep official scripts unchanged and move extra project logic to thin adapters when needed.',
-      'If the project previously used ad-hoc APTS wrapper scripts for base operations, remove them once the official client or CLI is installed and keep only thin discovery adapters when the runtime still needs them.',
-      'Prepare a local append-only resilience journal, for example at .apts/agent-resilience-log.jsonl, without treating it as a source of truth.',
-      'Inspect local files that currently contain backlog, planning, or operational tracking.',
-      'If the current chat request is a new bugfix, error investigation, or regression report, run search_similar_bug_reports and inspect APTS backlog for a matching bug item before creating a new item_type=bug.',
-      'Create or update backlog_items in APTS to reflect that initial state.',
-      'From that point onward, use APTS as the primary tracking system and do not invent work outside APTS.'
+    instructions: [
+      'Read the bootstrap section first to understand the service purpose and the migration goal from local tracking to APTS.',
+      'If APTS_API_KEY is missing, request it from the operator before any protected API call.',
+      'Store APTS_BASE_URL and APTS_API_KEY in a .env file at the root of the client project, or in an equivalent project secret store.',
+      'Install APTS integration artifacts in a workspace-local base folder such as .ia/apts.',
+      'When consuming manifest artifacts, filter by runtime first (runtime query param or client-side equivalent), then apply recommended entries from that compatible subset.',
+      'Use runtime-specific adapter paths only when needed for discovery (.github/skills/apts, .agents/skills/apts, or .claude/skills/apts), and avoid user-global skill installation.',
+      'If using VS Code custom agents, install the published agent runtime adapters into .github/agents and reload the window so those agents become discoverable.',
+      'Maintain the local resilience log described in the bootstrap section; it is append-only and must not replace APTS as the source of truth.',
+      'Download and install the skills contract first.',
+      'Read the base agent guidelines before the first APTS API call.',
+      'Ensure AGENTS.md or .github/copilot-instructions.md exists before protected calls: create AGENTS.md if neither exists, or merge/update one APTS-managed section if an instruction file already exists.',
+      'If the current chat introduces a new bug, error, or regression request, ensure it is represented in APTS backlog as a bug item before registering execution work or starting implementation.',
+      'If the runtime supports custom agents, install and use APTS Bugfix Intake as the first entrypoint for chat-triggered defect intake.',
+      'Choose the reference client that matches the client project module system: apts-client.js for CommonJS or apts-client.mjs for ESM.',
+      'If the runtime prefers shellable command entrypoints over importing JavaScript modules, download the matching CLI as well: apts-cli.js for CommonJS or apts-cli.mjs for ESM, keeping it beside the matching client file.',
+      'Official APTS client/CLI auto-fills missing identity fields from environment variables first, local managed execution context second, and local Git as fallback; provide explicit identity fields only when raw API calls are used.',
+      'Official client/CLI persist managed execution context in .apts/execution-context.json by default (override with APTS_CONTEXT_FILE) so repeated execution calls can omit task_id and identity fields.',
+      'Use register_task with backlog_item_id to resume interrupted work for that backlog item before creating additional execution tasks.',
+      'Do not force task status done for interrupted executions: pass through review first and ensure recent heartbeat or progress logs exist before closing as done.',
+      'For base APTS operations, use only official scripts published by this manifest and never merge legacy wrapper code into downloaded managed scripts.',
+      'After installing the official client or CLI, remove older local APTS wrapper scripts for base operations to avoid drift. Keep only thin runtime-specific discovery adapters when required.',
+      'Download the optional agent templates only if your runtime supports custom agents.',
+      'Use APTS_BASE_URL with the published /api base path.'
     ],
-    operator_prompt_template: 'Read this public manifest, understand that APTS is the tracking source of truth, request APTS_BASE_URL and APTS_API_KEY from the operator if missing, store them in a .env file at the client project root (or equivalent secret store), prepare a local append-only resilience journal, and if the current user request is a new bug, error, or regression from chat, first ensure there is a corresponding APTS backlog item with item_type=bug before implementation starts.'
-  },
-  entrypoint: buildAbsoluteUrl(req, publicIntegrationBasePath),
-  api_base_url: buildAbsoluteUrl(req, '/api'),
-  auth: {
-    type: 'bearer',
-    header: 'Authorization',
-    scheme: 'Bearer',
-    env: ['APTS_API_KEY', 'APTS_BASE_URL'],
-    required_secret: 'APTS_API_KEY',
-    request_secret_from_operator_when_missing: true,
-    secret_storage: {
-      recommended_locations: ['root_dotenv_file', 'environment_variables', 'project_secret_store'],
-      avoid: ['hardcoded_source_files', 'tracked_prompt_files', 'versioned_json_contracts', 'backlog_documents']
-    }
-  },
-  instructions: [
-    'Read the bootstrap section first to understand the service purpose and the migration goal from local tracking to APTS.',
-    'If APTS_API_KEY is missing, request it from the operator before any protected API call.',
-    'Store APTS_BASE_URL and APTS_API_KEY in a .env file at the root of the client project, or in an equivalent project secret store.',
-    'Install APTS integration artifacts in a workspace-local base folder such as .ia/apts.',
-    'When consuming manifest artifacts, filter by runtime first (runtime query param or client-side equivalent), then apply recommended entries from that compatible subset.',
-    'Use runtime-specific adapter paths only when needed for discovery (.github/skills/apts, .agents/skills/apts, or .claude/skills/apts), and avoid user-global skill installation.',
-    'If using VS Code custom agents, install the published agent runtime adapters into .github/agents and reload the window so those agents become discoverable.',
-    'Maintain the local resilience log described in the bootstrap section; it is append-only and must not replace APTS as the source of truth.',
-    'Download and install the skills contract first.',
-    'Read the base agent guidelines before the first APTS API call.',
-    'Ensure AGENTS.md or .github/copilot-instructions.md exists before protected calls: create AGENTS.md if neither exists, or merge/update one APTS-managed section if an instruction file already exists.',
-    'If the current chat introduces a new bug, error, or regression request, ensure it is represented in APTS backlog as a bug item before registering execution work or starting implementation.',
-    'If the runtime supports custom agents, install and use APTS Bugfix Intake as the first entrypoint for chat-triggered defect intake.',
-    'Choose the reference client that matches the client project module system: apts-client.js for CommonJS or apts-client.mjs for ESM.',
-    'If the runtime prefers shellable command entrypoints over importing JavaScript modules, download the matching CLI as well: apts-cli.js for CommonJS or apts-cli.mjs for ESM, keeping it beside the matching client file.',
-    'Official APTS client/CLI auto-fills missing identity fields from environment variables first, local managed execution context second, and local Git as fallback; provide explicit identity fields only when raw API calls are used.',
-    'Official client/CLI persist managed execution context in .apts/execution-context.json by default (override with APTS_CONTEXT_FILE) so repeated execution calls can omit task_id and identity fields.',
-    'Use register_task with backlog_item_id to resume interrupted work for that backlog item before creating additional execution tasks.',
-    'Do not force task status done for interrupted executions: pass through review first and ensure recent heartbeat or progress logs exist before closing as done.',
-    'For base APTS operations, use only official scripts published by this manifest and never merge legacy wrapper code into downloaded managed scripts.',
-    'After installing the official client or CLI, remove older local APTS wrapper scripts for base operations to avoid drift. Keep only thin runtime-specific discovery adapters when required.',
-    'Download the optional agent templates only if your runtime supports custom agents.',
-    'Use APTS_BASE_URL with the published /api base path.'
-  ],
-  identity_requirements: [
-    { field: 'project_url', resolve_with: 'APTS_PROJECT_URL, managed execution context, or git remote get-url origin' },
-    { field: 'agent_name', resolve_with: 'APTS_AGENT_NAME, managed execution context, or git config user.name' },
-    { field: 'agent_email', resolve_with: 'APTS_AGENT_EMAIL, managed execution context, or git config user.email' },
-    { field: 'branch', resolve_with: 'APTS_BRANCH, managed execution context, or git branch --show-current' },
-    { field: 'task_id', resolve_with: 'APTS_TASK_ID or managed execution context (for repeated execution calls)' }
-  ],
-  artifacts: Object.entries(integrationArtifacts).map(([id, artifact]) => ({
-    runtime_compatible: isArtifactRuntimeCompatible(artifact, activeRuntime),
-    id,
-    kind: artifact.kind,
-    artifact_version: artifact.artifactVersion,
-    updated_in_schema_version: artifact.updatedInSchemaVersion,
-    sync_action: artifact.syncAction,
-    deprecated_filenames: artifact.deprecatedFilenames || [],
-    description: artifact.description,
-    recommended: artifact.recommended && isArtifactRuntimeCompatible(artifact, activeRuntime),
-    recommended_unfiltered: artifact.recommended,
-    optional: artifact.optional || false,
-    module_system: artifact.module_system || null,
-    selection_rule: artifact.selection_rule || null,
-    depends_on_artifact_ids: artifact.dependsOnArtifactIds || [],
-    runtime: artifact.runtime || null,
-    discovery_path: artifact.discoveryPath || null,
-    required_glob: artifact.requiredGlob || null,
-    target_relative_path: artifact.targetRelativePath || null,
-    canonical_source_artifact_id: artifact.canonicalSourceArtifactId || null,
-    invocation_name: artifact.invocationName || null,
-    invocation_aliases: artifact.invocationAliases || [],
-    media_type: artifact.contentType,
-    url: buildAbsoluteUrl(req, artifact.route),
-    download_url: `${buildAbsoluteUrl(req, artifact.route)}?download=1`
-  }))
+    identity_requirements: [
+      { field: 'project_url', resolve_with: 'APTS_PROJECT_URL, managed execution context, or git remote get-url origin' },
+      { field: 'agent_name', resolve_with: 'APTS_AGENT_NAME, managed execution context, or git config user.name' },
+      { field: 'agent_email', resolve_with: 'APTS_AGENT_EMAIL, managed execution context, or git config user.email' },
+      { field: 'branch', resolve_with: 'APTS_BRANCH, managed execution context, or git branch --show-current' },
+      { field: 'task_id', resolve_with: 'APTS_TASK_ID or managed execution context (for repeated execution calls)' }
+    ],
+    artifacts: Object.entries(integrationArtifacts).map(([id, artifact]) => ({
+      runtime_compatible: isArtifactRuntimeCompatible(artifact, activeRuntime),
+      id,
+      kind: artifact.kind,
+      artifact_version: artifact.artifactVersion,
+      updated_in_schema_version: artifact.updatedInSchemaVersion,
+      sync_action: artifact.syncAction,
+      deprecated_filenames: artifact.deprecatedFilenames || [],
+      description: artifact.description,
+      recommended: artifact.recommended && isArtifactRuntimeCompatible(artifact, activeRuntime),
+      recommended_unfiltered: artifact.recommended,
+      optional: artifact.optional || false,
+      module_system: artifact.module_system || null,
+      selection_rule: artifact.selection_rule || null,
+      depends_on_artifact_ids: artifact.dependsOnArtifactIds || [],
+      runtime: artifact.runtime || null,
+      discovery_path: artifact.discoveryPath || null,
+      required_glob: artifact.requiredGlob || null,
+      target_relative_path: artifact.targetRelativePath || null,
+      canonical_source_artifact_id: artifact.canonicalSourceArtifactId || null,
+      invocation_name: artifact.invocationName || null,
+      invocation_aliases: artifact.invocationAliases || [],
+      media_type: artifact.contentType,
+      url: buildAbsoluteUrl(req, artifact.route),
+      download_url: `${buildAbsoluteUrl(req, artifact.route)}?download=1`
+    }))
   };
 };
 
