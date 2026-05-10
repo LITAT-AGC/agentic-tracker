@@ -1619,6 +1619,32 @@ const listBacklogItems = async (
   return items.map((item) => mapBacklogItemRecord(item, { view }));
 };
 
+const listProjectsSummary = async ({ connection = db } = {}) => {
+  const [projects, backlogNeedsDetails] = await Promise.all([
+    connection('projects').select('*').orderBy('updated_at', 'desc'),
+    connection('backlog_items')
+      .select('project_url')
+      .count({ needs_details_count: '*' })
+      .where({ status: 'needs_details' })
+      .whereNull('deleted_at')
+      .groupBy('project_url')
+  ]);
+
+  const needsDetailsByProject = new Map(
+    backlogNeedsDetails.map((row) => [row.project_url, Number.parseInt(row.needs_details_count, 10) || 0])
+  );
+
+  return projects.map((project) => {
+    const needsDetailsCount = needsDetailsByProject.get(project.url) || 0;
+
+    return {
+      ...project,
+      needs_details_count: needsDetailsCount,
+      has_needs_details: needsDetailsCount > 0
+    };
+  });
+};
+
 const searchSimilarBugReports = async ({
   projectUrl,
   queryText,
@@ -3215,6 +3241,15 @@ app.get('/api/projects/context', apiLimiter, authenticateAgent, async (req, res)
   }
 });
 
+app.get('/api/projects', apiLimiter, authenticateAgent, async (_req, res) => {
+  try {
+    const projects = await listProjectsSummary();
+    return res.json({ projects });
+  } catch (routeError) {
+    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+  }
+});
+
 app.get('/api/projects/:url/constraints', apiLimiter, authenticateAgent, async (req, res) => {
   try {
     const url = normalizeUrl(decodeURIComponent(req.params.url));
@@ -3844,31 +3879,8 @@ app.get('/api/dashboard/overview', requireAuth, async (req, res) => {
 
 app.get('/api/dashboard/projects', requireAuth, async (req, res) => {
   try {
-    const [projects, backlogNeedsDetails] = await Promise.all([
-      db('projects').select('*').orderBy('updated_at', 'desc'),
-      db('backlog_items')
-        .select('project_url')
-        .count({ needs_details_count: '*' })
-        .where({ status: 'needs_details' })
-        .whereNull('deleted_at')
-        .groupBy('project_url')
-    ]);
-
-    const needsDetailsByProject = new Map(
-      backlogNeedsDetails.map((row) => [row.project_url, Number.parseInt(row.needs_details_count, 10) || 0])
-    );
-
-    res.json({
-      projects: projects.map((project) => {
-        const needsDetailsCount = needsDetailsByProject.get(project.url) || 0;
-
-        return {
-          ...project,
-          needs_details_count: needsDetailsCount,
-          has_needs_details: needsDetailsCount > 0
-        };
-      })
-    });
+    const projects = await listProjectsSummary();
+    res.json({ projects });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
