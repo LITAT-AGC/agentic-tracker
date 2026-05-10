@@ -37,6 +37,16 @@ Use a workspace-local installation strategy for APTS integration artifacts:
 - If a runtime needs its own discovery path, add a thin adapter at `.github/skills/apts/`, `.agents/skills/apts/`, or `.claude/skills/apts/` that delegates to `.ia/apts/`.
 - Avoid user-global skill installation for project integrations to prevent cross-project config leakage and version drift.
 
+## Runtime role separation (skills vs custom agents)
+
+To avoid ambiguous discovery in heterogeneous runtimes (for example VS Code, OpenCode, and Claude-style runners), keep skills and custom agents in separate discovery scopes:
+
+- Never place `SKILL.md` and `.agent.md` files in the same runtime discovery folder.
+- Skills define tool contracts and integration workflow entrypoints; custom agents define role-specialized behavior and subagent delegation.
+- In OpenCode-style setups, keep skill assets under `.agents/skills/apts/` and keep custom agents in the runtime path dedicated to agents.
+- Treat `APTS Backlog Orchestrator` as an entrypoint agent and `Backlog Item Executor Dev Test Commit` as subagent-only when the runtime supports invocability controls.
+- If a runtime does not reliably enforce subagent-only flags, enforce the same rule in prompt instructions: do not invoke the executor directly from end-user chat.
+
 ## Runtime-aware process management (recommended)
 
 When validations require local servers (API, Playwright web server, Vite dev server, or similar), choose process controls based on the active runtime instead of assuming one shell behavior works everywhere.

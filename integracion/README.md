@@ -15,6 +15,16 @@ Se mantiene fuera de `.github/` para evitar que VS Code/Copilot lo trate como cu
 2. Copia desde `plantillas-agentes/` las plantillas de agentes si quieres un flujo de intake de bugs y/o un flujo orquestador/ejecutor apoyado en backlog de APTS.
 3. Instala esos archivos en el proyecto cliente dentro de las ubicaciones que su runtime de agentes soporte.
 
+## Separacion obligatoria entre skills y agentes
+
+Para evitar conflictos de discovery en runtimes mixtos:
+
+1. No mezcles artefactos de skill (`SKILL.md`, contrato JSON y cliente/CLI) con plantillas `.agent.md` en la misma carpeta de discovery.
+2. Usa rutas separadas por tipo:
+	- Skills: `.github/skills/apts/`, `.agents/skills/apts/` o `.claude/skills/apts/` segun runtime.
+	- Agentes custom: ruta de agentes del runtime (por ejemplo `.github/agents/` en VS Code).
+3. En flujo orquestador/ejecutor, toma el orquestador como entrypoint y deja el ejecutor como subagente (no como entrypoint de usuario) cuando el runtime soporte ese control.
+
 ## Regla de cobertura del cliente exportable
 
 - El cliente HTTP oficial que APTS distribuye (`apts-client.js` y `apts-client.mjs`) debe cubrir todas las funcionalidades de integracion publicadas en `apts_skills.json`.

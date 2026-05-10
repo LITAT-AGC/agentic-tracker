@@ -1711,10 +1711,18 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.31';
+const integrationManifestSchemaVersion = '2.0.32';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.32',
+    date: '2026-05-10',
+    changes: [
+      'Public integration manifest now supports runtime-aware recommendation filtering via query param runtime, so artifact installation can filter by runtime compatibility before applying recommended entries.',
+      'Executor agent artifacts are published again as subagent-oriented (`user-invocable: false`, `disable-model-invocation: false`) to reduce skill-vs-agent invocation ambiguity in mixed runtimes such as OpenCode + VS Code setups.'
+    ]
+  },
   {
     version: '2.0.31',
     date: '2026-05-10',
@@ -2106,8 +2114,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-agent-guidelines.md'),
     fileName: 'apts-agent-guidelines.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.30',
-    updatedInSchemaVersion: '2.0.30',
+    artifactVersion: '2.0.32',
+    updatedInSchemaVersion: '2.0.32',
     kind: 'agent_guidelines',
     recommended: true,
     syncAction: 'overwrite',
@@ -2119,8 +2127,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'plantillas-agentes', 'ejecutor-item-backlog-dev-test-commit.agent.md'),
     fileName: 'ejecutor-item-backlog-dev-test-commit.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.31',
-    updatedInSchemaVersion: '2.0.31',
+    artifactVersion: '2.0.32',
+    updatedInSchemaVersion: '2.0.32',
     kind: 'agent_template',
     recommended: false,
     syncAction: 'overwrite',
@@ -2183,8 +2191,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'runtime-adapters', 'vscode', 'agents', 'backlog-item-executor-dev-test-commit.agent.md'),
     fileName: 'backlog-item-executor-dev-test-commit.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.31',
-    updatedInSchemaVersion: '2.0.31',
+    artifactVersion: '2.0.32',
+    updatedInSchemaVersion: '2.0.32',
     kind: 'agent_runtime_adapter',
     recommended: true,
     syncAction: 'overwrite',
@@ -2296,12 +2304,48 @@ const buildLegacyCleanupTargets = () => Object.entries(integrationArtifacts)
     file_name: fileName
   })));
 
-const buildIntegrationManifest = (req) => ({
-  service: 'APTS',
-  version: rootPackage.version,
-  schema_version: integrationManifestSchemaVersion,
-  integration_mode: 'agent',
-  bootstrap: {
+const normalizeManifestRuntime = (runtime) => {
+  if (typeof runtime !== 'string') return null;
+
+  const normalized = runtime.trim().toLowerCase();
+  if (!normalized) return null;
+
+  const aliases = {
+    'vs-code': 'vscode',
+    'vs code': 'vscode',
+    copilot: 'vscode',
+    'github-copilot': 'vscode',
+    'open-code': 'opencode',
+    'open code': 'opencode',
+    claude: 'claudecode',
+    'claude-code': 'claudecode',
+    'claude code': 'claudecode'
+  };
+
+  return aliases[normalized] || normalized;
+};
+
+const isArtifactRuntimeCompatible = (artifact, activeRuntime) => {
+  if (!activeRuntime) return true;
+  if (!artifact?.runtime) return true;
+  return String(artifact.runtime).toLowerCase() === activeRuntime;
+};
+
+const buildIntegrationManifest = (req) => {
+  const activeRuntime = normalizeManifestRuntime(req.query.runtime);
+
+  return {
+    service: 'APTS',
+    version: rootPackage.version,
+    schema_version: integrationManifestSchemaVersion,
+    integration_mode: 'agent',
+    runtime_filter: {
+      query_param: 'runtime',
+      active_runtime: activeRuntime,
+      supported_runtime_values: ['vscode', 'opencode', 'claudecode'],
+      recommendation_behavior: 'When runtime is provided, recommended artifacts are filtered to runtime-compatible entries first.'
+    },
+    bootstrap: {
     manifest_updates: {
       history_mode: 'append_only',
       current_version: integrationManifestSchemaVersion,
@@ -2402,6 +2446,9 @@ const buildIntegrationManifest = (req) => ({
       compare_strategy: 'by_artifact_id_and_artifact_version',
       when_version_changes: 'overwrite_local_file',
       delete_known_legacy_files: true,
+      runtime_filtering_required_before_recommended: true,
+      runtime_filtering_rule: 'Before applying recommended artifacts, keep only entries where runtime is null or equals the active runtime. Then apply recommended=true on that filtered set.',
+      runtime_filter_query_param: 'runtime',
       legacy_cleanup_targets: buildLegacyCleanupTargets(),
       managed_artifact_integrity: 'Treat downloaded official APTS scripts as managed artifacts. Do not hand-edit them or splice legacy wrapper code into them; replace the full file when artifact_version changes.',
       manual_cleanup_note: 'Automatic cleanup only applies to filenames explicitly published by APTS in legacy_cleanup_targets. If the client project previously created custom APTS wrapper scripts for base operations, remove them manually during migration unless APTS later publishes those filenames as deprecated.',
@@ -2550,6 +2597,7 @@ const buildIntegrationManifest = (req) => ({
     'If APTS_API_KEY is missing, request it from the operator before any protected API call.',
     'Store APTS_BASE_URL and APTS_API_KEY in a .env file at the root of the client project, or in an equivalent project secret store.',
     'Install APTS integration artifacts in a workspace-local base folder such as .ia/apts.',
+    'When consuming manifest artifacts, filter by runtime first (runtime query param or client-side equivalent), then apply recommended entries from that compatible subset.',
     'Use runtime-specific adapter paths only when needed for discovery (.github/skills/apts, .agents/skills/apts, or .claude/skills/apts), and avoid user-global skill installation.',
     'If using VS Code custom agents, install the published agent runtime adapters into .github/agents and reload the window so those agents become discoverable.',
     'Maintain the local resilience log described in the bootstrap section; it is append-only and must not replace APTS as the source of truth.',
@@ -2577,6 +2625,7 @@ const buildIntegrationManifest = (req) => ({
     { field: 'task_id', resolve_with: 'APTS_TASK_ID or managed execution context (for repeated execution calls)' }
   ],
   artifacts: Object.entries(integrationArtifacts).map(([id, artifact]) => ({
+    runtime_compatible: isArtifactRuntimeCompatible(artifact, activeRuntime),
     id,
     kind: artifact.kind,
     artifact_version: artifact.artifactVersion,
@@ -2584,7 +2633,8 @@ const buildIntegrationManifest = (req) => ({
     sync_action: artifact.syncAction,
     deprecated_filenames: artifact.deprecatedFilenames || [],
     description: artifact.description,
-    recommended: artifact.recommended,
+    recommended: artifact.recommended && isArtifactRuntimeCompatible(artifact, activeRuntime),
+    recommended_unfiltered: artifact.recommended,
     optional: artifact.optional || false,
     module_system: artifact.module_system || null,
     selection_rule: artifact.selection_rule || null,
@@ -2600,7 +2650,8 @@ const buildIntegrationManifest = (req) => ({
     url: buildAbsoluteUrl(req, artifact.route),
     download_url: `${buildAbsoluteUrl(req, artifact.route)}?download=1`
   }))
-});
+  };
+};
 
 const sendIntegrationArtifact = async (req, res, artifactKey) => {
   const artifact = integrationArtifacts[artifactKey];
