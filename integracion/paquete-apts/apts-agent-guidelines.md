@@ -37,9 +37,23 @@ Use a workspace-local installation strategy for APTS integration artifacts:
 - If a runtime needs its own discovery path, add a thin adapter at `.github/skills/apts/`, `.agents/skills/apts/`, or `.claude/skills/apts/` that delegates to `.ia/apts/`.
 - Avoid user-global skill installation for project integrations to prevent cross-project config leakage and version drift.
 
-## OpenCode process plugins (recommended)
+## Runtime-aware process management (recommended)
 
-If the client project runs agents through OpenCode with a synchronous `bash` tool (common on Windows with Git Bash), install both official process plugins to avoid hanging server commands during validation runs:
+When validations require local servers (API, Playwright web server, Vite dev server, or similar), choose process controls based on the active runtime instead of assuming one shell behavior works everywhere.
+
+Baseline rules:
+
+- Use runtime-native non-blocking process primitives for long-running servers.
+- Track process handles or terminal IDs so you can verify liveness and stop processes after tests.
+- Do not rely on raw shell detachment (`&` or `nohup`) as the only control mechanism unless the runtime explicitly guarantees detached lifecycle management.
+
+Runtime-specific guidance:
+
+- VS Code/Copilot runtime: use non-blocking terminal/task primitives (`run_in_terminal` async mode or background tasks), verify readiness, and stop the terminal/task after validation.
+- OpenCode runtime with synchronous `bash` execution (common on Windows + Git Bash): install and use official process plugins.
+- Other runtimes (for example Claude-style agent runners): use the runtime's native background process or PTY primitives; if unavailable, avoid server-dependent validation and report blocker.
+
+OpenCode plugin recommendation:
 
 - `@zenobius/opencode-background` (tested with `v0.1.0-alpha.2`)
 - `opencode-pty` (tested with `v0.3.4`)

@@ -56,36 +56,18 @@ The orchestrator should pass at least:
 - Never write `APTS_API_KEY` or any other secret to the local log.
 
 ## Process Management (CRITICAL)
-- NEVER use `&` or `nohup` to background a process in bash. The bash tool is synchronous and will hang even with `&`.
-- ALWAYS use `createBackgroundProcess` (from `@zenobius/opencode-background` plugin) for servers:
-
-```txt
-createBackgroundProcess
-command: node apps/agent/deploy-agent-runtime.js
-name: agent-server
-tags: "agent", "test"
-global: false
-```
-
-- Use `listBackgroundProcesses` to verify the server is running.
-- Use `killProcesses` with tags to stop servers after tests: `killProcesses tags: ["agent"]`.
-- Alternative: `pty_spawn` (from `opencode-pty` plugin) for processes needing log inspection:
-
-```txt
-pty_spawn
-command: node
-args: "apps/agent/deploy-agent-runtime.js"
-title: "Agent Server"
-```
-
-Then use `pty_read`, `pty_write` with `\x03` (Ctrl+C), or `pty_kill`.
+- For this VS Code runtime adapter, start long-running validation servers with VS Code non-blocking execution primitives (async terminal runs or background tasks).
+- Track terminal/task identifiers so liveness can be verified and shutdown is deterministic.
+- Do not rely on raw shell detachment (`&` or `nohup`) as the only lifecycle control.
+- Stop all validation servers after tests (for example by killing the async terminal or stopping the background task).
+- If this workflow is executed outside VS Code, switch to that runtime's native process controls (for example OpenCode plugins in synchronous bash environments).
 
 ## Validation Policy
 - Prefer the most relevant targeted validation first.
 - Before commit, run the strongest practical validation available for the touched slice.
-- Servers MUST be started via `createBackgroundProcess` or `pty_spawn`, never via raw bash.
+- Servers MUST be started with non-blocking process controls compatible with the active runtime.
 - Confirm server is ready (for example poll `/health`) before running tests.
-- Stop background servers via `killProcesses` or `pty_kill` after validation completes.
+- Stop all validation servers after validation completes.
 - If `npm test` is not a valid command for this repository slice, do not invent success; run the best available targeted validation and report it explicitly.
 - If any required validation fails, do not commit.
 

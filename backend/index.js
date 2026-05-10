@@ -1711,10 +1711,18 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.28';
+const integrationManifestSchemaVersion = '2.0.29';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.29',
+    date: '2026-05-10',
+    changes: [
+      'Executor process guidance is now runtime-aware so the same APTS-integrated project can run safely across VS Code, OpenCode, and other agent runtimes without assuming one shell lifecycle model.',
+      'VS Code executor adapter now requires VS Code-native non-blocking process controls, while OpenCode plugin requirements remain explicit only for synchronous OpenCode bash environments.'
+    ]
+  },
   {
     version: '2.0.28',
     date: '2026-05-10',
@@ -2069,8 +2077,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'SKILL.md'),
     fileName: 'SKILL.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.28',
-    updatedInSchemaVersion: '2.0.28',
+    artifactVersion: '2.0.29',
+    updatedInSchemaVersion: '2.0.29',
     kind: 'skill_package',
     recommended: false,
     syncAction: 'overwrite',
@@ -2082,8 +2090,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-agent-guidelines.md'),
     fileName: 'apts-agent-guidelines.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.28',
-    updatedInSchemaVersion: '2.0.28',
+    artifactVersion: '2.0.29',
+    updatedInSchemaVersion: '2.0.29',
     kind: 'agent_guidelines',
     recommended: true,
     syncAction: 'overwrite',
@@ -2095,8 +2103,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'plantillas-agentes', 'ejecutor-item-backlog-dev-test-commit.agent.md'),
     fileName: 'ejecutor-item-backlog-dev-test-commit.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.28',
-    updatedInSchemaVersion: '2.0.28',
+    artifactVersion: '2.0.29',
+    updatedInSchemaVersion: '2.0.29',
     kind: 'agent_template',
     recommended: false,
     syncAction: 'overwrite',
@@ -2159,8 +2167,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'runtime-adapters', 'vscode', 'agents', 'backlog-item-executor-dev-test-commit.agent.md'),
     fileName: 'backlog-item-executor-dev-test-commit.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.28',
-    updatedInSchemaVersion: '2.0.28',
+    artifactVersion: '2.0.29',
+    updatedInSchemaVersion: '2.0.29',
     kind: 'agent_runtime_adapter',
     recommended: true,
     syncAction: 'overwrite',

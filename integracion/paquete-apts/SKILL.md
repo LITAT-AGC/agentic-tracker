@@ -106,5 +106,5 @@ The client project ends up with:
 
 - a consistent tools contract for APTS,
 - a reusable HTTP layer and optional shell entrypoint,
-- recommended OpenCode process plugins (`@zenobius/opencode-background` and `opencode-pty`) when running orchestrator/executor flows with synchronous bash runtimes,
+- runtime-aware process management guidance for server-based validations, including OpenCode plugin recommendations only when that runtime uses synchronous bash,
 - and an operational instruction so agents report work consistently, including creating or reusing bug backlog items before implementing chat-triggered defect fixes.

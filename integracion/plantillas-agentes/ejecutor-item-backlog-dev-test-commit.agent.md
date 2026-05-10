@@ -55,37 +55,33 @@ The orchestrator should pass at least:
 - Prefer entries that include timestamp, backlog item id, task id, branch, event, summary, files changed, commands run, and APTS sync status.
 - Never write `APTS_API_KEY` or any other secret to the local log.
 
-## Gestion de Procesos (CRITICO)
-- NUNCA uses `&` ni `nohup` para dejar un proceso en segundo plano desde bash. El tool bash es sincrono y puede quedar colgado incluso con `&`.
-- SIEMPRE usa `createBackgroundProcess` (plugin `@zenobius/opencode-background`) para levantar servidores:
+## Gestion de Procesos por Runtime (CRITICO)
+- Antes de iniciar servidores, identifica el runtime activo (VS Code/Copilot, OpenCode, ClaudeCode u otro).
+- NUNCA asumas que `bash` desacopla correctamente con `&` o `nohup`.
+- Usa primitivas no bloqueantes del runtime para procesos largos, conserva los IDs/handles y deten los procesos al finalizar.
 
-```txt
-createBackgroundProcess
-command: node apps/agent/deploy-agent-runtime.js
-name: agent-server
-tags: "agent", "test"
-global: false
-```
+Reglas por entorno:
 
-- Usa `listBackgroundProcesses` para verificar que el servidor siga activo.
-- Usa `killProcesses` con tags para detener servidores despues de los tests: `killProcesses tags: ["agent"]`.
-- Alternativa: `pty_spawn` (plugin `opencode-pty`) para procesos que requieren inspeccion de logs:
-
-```txt
-pty_spawn
-command: node
-args: "apps/agent/deploy-agent-runtime.js"
-title: "Agent Server"
-```
-
-Luego usa `pty_read`, `pty_write` con `\x03` (Ctrl+C), o `pty_kill`.
+1. OpenCode con `bash` sincrono:
+  - No uses `&` ni `nohup` para servidores.
+  - Usa `createBackgroundProcess` para levantar servidores.
+  - Usa `listBackgroundProcesses` para verificar ejecucion.
+  - Usa `killProcesses` para apagar servidores por `tags`.
+  - Si necesitas inspeccion interactiva, usa `pty_spawn` + `pty_read`/`pty_write` y cierre con `pty_kill` (o `\x03`).
+2. VS Code/Copilot:
+  - Usa ejecucion no bloqueante del runtime (terminal async o tarea en background).
+  - Verifica readiness antes de tests.
+  - Deten terminales/tareas al finalizar la validacion.
+3. Otros runtimes (incluyendo ClaudeCode):
+  - Usa las primitivas nativas de background o PTY del runtime.
+  - Si no hay una via confiable para iniciar/detener servidores sin bloqueo, reporta `BLOCKED` en lugar de dejar la ejecucion colgada.
 
 ## Politica de Validacion
 - Prioriza primero la validacion mas relevante para el slice tocado.
 - Antes de commitear, ejecuta la validacion mas fuerte y practica para el cambio.
-- Los servidores DEBEN iniciarse con `createBackgroundProcess` o `pty_spawn`, nunca con bash en crudo.
+- Los servidores DEBEN iniciarse con primitivas no bloqueantes del runtime actual (por ejemplo `createBackgroundProcess`/`pty_spawn` en OpenCode).
 - Confirma que el servidor este listo (por ejemplo consultando `/health`) antes de correr tests.
-- Deten los servidores con `killProcesses` o `pty_kill` al finalizar la validacion.
+- Deten todos los procesos de servidor iniciados para validacion al finalizar (por ejemplo `killProcesses`, `pty_kill`, o kill de terminal/tarea del runtime).
 - Si `npm test` no existe para ese slice del repositorio, no inventes exito: corre la mejor validacion disponible y reportala de forma explicita.
 - Si falla cualquier validacion requerida, no hagas commit.
 
