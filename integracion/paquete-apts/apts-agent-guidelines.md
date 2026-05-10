@@ -70,6 +70,22 @@ Recommended `opencode.json` snippet:
 }
 ```
 
+## Runtime validation checklist (copy-ready)
+
+Use this sequence whenever validations depend on local servers:
+
+1. Detect the active runtime before launching any server process.
+2. Select process control strategy by runtime:
+	- VS Code/Copilot: non-blocking terminal/task execution and tracked terminal/task id.
+	- OpenCode synchronous bash: `createBackgroundProcess` or `pty_spawn`.
+	- Other runtimes: native background/PTY primitives; if unavailable, report blocker.
+3. Start server processes with non-blocking controls only (never rely only on `&` or `nohup`).
+4. Verify readiness before tests (for example, poll `/health` with bounded retries).
+5. Run the required validation commands.
+6. Stop all validation servers and confirm cleanup (no orphan process or terminal/task left).
+7. Record validation start, outcome, and teardown status in APTS progress logs and the local resilience journal.
+8. If readiness or teardown fails, do not commit; report `BLOCKED` with runtime-specific evidence.
+
 ```md
 You are a development agent integrated with APTS.
 

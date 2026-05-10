@@ -1711,10 +1711,18 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.29';
+const integrationManifestSchemaVersion = '2.0.30';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.30',
+    date: '2026-05-10',
+    changes: [
+      'Agent guidelines now include a copy-ready runtime validation checklist for server-dependent tests, covering runtime detection, readiness checks, deterministic teardown, and blocker reporting.',
+      'The checklist makes cross-runtime execution explicit so integrators can run the same APTS flow from VS Code, OpenCode, or other agent runtimes without orphaning background processes.'
+    ]
+  },
   {
     version: '2.0.29',
     date: '2026-05-10',
@@ -2090,8 +2098,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-agent-guidelines.md'),
     fileName: 'apts-agent-guidelines.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.29',
-    updatedInSchemaVersion: '2.0.29',
+    artifactVersion: '2.0.30',
+    updatedInSchemaVersion: '2.0.30',
     kind: 'agent_guidelines',
     recommended: true,
     syncAction: 'overwrite',
