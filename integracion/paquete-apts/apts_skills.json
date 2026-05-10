@@ -66,7 +66,7 @@
     },
     {
       "name": "read_project_context",
-      "description": "Read current project state, backlog items, pending tasks, and recent history. Minimum payload in official client/CLI: none for identity (url auto-resolves from env/local managed context/Git when omitted). Optional: limit, backlog_status, and view. Agent flows now default to compact summaries; request view=full only when raw detail is needed.",
+      "description": "Read current project state with optional section selection. Minimum payload in official client/CLI: none for identity (url auto-resolves from env/local managed context/Git when omitted). Optional: limit, backlog_status, include, and view. Agent flows now default to compact summaries; request view=full only when raw detail is needed.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -90,6 +90,25 @@
               "archived"
             ]
           },
+          "include": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Comma-separated sections: tasks,backlog,logs"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "tasks",
+                    "backlog",
+                    "logs"
+                  ]
+                }
+              }
+            ]
+          },
           "view": {
             "type": "string",
             "enum": [
@@ -104,12 +123,29 @@
     },
     {
       "name": "list_backlog_items",
-      "description": "List backlog items for a project ordered by priority and sort order. Minimum payload in official client/CLI: none for identity (url auto-resolves from env/local managed context/Git when omitted). Use this before direct implementation to detect whether a reported bug, error, or regression is already tracked. Agent flows now default to compact summaries; request view=full only for the chosen item or when summary data is insufficient.",
+      "description": "List backlog items for a project ordered by priority and sort order. Minimum payload in official client/CLI: none for identity (url auto-resolves from env/local managed context/Git when omitted). Optional filters include id, ids, status, and pagination with limit/offset. Agent flows now default to compact summaries; request view=full only for chosen items.",
       "parameters": {
         "type": "object",
         "properties": {
           "url": {
             "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "ids": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "Comma-separated UUID list"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            ]
           },
           "status": {
             "type": "string",
@@ -128,6 +164,12 @@
             "type": "boolean",
             "default": false
           },
+          "limit": {
+            "type": "number"
+          },
+          "offset": {
+            "type": "number"
+          },
           "view": {
             "type": "string",
             "enum": [
@@ -135,6 +177,73 @@
               "compact"
             ],
             "default": "compact"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "get_backlog_item",
+      "description": "Get one backlog item by UUID. Default response view is full; compact is available for token-sensitive reads.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "backlog_item_id": {
+            "type": "string"
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "full",
+              "compact"
+            ],
+            "default": "full"
+          },
+          "include_deleted": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "backlog_item_id"
+        ]
+      }
+    },
+    {
+      "name": "get_task",
+      "description": "Get one task by UUID including task status/context, recent heartbeats, and associated logs.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string"
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "full",
+              "compact"
+            ],
+            "default": "full"
+          },
+          "limit": {
+            "type": "number",
+            "default": 20
+          }
+        },
+        "required": [
+          "task_id"
+        ]
+      }
+    },
+    {
+      "name": "get_project_constraints",
+      "description": "Read project constraints registered in APTS (test/lint/typecheck commands, framework, language, and conventions). Minimum payload in official client/CLI: none for identity (url auto-resolves from env/local managed context/Git when omitted).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
           }
         },
         "required": []

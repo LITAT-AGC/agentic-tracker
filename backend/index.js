@@ -181,7 +181,11 @@ const MAX_BATCH_SIZE = 100;
 const SQLITE_LEGACY_BATCH_SIZE = 200;
 const RESPONSE_VIEW_MODES = ['full', 'compact'];
 const DEFAULT_RESPONSE_VIEW = 'compact';
+const PROJECT_CONTEXT_INCLUDE_SECTIONS = ['tasks', 'backlog', 'logs'];
+const DEFAULT_TASK_DETAIL_LOG_LIMIT = 20;
+const MAX_TASK_DETAIL_LOG_LIMIT = 100;
 const COMPACT_TEXT_EXCERPT_LIMIT = 240;
+const PROJECT_CONSTRAINTS_CONFIG_PREFIX = 'project_constraints:';
 const BACKLOG_COMPACT_SELECT_COLUMNS = [
   'id',
   'project_url',
@@ -345,6 +349,88 @@ const validateResponseView = (value) => {
     throw createHttpError(400, `Invalid view. Supported values: ${RESPONSE_VIEW_MODES.join(', ')}`);
   }
   return normalized;
+};
+
+const parseOptionalNonNegativeInteger = (value, fieldName, { max = Number.MAX_SAFE_INTEGER } = {}) => {
+  if (value === undefined || value === null || value === '') {
+    return undefined;
+  }
+
+  const normalized = normalizeInputString(String(value), { unwrapQuotes: true });
+  if (!normalized) {
+    return undefined;
+  }
+
+  if (!/^\d+$/.test(normalized)) {
+    throw createHttpError(400, `${fieldName} must be a non-negative integer`);
+  }
+
+  const parsed = Number.parseInt(normalized, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    throw createHttpError(400, `${fieldName} must be a non-negative integer`);
+  }
+
+  if (parsed > max) {
+    throw createHttpError(400, `${fieldName} must be <= ${max}`);
+  }
+
+  return parsed;
+};
+
+const parseCommaSeparatedUuidList = (value, fieldName) => {
+  if (value === undefined || value === null || value === '') {
+    return [];
+  }
+
+  const rawValue = Array.isArray(value) ? value.join(',') : value;
+  if (typeof rawValue !== 'string') {
+    throw createHttpError(400, `${fieldName} must be a comma-separated UUID list`);
+  }
+
+  const ids = rawValue
+    .split(',')
+    .map((entry) => normalizeInputString(entry, { unwrapQuotes: true }))
+    .filter(Boolean);
+
+  if (!ids.length) {
+    return [];
+  }
+
+  const invalidId = ids.find((id) => !UUID_REGEX.test(id));
+  if (invalidId) {
+    throw createHttpError(400, `${fieldName} contains invalid UUID: ${invalidId}`);
+  }
+
+  return [...new Set(ids)];
+};
+
+const parseProjectContextInclude = (value) => {
+  if (value === undefined || value === null || value === '') {
+    return new Set(PROJECT_CONTEXT_INCLUDE_SECTIONS);
+  }
+
+  const rawValue = Array.isArray(value) ? value.join(',') : value;
+  if (typeof rawValue !== 'string') {
+    throw createHttpError(400, `Invalid include. Supported values: ${PROJECT_CONTEXT_INCLUDE_SECTIONS.join(', ')}`);
+  }
+
+  const requestedSections = rawValue
+    .split(',')
+    .map((entry) => normalizeInputString(entry, { lowercase: true }))
+    .filter(Boolean);
+
+  if (!requestedSections.length) {
+    return new Set(PROJECT_CONTEXT_INCLUDE_SECTIONS);
+  }
+
+  const invalidSection = requestedSections
+    .find((section) => !PROJECT_CONTEXT_INCLUDE_SECTIONS.includes(section));
+
+  if (invalidSection) {
+    throw createHttpError(400, `Invalid include section '${invalidSection}'. Supported values: ${PROJECT_CONTEXT_INCLUDE_SECTIONS.join(', ')}`);
+  }
+
+  return new Set(requestedSections);
 };
 
 const isUuid = (value) => typeof value === 'string' && UUID_REGEX.test(value);
@@ -568,6 +654,10 @@ const uuidFieldSchema = (
 
 const taskIdParamSchema = z.object({
   id: uuidFieldSchema('Task id must be a valid UUID')
+});
+
+const backlogIdParamSchema = z.object({
+  id: uuidFieldSchema('Backlog item id must be a valid UUID')
 });
 
 const registerTaskBodySchema = z.object({
@@ -1236,7 +1326,7 @@ const copyLegacySQLiteIntoPostgresAtStartup = async () => {
 
     if (totalRows === 0) {
       await sqliteLegacyDb.destroy();
-      await fs.unlink(sqliteLegacyFilePath).catch(() => {});
+      await fs.unlink(sqliteLegacyFilePath).catch(() => { });
 
       return {
         skipped: true,
@@ -1422,8 +1512,75 @@ const ensureProjectExists = async (url, { connection = db } = {}) => {
     .onConflict('url').merge();
 };
 
-const listBacklogItems = async (projectUrl, status, { includeDeleted = false, view = DEFAULT_RESPONSE_VIEW } = {}) => {
-  const query = db('backlog_items')
+const parseJsonObjectOrEmpty = (value) => {
+  if (typeof value !== 'string') return {};
+
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {};
+    }
+    return parsed;
+  } catch (_error) {
+    return {};
+  }
+};
+
+const normalizeProjectConstraints = (input) => {
+  const constraints = input && typeof input === 'object' && !Array.isArray(input)
+    ? input
+    : {};
+
+  return {
+    test_command: normalizeInputString(constraints.test_command, { unwrapQuotes: true }) || null,
+    lint_command: normalizeInputString(constraints.lint_command, { unwrapQuotes: true }) || null,
+    typecheck_command: normalizeInputString(constraints.typecheck_command, { unwrapQuotes: true }) || null,
+    framework: normalizeInputString(constraints.framework, { unwrapQuotes: true }) || null,
+    language: normalizeInputString(constraints.language, { unwrapQuotes: true }) || null,
+    conventions: normalizeInputString(constraints.conventions) || null
+  };
+};
+
+const getProjectConstraints = async (projectUrl, { connection = db } = {}) => {
+  const project = await connection('projects').where({ url: projectUrl }).first();
+  if (!project) {
+    throw createHttpError(404, 'Project not found');
+  }
+
+  const constraintsConfigKey = `${PROJECT_CONSTRAINTS_CONFIG_PREFIX}${projectUrl}`;
+  const hasConfigTable = await connection.schema.hasTable('config');
+  const constraintsConfig = hasConfigTable
+    ? await connection('config')
+      .where({ key: constraintsConfigKey })
+      .first()
+    : null;
+
+  const projectDescriptionConstraints = parseJsonObjectOrEmpty(project.description);
+  const configuredConstraints = parseJsonObjectOrEmpty(constraintsConfig?.value);
+
+  return {
+    project_url: projectUrl,
+    ...normalizeProjectConstraints({
+      ...projectDescriptionConstraints,
+      ...configuredConstraints
+    })
+  };
+};
+
+const listBacklogItems = async (
+  projectUrl,
+  status,
+  {
+    includeDeleted = false,
+    view = DEFAULT_RESPONSE_VIEW,
+    id = null,
+    ids = [],
+    limit,
+    offset,
+    connection = db
+  } = {}
+) => {
+  const query = connection('backlog_items')
     .where({ project_url: projectUrl })
     .orderBy([
       { column: 'priority', order: 'asc' },
@@ -1437,6 +1594,22 @@ const listBacklogItems = async (projectUrl, status, { includeDeleted = false, vi
 
   if (status) {
     query.andWhere({ status });
+  }
+
+  if (id) {
+    query.andWhere({ id });
+  }
+
+  if (Array.isArray(ids) && ids.length) {
+    query.whereIn('id', ids);
+  }
+
+  if (typeof offset === 'number') {
+    query.offset(offset);
+  }
+
+  if (typeof limit === 'number') {
+    query.limit(limit);
   }
 
   const items = view === 'compact'
@@ -1538,10 +1711,26 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.24';
+const integrationManifestSchemaVersion = '2.0.26';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.26',
+    date: '2026-05-10',
+    changes: [
+      'Agent API now supports targeted read endpoints for one backlog item and one task, plus lightweight section filtering in read_project_context and id/ids pagination filters in list_backlog_items to reduce token-heavy orchestration loops.',
+      'Official APTS clients and CLIs now expose get-backlog-item, get-task, and get-project-constraints operations and improve PowerShell-safe JSON handling with --json @file support and resilient inline parser normalization.'
+    ]
+  },
+  {
+    version: '2.0.25',
+    date: '2026-05-09',
+    changes: [
+      'Public integration downloads now expose compatibility aliases for the bugfix intake agent and the VS Code bugfix intake adapter to avoid client timeouts caused by stale route names with aggressive retries.',
+      'The VS Code bugfix intake adapter metadata now publishes a deprecated legacy filename so local updaters can clean old intake naming during sync.'
+    ]
+  },
   {
     version: '2.0.24',
     date: '2026-05-08',
@@ -1851,8 +2040,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts_skills.json'),
     fileName: 'apts_skills.json',
     contentType: 'application/json; charset=utf-8',
-    artifactVersion: '2.0.24',
-    updatedInSchemaVersion: '2.0.24',
+    artifactVersion: '2.0.26',
+    updatedInSchemaVersion: '2.0.26',
     kind: 'skills_contract',
     recommended: true,
     syncAction: 'overwrite',
@@ -1979,7 +2168,9 @@ const integrationArtifacts = {
     kind: 'agent_runtime_adapter',
     recommended: true,
     syncAction: 'overwrite',
-    deprecatedFilenames: [],
+    deprecatedFilenames: [
+      'intake-bugfix-apts.agent.md'
+    ],
     runtime: 'vscode',
     discoveryPath: '.github/agents',
     requiredGlob: '*.agent.md',
@@ -1994,8 +2185,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-client.js'),
     fileName: 'apts-client.js',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.0.24',
-    updatedInSchemaVersion: '2.0.24',
+    artifactVersion: '2.0.26',
+    updatedInSchemaVersion: '2.0.26',
     kind: 'reference_client',
     recommended: false,
     optional: true,
@@ -2010,8 +2201,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-client.mjs'),
     fileName: 'apts-client.mjs',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.0.24',
-    updatedInSchemaVersion: '2.0.24',
+    artifactVersion: '2.0.26',
+    updatedInSchemaVersion: '2.0.26',
     kind: 'reference_client',
     recommended: false,
     optional: true,
@@ -2026,8 +2217,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-cli.js'),
     fileName: 'apts-cli.js',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.0.24',
-    updatedInSchemaVersion: '2.0.24',
+    artifactVersion: '2.0.26',
+    updatedInSchemaVersion: '2.0.26',
     kind: 'reference_cli',
     recommended: false,
     optional: true,
@@ -2043,8 +2234,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-cli.mjs'),
     fileName: 'apts-cli.mjs',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.0.23',
-    updatedInSchemaVersion: '2.0.23',
+    artifactVersion: '2.0.26',
+    updatedInSchemaVersion: '2.0.26',
     kind: 'reference_cli',
     recommended: false,
     optional: true,
@@ -2402,9 +2593,11 @@ app.get(`${publicIntegrationBasePath}/agent-guidelines.md`, async (req, res) => 
 app.get(`${publicIntegrationBasePath}/agentes/ejecutor-item-backlog-dev-test-commit.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'executor_agent'));
 app.get(`${publicIntegrationBasePath}/agentes/orquestador-backlog-apts.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'orchestrator_agent'));
 app.get(`${publicIntegrationBasePath}/agentes/intake-bugfix-apts.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'bugfix_intake_agent'));
+app.get(`${publicIntegrationBasePath}/agentes/apts-bugfix-intake.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'bugfix_intake_agent'));
 app.get(`${publicIntegrationBasePath}/agentes/vscode/apts-backlog-orchestrator.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'vscode_orchestrator_agent_adapter'));
 app.get(`${publicIntegrationBasePath}/agentes/vscode/backlog-item-executor-dev-test-commit.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'vscode_executor_agent_adapter'));
 app.get(`${publicIntegrationBasePath}/agentes/vscode/apts-bugfix-intake.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'vscode_bugfix_intake_agent_adapter'));
+app.get(`${publicIntegrationBasePath}/agentes/vscode/intake-bugfix-apts.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'vscode_bugfix_intake_agent_adapter'));
 app.get(`${publicIntegrationBasePath}/apts-client.js`, async (req, res) => sendIntegrationArtifact(req, res, 'js_client_commonjs'));
 app.get(`${publicIntegrationBasePath}/apts-client.mjs`, async (req, res) => sendIntegrationArtifact(req, res, 'js_client_esm'));
 app.get(`${publicIntegrationBasePath}/apts-cli.js`, async (req, res) => sendIntegrationArtifact(req, res, 'js_cli_commonjs'));
@@ -2526,6 +2719,7 @@ const registerTaskInternal = async (payload, { connection = db } = {}) => {
           status: 'in_progress',
           backlog_item_id: backlogItemId,
           resumed: true,
+          previous_task_id: activeTask.id,
           previous_status: previousStatus
         };
       }
@@ -2559,6 +2753,7 @@ const registerTaskInternal = async (payload, { connection = db } = {}) => {
     status: task.status,
     backlog_item_id: backlogItemId || null,
     resumed: false,
+    previous_task_id: null,
     previous_status: null
   };
 };
@@ -2867,66 +3062,122 @@ app.post('/api/projects/tasks', apiLimiter, authenticateAgent, async (req, res) 
 
 // Skill 1: read_project_context
 app.get('/api/projects/context', apiLimiter, authenticateAgent, async (req, res) => {
-  const url = normalizeUrl(req.query.url);
-  const limit = parseInt(req.query.limit) || 5;
-  const view = validateResponseView(req.query.view);
-
   try {
-    const tasksQuery = db('tasks').where({ project_url: url });
-    const tasks = (view === 'compact'
-      ? await tasksQuery.select(TASK_COMPACT_SELECT_COLUMNS)
-      : await tasksQuery.select('*'))
-      .map((task) => mapTaskRecord(task, { view }));
+    const url = normalizeUrl(req.query.url);
+    const view = validateResponseView(req.query.view);
+    const includeSections = parseProjectContextInclude(req.query.include);
+    const limit = parseOptionalNonNegativeInteger(req.query.limit, 'limit', { max: MAX_TASK_DETAIL_LOG_LIMIT }) ?? 5;
+    const backlogStatus = normalizeInputString(req.query.backlog_status, { unwrapQuotes: true, lowercase: true }) || null;
 
-    const backlog = await listBacklogItems(url, req.query.backlog_status, { view });
+    if (!url) {
+      return res.status(400).json({ error: 'Project url is required' });
+    }
 
-    const logsQuery = db('agent_logs')
-      .join('tasks', 'agent_logs.task_id', 'tasks.id')
-      .where('tasks.project_url', url)
-      .orderBy('agent_logs.created_at', 'desc')
-      .limit(limit);
+    if (backlogStatus && !BACKLOG_STATUSES.includes(backlogStatus)) {
+      return res.status(400).json({ error: 'Invalid backlog status' });
+    }
 
-    const logs = (view === 'compact'
-      ? await logsQuery.select(
-        'agent_logs.id',
-        'agent_logs.task_id',
-        'agent_logs.action_type',
-        'agent_logs.agent_name',
-        'agent_logs.branch',
-        'agent_logs.message',
-        'agent_logs.created_at',
-        'agent_logs.updated_at',
-        db.raw("CASE WHEN agent_logs.technical_details IS NULL THEN 'false' ELSE 'true' END AS has_technical_details")
-      )
-      : await logsQuery.select('agent_logs.*'))
-      .map((log) => mapAgentLogRecord(log, { view }));
+    const responsePayload = {};
 
-    res.json({ tasks, backlog, logs });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    if (includeSections.has('tasks')) {
+      const tasksQuery = db('tasks').where({ project_url: url });
+      const tasks = (view === 'compact'
+        ? await tasksQuery.select(TASK_COMPACT_SELECT_COLUMNS)
+        : await tasksQuery.select('*'))
+        .map((task) => mapTaskRecord(task, { view }));
+      responsePayload.tasks = tasks;
+    }
+
+    if (includeSections.has('backlog')) {
+      const backlog = await listBacklogItems(url, backlogStatus, { view });
+      responsePayload.backlog = backlog;
+    }
+
+    if (includeSections.has('logs')) {
+      const logsQuery = db('agent_logs')
+        .join('tasks', 'agent_logs.task_id', 'tasks.id')
+        .where('tasks.project_url', url)
+        .orderBy('agent_logs.created_at', 'desc')
+        .limit(limit);
+
+      const logs = (view === 'compact'
+        ? await logsQuery.select(
+          'agent_logs.id',
+          'agent_logs.task_id',
+          'agent_logs.action_type',
+          'agent_logs.agent_name',
+          'agent_logs.branch',
+          'agent_logs.message',
+          'agent_logs.created_at',
+          'agent_logs.updated_at',
+          db.raw("CASE WHEN agent_logs.technical_details IS NULL THEN 'false' ELSE 'true' END AS has_technical_details")
+        )
+        : await logsQuery.select('agent_logs.*'))
+        .map((log) => mapAgentLogRecord(log, { view }));
+
+      responsePayload.logs = logs;
+    }
+
+    return res.json(responsePayload);
+  } catch (routeError) {
+    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+  }
+});
+
+app.get('/api/projects/:url/constraints', apiLimiter, authenticateAgent, async (req, res) => {
+  try {
+    const url = normalizeUrl(decodeURIComponent(req.params.url));
+
+    if (!url) {
+      return res.status(400).json({ error: 'Project url is required' });
+    }
+
+    const constraints = await getProjectConstraints(url);
+    return res.json(constraints);
+  } catch (routeError) {
+    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
   }
 });
 
 // Skill 1b: list_backlog_items
 app.get('/api/projects/backlog', apiLimiter, authenticateAgent, async (req, res) => {
-  const url = normalizeUrl(req.query.url);
-  const status = req.query.status;
-  const includeDeleted = parseBooleanFlag(req.query.include_deleted);
-  const view = validateResponseView(req.query.view);
-
-  if (!url) {
-    return res.status(400).json({ error: 'Project url is required' });
-  }
-
-  if (status && !BACKLOG_STATUSES.includes(status)) {
-    return res.status(400).json({ error: 'Invalid backlog status' });
-  }
-
   try {
-    const backlog = await listBacklogItems(url, status, { includeDeleted, view });
-    res.json({ backlog });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+    const url = normalizeUrl(req.query.url);
+    const status = normalizeInputString(req.query.status, { unwrapQuotes: true, lowercase: true }) || null;
+    const includeDeleted = parseBooleanFlag(req.query.include_deleted);
+    const view = validateResponseView(req.query.view);
+    const id = normalizeInputString(req.query.id, { unwrapQuotes: true }) || null;
+    const ids = parseCommaSeparatedUuidList(req.query.ids, 'ids');
+    const limit = parseOptionalNonNegativeInteger(req.query.limit, 'limit');
+    const offset = parseOptionalNonNegativeInteger(req.query.offset, 'offset');
+
+    if (!url) {
+      return res.status(400).json({ error: 'Project url is required' });
+    }
+
+    if (status && !BACKLOG_STATUSES.includes(status)) {
+      return res.status(400).json({ error: 'Invalid backlog status' });
+    }
+
+    if (id && !isUuid(id)) {
+      return res.status(400).json({ error: 'id must be a valid UUID' });
+    }
+
+    if (id && ids.length > 0) {
+      return res.status(400).json({ error: 'Use either id or ids, not both' });
+    }
+
+    const backlog = await listBacklogItems(url, status, {
+      includeDeleted,
+      view,
+      id,
+      ids,
+      limit,
+      offset
+    });
+    return res.json({ backlog });
+  } catch (routeError) {
+    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
   }
 });
 
@@ -3004,6 +3255,35 @@ app.post('/api/projects/backlog', apiLimiter, authenticateAgent, async (req, res
         failed_index: routeError.failedIndex
       });
     }
+    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+  }
+});
+
+app.get('/api/backlog/:id', apiLimiter, authenticateAgent, async (req, res) => {
+  const parsedParams = backlogIdParamSchema.safeParse(req.params || {});
+  if (!parsedParams.success) {
+    return res.status(400).json({ error: zodErrorMessage(parsedParams.error) });
+  }
+
+  try {
+    const view = validateResponseView(req.query.view || 'full');
+    const includeDeleted = parseBooleanFlag(req.query.include_deleted);
+
+    const backlogItemQuery = db('backlog_items').where({ id: parsedParams.data.id });
+    if (!includeDeleted) {
+      backlogItemQuery.whereNull('deleted_at');
+    }
+
+    const backlogItem = view === 'compact'
+      ? await backlogItemQuery.select(BACKLOG_COMPACT_SELECT_COLUMNS).first()
+      : await backlogItemQuery.select('*').first();
+
+    if (!backlogItem) {
+      return res.status(404).json({ error: 'Backlog item not found' });
+    }
+
+    return res.json({ backlog_item: mapBacklogItemRecord(backlogItem, { view }) });
+  } catch (routeError) {
     return res.status(routeError.statusCode || 500).json({ error: routeError.message });
   }
 });
@@ -3110,6 +3390,81 @@ app.delete('/api/backlog', apiLimiter, authenticateAgent, async (req, res) => {
         failed_index: routeError.failedIndex
       });
     }
+    return res.status(routeError.statusCode || 500).json({ error: routeError.message });
+  }
+});
+
+app.get('/api/tasks/:id', apiLimiter, authenticateAgent, async (req, res) => {
+  const parsedParams = taskIdParamSchema.safeParse(req.params || {});
+  if (!parsedParams.success) {
+    return res.status(400).json({ error: zodErrorMessage(parsedParams.error) });
+  }
+
+  try {
+    const view = validateResponseView(req.query.view || 'full');
+    const logsLimit = parseOptionalNonNegativeInteger(req.query.limit, 'limit', { max: MAX_TASK_DETAIL_LOG_LIMIT })
+      ?? DEFAULT_TASK_DETAIL_LOG_LIMIT;
+    const taskId = parsedParams.data.id;
+
+    const taskQuery = db('tasks').where({ id: taskId });
+    const task = view === 'compact'
+      ? await taskQuery.select(TASK_COMPACT_SELECT_COLUMNS).first()
+      : await taskQuery.select('*').first();
+
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    const logsQuery = db('agent_logs')
+      .where({ task_id: taskId })
+      .orderBy('created_at', 'desc')
+      .limit(logsLimit);
+
+    const logs = (view === 'compact'
+      ? await logsQuery.select(
+        'id',
+        'task_id',
+        'action_type',
+        'agent_name',
+        'branch',
+        'message',
+        'created_at',
+        'updated_at',
+        db.raw("CASE WHEN technical_details IS NULL THEN 'false' ELSE 'true' END AS has_technical_details")
+      )
+      : await logsQuery.select('*'))
+      .map((log) => mapAgentLogRecord(log, { view }));
+
+    const heartbeatLogs = await db('agent_logs')
+      .where({ task_id: taskId, action_type: 'heartbeat' })
+      .orderBy('created_at', 'desc')
+      .limit(5)
+      .select('id', 'created_at', 'agent_name', 'branch', 'message');
+
+    const recentHeartbeats = heartbeatLogs.length > 0
+      ? heartbeatLogs.map((heartbeat) => ({
+        id: heartbeat.id,
+        timestamp: heartbeat.created_at,
+        agent_name: heartbeat.agent_name || null,
+        branch: heartbeat.branch || null,
+        message: heartbeat.message || null
+      }))
+      : (task.last_heartbeat
+        ? [{
+          id: null,
+          timestamp: task.last_heartbeat,
+          agent_name: task.agent_name || null,
+          branch: null,
+          message: null
+        }]
+        : []);
+
+    return res.json({
+      task: mapTaskRecord(task, { view }),
+      recent_heartbeats: recentHeartbeats,
+      logs
+    });
+  } catch (routeError) {
     return res.status(routeError.statusCode || 500).json({ error: routeError.message });
   }
 });
@@ -3755,14 +4110,21 @@ const startServer = async () => {
     const startupSyncedSequences = await syncPostgresAutoIncrementSequences(db, POSTGRES_AUTOINCREMENT_TABLES);
     logger.info({ synced_sequences: startupSyncedSequences }, 'PostgreSQL autoincrement sequences checked');
 
-    const embeddingBackfillResult = await backfillOpenBugEmbeddingsAtStartup();
-    logger.info({ embedding_backfill: embeddingBackfillResult }, 'Open bug embedding backfill checked');
-
     app.listen(PORT, () => {
       logger.info({ port: PORT }, 'Backend running');
     });
 
     startBackgroundJobs();
+
+    // Keep startup responsive for integrators: run non-critical embedding backfill after listen.
+    void (async () => {
+      try {
+        const embeddingBackfillResult = await backfillOpenBugEmbeddingsAtStartup();
+        logger.info({ embedding_backfill: embeddingBackfillResult }, 'Open bug embedding backfill checked');
+      } catch (error) {
+        logger.warn({ err: error }, 'Open bug embedding backfill failed after startup');
+      }
+    })();
   } catch (error) {
     logger.fatal({ err: error }, 'Backend startup failed while applying migrations');
     process.exit(1);

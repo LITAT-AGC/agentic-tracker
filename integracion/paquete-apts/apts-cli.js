@@ -53,6 +53,27 @@ const COMMANDS = {
     supportsOptions: false,
     invoke: (client, payload) => client.listBacklogItems(payload),
   },
+  'get-backlog-item': {
+    description: 'Get one backlog item by id with optional full or compact view.',
+    usage: 'apts-cli get-backlog-item (--json <payload> | --stdin) [--cwd <path>] [--pretty]',
+    expectsPayload: true,
+    supportsOptions: false,
+    invoke: (client, payload) => client.getBacklogItem(payload),
+  },
+  'get-task': {
+    description: 'Get one task by id including associated logs and recent heartbeat data.',
+    usage: 'apts-cli get-task (--json <payload> | --stdin) [--cwd <path>] [--pretty]',
+    expectsPayload: true,
+    supportsOptions: false,
+    invoke: (client, payload) => client.getTask(payload),
+  },
+  'get-project-constraints': {
+    description: 'Get registered project constraints used by orchestrator and executor agents.',
+    usage: 'apts-cli get-project-constraints (--json <payload> | --stdin) [--cwd <path>] [--pretty]',
+    expectsPayload: true,
+    supportsOptions: false,
+    invoke: (client, payload) => client.getProjectConstraints(payload),
+  },
   'search-similar-bug-reports': {
     description: 'Find semantically similar bug reports in APTS backlog using OpenRouter embeddings.',
     usage: 'apts-cli search-similar-bug-reports (--json <payload> | --stdin) [--cwd <path>] [--pretty]',
@@ -141,6 +162,27 @@ const COMMAND_HELP_DETAILS = {
     ],
     examples: [
       "node .ia/apts/apts-cli.js list-backlog-items --json '{\"status\":\"ready\",\"view\":\"compact\"}'",
+    ],
+  },
+  'get-backlog-item': {
+    requiredFields: ['backlog_item_id'],
+    examples: [
+      "node .ia/apts/apts-cli.js get-backlog-item --json '{\"backlog_item_id\":\"11111111-1111-1111-1111-111111111111\",\"view\":\"full\"}'",
+    ],
+  },
+  'get-task': {
+    requiredFields: ['task_id'],
+    examples: [
+      "node .ia/apts/apts-cli.js get-task --json '{\"task_id\":\"22222222-2222-2222-2222-222222222222\"}'",
+    ],
+  },
+  'get-project-constraints': {
+    requiredFields: [],
+    notes: [
+      'url auto-resolves from env/local context/Git when omitted in official client/CLI flows.',
+    ],
+    examples: [
+      "node .ia/apts/apts-cli.js get-project-constraints --json '{}'",
     ],
   },
   'search-similar-bug-reports': {
@@ -306,7 +348,7 @@ function buildHelp(commandName) {
       ...(details?.notes?.length ? ['', 'Command notes:', ...details.notes.map((note) => `  - ${note}`)] : []),
       '',
       'Flags:',
-      '  --json <payload>     Inline JSON payload matching the contract-first shape.',
+      '  --json <payload>     Inline JSON payload or @path/to/payload.json.',
       '  --stdin              Read the JSON payload from stdin.',
       '  --options <json>     Optional JSON options for batch strict mode.',
       '  --cwd <path>         Resolve .env and Git identity from a different working directory.',
@@ -336,10 +378,10 @@ function buildHelp(commandName) {
     '  --help               Show this help.',
     '',
     'Payload flags:',
-    '  --json <payload>     Inline JSON payload matching the contract-first shape.',
+    '  --json <payload>     Inline JSON payload or @path/to/payload.json.',
     '  --stdin              Read the JSON payload from stdin.',
     '  --options <json>     Optional JSON options for batch strict mode.',
-    '  PowerShell tip:      Prefer file + --stdin for long payloads and multiline text; keep inline --json for short validation calls.',
+    '  PowerShell tip:      Prefer --stdin or --json @payload.json for long payloads and multiline text.',
     '',
     'Run `apts-cli help <command>` to see minimum required fields and copy-ready examples for that operation.',
     '',
@@ -352,11 +394,68 @@ function buildHelp(commandName) {
 }
 
 function parseJsonText(rawText, label) {
-  try {
-    return JSON.parse(rawText);
-  } catch (error) {
-    throw usageError(`Invalid JSON in ${label}: ${error.message}`);
+  const parsedCandidates = [];
+
+  const rawInput = typeof rawText === 'string' ? rawText.trim() : '';
+  if (!rawInput) {
+    throw usageError(`Expected JSON text in ${label}, but it was empty`);
   }
+
+  const inputText = rawInput.startsWith('@')
+    ? (() => {
+      const filePath = rawInput.slice(1).trim();
+      if (!filePath) {
+        throw usageError(`Invalid ${label}: expected @<path-to-json-file>`);
+      }
+
+      const resolvedPath = path.resolve(filePath);
+      if (!fs.existsSync(resolvedPath) || !fs.statSync(resolvedPath).isFile()) {
+        throw usageError(`Invalid ${label}: JSON file not found at ${filePath}`);
+      }
+
+      const fileContents = fs.readFileSync(resolvedPath, 'utf8').trim();
+      if (!fileContents) {
+        throw usageError(`Invalid ${label}: JSON file at ${filePath} is empty`);
+      }
+
+      return fileContents;
+    })()
+    : rawInput;
+
+  parsedCandidates.push(inputText);
+
+  const unwrapped = unwrapMatchingQuotes(inputText);
+  if (unwrapped && unwrapped !== inputText) {
+    parsedCandidates.push(unwrapped);
+  }
+
+  const withCollapsedDoubleQuotes = unwrapped.replace(/""/g, '"');
+  if (withCollapsedDoubleQuotes && !parsedCandidates.includes(withCollapsedDoubleQuotes)) {
+    parsedCandidates.push(withCollapsedDoubleQuotes);
+  }
+
+  for (const candidate of parsedCandidates) {
+    try {
+      return JSON.parse(candidate);
+    } catch (_error) {
+      // Keep trying normalized forms before returning a usage error.
+    }
+  }
+
+  throw usageError(`Invalid JSON in ${label}. If using PowerShell, prefer --stdin or --json @payload.json.`);
+}
+
+function unwrapMatchingQuotes(value) {
+  if (typeof value !== 'string') return value;
+
+  const trimmed = value.trim();
+  if (trimmed.length < 2) return trimmed;
+
+  const startsWithDouble = trimmed.startsWith('"') && trimmed.endsWith('"');
+  const startsWithSingle = trimmed.startsWith('\'') && trimmed.endsWith('\'');
+
+  if (!startsWithDouble && !startsWithSingle) return trimmed;
+  return trimmed.slice(1, -1).trim();
 }
 
 function readPayload(flags, command) {

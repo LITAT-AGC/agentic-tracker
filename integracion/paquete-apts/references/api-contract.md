@@ -54,12 +54,12 @@ La tabla refleja campos obligatorios a nivel de API. El cliente/CLI oficial pued
 | Campo | Operaciones |
 | --- | --- |
 | `project_url` | `register_task`, `create_backlog_item`, `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` |
-| `url` | `read_project_context`, `list_backlog_items`, `search_similar_bug_reports` |
+| `url` | `read_project_context`, `list_backlog_items`, `search_similar_bug_reports`, `get_project_constraints` |
 | `agent_name` | `register_task`, `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` |
 | `agent_email` | `register_task`, `update_task_status` |
 | `branch` | `log_agent_progress` |
 | `task_id` | `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` |
-| `backlog_item_id` | `register_task` cuando se enlaza ejecucion a backlog, `update_backlog_item`, `delete_backlog_item` |
+| `backlog_item_id` | `register_task` cuando se enlaza ejecucion a backlog, `get_backlog_item`, `update_backlog_item`, `delete_backlog_item` |
 
 ## Regla explicita para crear o reutilizar backlog
 
@@ -83,6 +83,7 @@ La tabla refleja campos obligatorios a nivel de API. El cliente/CLI oficial pued
 - Ruta: `/projects/tasks`
 - Body: objeto unico o array de objetos `register_task`
 - Comportamiento de reanudacion: cuando se envia `backlog_item_id` y ese backlog item ya tiene una `active_task_id` en estado `todo`, `in_progress` o `stalled`, APTS reanuda esa tarea en lugar de crear una duplicada.
+- Respuesta incluye: `task_id`, `status`, `resumed`, `previous_task_id`, `previous_status`, `backlog_item_id`.
 - Payload obligatorio: `project_url`, `title`, `agent_name`, `agent_email`
 - Body minimo:
 
@@ -102,6 +103,7 @@ La tabla refleja campos obligatorios a nivel de API. El cliente/CLI oficial pued
 - Query minima: `url`
 - Query params opcionales:
   - `backlog_status=<draft|needs_details|ready|in_progress|review|blocked|done|archived>`
+  - `include=<tasks|backlog|logs>` o lista separada por comas (`include=tasks,backlog`) para devolver solo secciones necesarias
   - `view=<full|compact>` para devolver resumenes compactos y omitir textos largos, contexto completo de tareas y `technical_details` completos de logs
 - Default actual para agentes e integraciones oficiales: `compact`.
 - Recomendacion para agentes: usar el default compacto y volver a leer en `view=full` solo cuando haga falta detalle bruto.
@@ -123,8 +125,11 @@ Ejemplo:
 - Ruta base: `/projects/backlog?url=<project_url>`
 - Query minima: `url`
 - Query params opcionales:
+  - `id=<uuid>` para filtrar un backlog item especifico
+  - `ids=<uuid,uuid,...>` para filtrar multiples backlog items
   - `status=<draft|needs_details|ready|in_progress|review|blocked|done|archived>`
   - `include_deleted=true` para incluir items eliminados por soft-delete
+  - `limit=<int>` y `offset=<int>` para paginacion basica
   - `view=<full|compact>` para listar solo campos resumen cuando todavia no necesitas descripciones completas ni criterios de aceptacion
 - Default actual para agentes e integraciones oficiales: `compact`.
 - Recomendacion para agentes: usar el default compacto durante loops de seleccion o deduplicacion y escalar a `full` solo para el item elegido o cuando falte contexto.
@@ -135,7 +140,65 @@ Ejemplo:
 {
   "url": "https://github.com/org/repo",
   "status": "ready",
+  "limit": 20,
+  "offset": 0,
   "view": "compact"
+}
+```
+
+### 2g. get_backlog_item
+
+- Metodo: `GET`
+- Ruta: `/backlog/:id`
+- Query params opcionales:
+  - `view=<full|compact>` (default `full`)
+  - `include_deleted=true`
+- Objetivo: obtener un unico backlog item completo sin listar todo el backlog.
+
+Ejemplo:
+
+```json
+{
+  "backlog_item_id": "11111111-1111-1111-1111-111111111111",
+  "view": "full"
+}
+```
+
+### 2h. get_task
+
+- Metodo: `GET`
+- Ruta: `/tasks/:id`
+- Query params opcionales:
+  - `view=<full|compact>` (default `full`)
+  - `limit=<int>` para limitar logs asociados (default 20)
+- Objetivo: obtener una tarea individual con estado/contexto, heartbeats recientes y logs asociados.
+
+Ejemplo:
+
+```json
+{
+  "task_id": "22222222-2222-2222-2222-222222222222",
+  "view": "full",
+  "limit": 20
+}
+```
+
+### 2i. get_project_constraints
+
+- Metodo: `GET`
+- Ruta: `/projects/:url/constraints`
+- Payload minimo en cliente/CLI oficial: `{}` (url auto-resuelta) o `{ "url": "https://github.com/org/repo" }`
+- Respuesta sugerida:
+
+```json
+{
+  "project_url": "https://github.com/org/repo",
+  "test_command": "npm test",
+  "lint_command": "npm run lint",
+  "typecheck_command": "npm run typecheck",
+  "framework": "express",
+  "language": "javascript",
+  "conventions": "..."
 }
 ```
 
@@ -333,6 +396,37 @@ $heartbeat | node .ia/apts/apts-cli.mjs heartbeat --stdin --pretty
 '@ | Set-Content -Path register-task.json
 
 Get-Content .\register-task.json | node .ia/apts/apts-cli.mjs register-task --stdin --pretty
+```
+
+`--json` robusto en PowerShell:
+
+- Soporta payload inline corto.
+- Soporta `--json @archivo.json` para evitar problemas de quoting en PS 5.1.
+- Para payloads largos o multilinea, mantener `--stdin` como metodo principal.
+
+Ejemplo `@archivo`:
+
+```powershell
+node .ia/apts/apts-cli.mjs get-task --json @task-query.json --pretty
+```
+
+Wrapper recomendado:
+
+```powershell
+function Invoke-AptsCli {
+  param(
+    [Parameter(Mandatory=$true)][string]$Command,
+    [Parameter(Mandatory=$true)][string]$JsonFile,
+    [switch]$Pretty
+  )
+
+  $args = @($Command, '--json', "@$JsonFile")
+  if ($Pretty.IsPresent) {
+    $args += '--pretty'
+  }
+
+  node .ia/apts/apts-cli.mjs @args
+}
 ```
 
 ## Troubleshooting PowerShell (sin sorpresas)

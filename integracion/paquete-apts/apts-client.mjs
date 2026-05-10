@@ -7,6 +7,7 @@ const TASK_STATUSES = ['todo', 'in_progress', 'review', 'done', 'stalled'];
 const BACKLOG_STATUSES = ['draft', 'needs_details', 'ready', 'in_progress', 'review', 'blocked', 'done', 'archived'];
 const BACKLOG_ITEM_TYPES = ['feature', 'bug', 'chore', 'research'];
 const RESPONSE_VIEWS = ['full', 'compact'];
+const PROJECT_CONTEXT_INCLUDE_SECTIONS = ['tasks', 'backlog', 'logs'];
 const DEFAULT_RESPONSE_VIEW = 'compact';
 const DEFAULT_EXECUTION_CONTEXT_FILE = path.join('.apts', 'execution-context.json');
 const STORED_EXECUTION_CONTEXT_KEYS = ['project_url', 'agent_name', 'agent_email', 'branch', 'task_id', 'backlog_item_id'];
@@ -22,6 +23,7 @@ const AUTO_FILL_FIELDS_BY_OPERATION = {
   register_task: ['project_url', 'agent_name', 'agent_email'],
   read_project_context: ['url'],
   list_backlog_items: ['url'],
+  get_project_constraints: ['url'],
   search_similar_bug_reports: ['url'],
   create_backlog_item: ['project_url'],
   update_task_status: ['task_id', 'project_url', 'agent_name', 'agent_email'],
@@ -349,6 +351,22 @@ function optionalInteger(payload, field, operationName) {
   return value;
 }
 
+function optionalNonNegativeInteger(payload, field, operationName) {
+  const value = optionalInteger(payload, field, operationName);
+  if (value === undefined) return undefined;
+
+  if (value < 0) {
+    throw invalidArgument(`${operationName} expects '${field}' to be a non-negative integer`, {
+      operation: operationName,
+      field,
+      expected: 'non-negative integer',
+      received: payload[field],
+    });
+  }
+
+  return value;
+}
+
 function optionalNumber(payload, field, operationName) {
   const original = payload[field];
   if (original === undefined) return undefined;
@@ -432,6 +450,84 @@ function optionalEnum(payload, field, allowedValues, operationName) {
   }
 
   return value;
+}
+
+function optionalEnumList(payload, field, allowedValues, operationName) {
+  const original = payload[field];
+  if (original === undefined) return undefined;
+
+  let rawValues;
+  if (Array.isArray(original)) {
+    rawValues = original;
+  } else if (typeof original === 'string') {
+    rawValues = original.split(',');
+  } else {
+    throw invalidArgument(`${operationName} expects '${field}' to be a comma-separated string or array`, {
+      operation: operationName,
+      field,
+      expected: 'comma-separated string or array',
+      received: original,
+    });
+  }
+
+  const normalizedValues = rawValues
+    .map((value) => normalizeString(value, { unwrapQuotes: true, lowercase: true }))
+    .filter((value) => typeof value === 'string' && value.length > 0);
+
+  if (!normalizedValues.length) {
+    return [];
+  }
+
+  const invalidValue = normalizedValues.find((value) => !allowedValues.includes(value));
+  if (invalidValue) {
+    throw invalidArgument(`${operationName} has invalid '${field}' value`, {
+      operation: operationName,
+      field,
+      expected: allowedValues,
+      received: invalidValue,
+    });
+  }
+
+  return [...new Set(normalizedValues)];
+}
+
+function optionalUuidList(payload, field, operationName) {
+  const original = payload[field];
+  if (original === undefined) return undefined;
+
+  let rawValues;
+  if (Array.isArray(original)) {
+    rawValues = original;
+  } else if (typeof original === 'string') {
+    rawValues = original.split(',');
+  } else {
+    throw invalidArgument(`${operationName} expects '${field}' to be a comma-separated string or array`, {
+      operation: operationName,
+      field,
+      expected: 'comma-separated string or array',
+      received: original,
+    });
+  }
+
+  const normalizedIds = rawValues
+    .map((value) => normalizeString(value, { unwrapQuotes: true }))
+    .filter((value) => typeof value === 'string' && value.length > 0);
+
+  if (!normalizedIds.length) {
+    return [];
+  }
+
+  const invalidId = normalizedIds.find((value) => !UUID_REGEX.test(value));
+  if (invalidId) {
+    throw invalidArgument(`${operationName} expects '${field}' to contain valid UUID values`, {
+      operation: operationName,
+      field,
+      expected: 'uuid[]',
+      received: invalidId,
+    });
+  }
+
+  return [...new Set(normalizedIds)];
 }
 
 function statusToErrorCode(statusCode) {
@@ -567,7 +663,9 @@ function enrichPayloadWithExecutionIdentity(payload, operationName) {
     }
   }
 
-  if ((operationName === 'read_project_context' || operationName === 'list_backlog_items')
+  if ((operationName === 'read_project_context'
+    || operationName === 'list_backlog_items'
+    || operationName === 'get_project_constraints')
     && !hasNonEmptyString(enriched.url, { unwrapQuotes: true })) {
     const fromPayloadProjectUrl = normalizeString(enriched.project_url, { unwrapQuotes: true });
     if (hasNonEmptyString(fromPayloadProjectUrl, { unwrapQuotes: true })) {
@@ -668,11 +766,14 @@ function validateReadProjectContextInput(urlOrOptions, limitOrOptions = 5) {
     const payload = prepareOperationPayload(urlOrOptions, operation, ['url']);
     assertPayloadObject(payload, operation);
 
+    const include = optionalEnumList(payload, 'include', PROJECT_CONTEXT_INCLUDE_SECTIONS, operation);
+
     return {
       url: requiredString(payload, 'url', operation, { unwrapQuotes: true }),
-      limit: optionalInteger(payload, 'limit', operation) ?? 5,
+      limit: optionalNonNegativeInteger(payload, 'limit', operation) ?? 5,
       backlog_status: optionalEnum(payload, 'backlog_status', BACKLOG_STATUSES, operation),
       view: optionalEnum(payload, 'view', RESPONSE_VIEWS, operation) ?? DEFAULT_RESPONSE_VIEW,
+      include: Array.isArray(include) && include.length ? include : undefined,
     };
   }
 
@@ -680,10 +781,18 @@ function validateReadProjectContextInput(urlOrOptions, limitOrOptions = 5) {
     ? limitOrOptions
     : { limit: limitOrOptions };
   const payload = prepareOperationPayload({ url: urlOrOptions }, operation, ['url']);
+  const include = optionalEnumList(
+    {
+      include: options.include ?? options.includes,
+    },
+    'include',
+    PROJECT_CONTEXT_INCLUDE_SECTIONS,
+    operation
+  );
 
   return {
     url: requiredString(payload, 'url', operation, { unwrapQuotes: true }),
-    limit: optionalInteger(options, 'limit', operation) ?? 5,
+    limit: optionalNonNegativeInteger(options, 'limit', operation) ?? 5,
     backlog_status: optionalEnum(
       {
         backlog_status: options.backlog_status ?? options.backlogStatus,
@@ -693,6 +802,7 @@ function validateReadProjectContextInput(urlOrOptions, limitOrOptions = 5) {
       operation
     ),
     view: optionalEnum(options, 'view', RESPONSE_VIEWS, operation) ?? DEFAULT_RESPONSE_VIEW,
+    include: Array.isArray(include) && include.length ? include : undefined,
   };
 }
 
@@ -703,11 +813,26 @@ function validateListBacklogItemsInput(urlOrOptions, statusOrOptions = null) {
     const payload = prepareOperationPayload(urlOrOptions, operation, ['url']);
     assertPayloadObject(payload, operation);
 
+    const id = optionalUuid(payload, 'id', operation);
+    const ids = optionalUuidList(payload, 'ids', operation);
+
+    if (id && ids?.length) {
+      throw invalidArgument(`${operation} accepts either 'id' or 'ids', not both`, {
+        operation,
+        expected: "one of 'id' or 'ids'",
+        received: { id, ids },
+      });
+    }
+
     return {
       url: requiredString(payload, 'url', operation, { unwrapQuotes: true }),
       status: optionalEnum(payload, 'status', BACKLOG_STATUSES, operation),
       include_deleted: optionalBoolean(payload, 'include_deleted', operation) ?? false,
       view: optionalEnum(payload, 'view', RESPONSE_VIEWS, operation) ?? DEFAULT_RESPONSE_VIEW,
+      id,
+      ids: Array.isArray(ids) && ids.length ? ids : undefined,
+      limit: optionalNonNegativeInteger(payload, 'limit', operation),
+      offset: optionalNonNegativeInteger(payload, 'offset', operation),
     };
   }
 
@@ -715,6 +840,22 @@ function validateListBacklogItemsInput(urlOrOptions, statusOrOptions = null) {
     ? statusOrOptions
     : { status: statusOrOptions };
   const payload = prepareOperationPayload({ url: urlOrOptions }, operation, ['url']);
+  const id = optionalUuid(options, 'id', operation);
+  const ids = optionalUuidList(
+    {
+      ids: options.ids,
+    },
+    'ids',
+    operation
+  );
+
+  if (id && ids?.length) {
+    throw invalidArgument(`${operation} accepts either 'id' or 'ids', not both`, {
+      operation,
+      expected: "one of 'id' or 'ids'",
+      received: { id, ids },
+    });
+  }
 
   return {
     url: requiredString(payload, 'url', operation, { unwrapQuotes: true }),
@@ -727,6 +868,62 @@ function validateListBacklogItemsInput(urlOrOptions, statusOrOptions = null) {
       operation
     ) ?? false,
     view: optionalEnum(options, 'view', RESPONSE_VIEWS, operation) ?? DEFAULT_RESPONSE_VIEW,
+    id,
+    ids: Array.isArray(ids) && ids.length ? ids : undefined,
+    limit: optionalNonNegativeInteger(options, 'limit', operation),
+    offset: optionalNonNegativeInteger(options, 'offset', operation),
+  };
+}
+
+function validateGetBacklogItemInput(inputOrBacklogId, maybeOptions) {
+  const operation = 'get_backlog_item';
+
+  const payload = typeof inputOrBacklogId === 'string'
+    ? {
+      ...(isPlainObject(maybeOptions) ? maybeOptions : {}),
+      backlog_item_id: inputOrBacklogId,
+    }
+    : inputOrBacklogId;
+
+  assertPayloadObject(payload, operation);
+
+  return {
+    backlog_item_id: requiredUuid(payload, 'backlog_item_id', operation),
+    view: optionalEnum(payload, 'view', RESPONSE_VIEWS, operation) ?? 'full',
+    include_deleted: optionalBoolean(payload, 'include_deleted', operation) ?? false,
+  };
+}
+
+function validateGetTaskInput(inputOrTaskId, maybeOptions) {
+  const operation = 'get_task';
+
+  const payload = typeof inputOrTaskId === 'string'
+    ? {
+      ...(isPlainObject(maybeOptions) ? maybeOptions : {}),
+      task_id: inputOrTaskId,
+    }
+    : inputOrTaskId;
+
+  assertPayloadObject(payload, operation);
+
+  return {
+    task_id: requiredUuid(payload, 'task_id', operation),
+    view: optionalEnum(payload, 'view', RESPONSE_VIEWS, operation) ?? 'full',
+    limit: optionalNonNegativeInteger(payload, 'limit', operation),
+  };
+}
+
+function validateGetProjectConstraintsInput(urlOrOptions) {
+  const operation = 'get_project_constraints';
+
+  const payload = typeof urlOrOptions === 'string'
+    ? { url: urlOrOptions }
+    : prepareOperationPayload(urlOrOptions, operation, ['url']);
+
+  assertPayloadObject(payload, operation);
+
+  return {
+    url: requiredString(payload, 'url', operation, { unwrapQuotes: true }),
   };
 }
 
@@ -1047,6 +1244,10 @@ async function readProjectContext(urlOrOptions, limitOrOptions = 5) {
     params.set('view', options.view);
   }
 
+  if (Array.isArray(options.include) && options.include.length) {
+    params.set('include', options.include.join(','));
+  }
+
   return request(`/projects/context?${params.toString()}`, {
     method: 'GET',
   });
@@ -1069,7 +1270,69 @@ async function listBacklogItems(urlOrOptions, statusOrOptions = null) {
     params.set('view', options.view);
   }
 
+  if (options.id) {
+    params.set('id', options.id);
+  }
+
+  if (Array.isArray(options.ids) && options.ids.length) {
+    params.set('ids', options.ids.join(','));
+  }
+
+  if (typeof options.limit === 'number') {
+    params.set('limit', String(options.limit));
+  }
+
+  if (typeof options.offset === 'number') {
+    params.set('offset', String(options.offset));
+  }
+
   return request(`/projects/backlog?${params.toString()}`, {
+    method: 'GET',
+  });
+}
+
+async function getBacklogItem(inputOrBacklogId, maybeOptions) {
+  const options = validateGetBacklogItemInput(inputOrBacklogId, maybeOptions);
+  const params = new URLSearchParams();
+
+  if (options.view) {
+    params.set('view', options.view);
+  }
+
+  if (options.include_deleted) {
+    params.set('include_deleted', 'true');
+  }
+
+  const query = params.toString();
+  const suffix = query ? `?${query}` : '';
+  return request(`/backlog/${options.backlog_item_id}${suffix}`, {
+    method: 'GET',
+  });
+}
+
+async function getTask(inputOrTaskId, maybeOptions) {
+  const options = validateGetTaskInput(inputOrTaskId, maybeOptions);
+  const params = new URLSearchParams();
+
+  if (options.view) {
+    params.set('view', options.view);
+  }
+
+  if (typeof options.limit === 'number') {
+    params.set('limit', String(options.limit));
+  }
+
+  const query = params.toString();
+  const suffix = query ? `?${query}` : '';
+  return request(`/tasks/${options.task_id}${suffix}`, {
+    method: 'GET',
+  });
+}
+
+async function getProjectConstraints(urlOrOptions = {}) {
+  const options = validateGetProjectConstraintsInput(urlOrOptions);
+  persistExecutionContextFromPayload({ project_url: options.url });
+  return request(`/projects/${encodeURIComponent(options.url)}/constraints`, {
     method: 'GET',
   });
 }
@@ -1271,7 +1534,10 @@ export {
   clearStoredExecutionContext,
   createBacklogItem,
   deleteBacklogItem,
+  getBacklogItem,
   getExecutionContext,
+  getProjectConstraints,
+  getTask,
   heartbeat,
   listBacklogItems,
   logAgentProgress,

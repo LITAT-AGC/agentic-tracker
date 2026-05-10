@@ -266,6 +266,46 @@ async function runBlockerAndResumeRegression({ projectUrl, agentName, agentEmail
   assert(logAfterResume.data.success === true, 'log after resume should succeed');
 }
 
+async function runTargetedReadEndpointsRegression({ projectUrl, backlogIds, taskIds }) {
+  const backlogById = await request(`/backlog/${backlogIds[0]}`);
+  assert(backlogById.data.backlog_item?.id === backlogIds[0], 'get backlog by id should return requested item');
+  assert(backlogById.data.backlog_item?.description !== undefined, 'get backlog by id should default to full view');
+
+  const backlogByIdCompact = await request(`/backlog/${backlogIds[0]}?view=compact`);
+  assert(backlogByIdCompact.data.backlog_item?.description === undefined, 'compact backlog by id should omit description');
+  assert(backlogByIdCompact.data.backlog_item?.text_excerpt, 'compact backlog by id should include text_excerpt');
+
+  const backlogFilterById = await request(`/projects/backlog?url=${encodeURIComponent(projectUrl)}&id=${backlogIds[0]}`);
+  assert((backlogFilterById.data.backlog || []).length === 1, 'list backlog with id should return one item');
+  assert(backlogFilterById.data.backlog[0]?.id === backlogIds[0], 'list backlog with id should return matching item');
+
+  const backlogFilterByIds = await request(`/projects/backlog?url=${encodeURIComponent(projectUrl)}&ids=${backlogIds.join(',')}`);
+  assert((backlogFilterByIds.data.backlog || []).length === backlogIds.length, 'list backlog with ids should return requested items');
+
+  const backlogPaginated = await request(`/projects/backlog?url=${encodeURIComponent(projectUrl)}&ids=${backlogIds.join(',')}&limit=1&offset=1`);
+  assert((backlogPaginated.data.backlog || []).length === 1, 'list backlog pagination should respect limit/offset');
+
+  const taskById = await request(`/tasks/${taskIds[0]}`);
+  assert(taskById.data.task?.id === taskIds[0], 'get task should return requested task');
+  assert(Array.isArray(taskById.data.logs), 'get task should include logs array');
+  assert(Array.isArray(taskById.data.recent_heartbeats), 'get task should include recent_heartbeats array');
+
+  const contextBacklogOnly = await request(`/projects/context?url=${encodeURIComponent(projectUrl)}&include=backlog`);
+  assert(Array.isArray(contextBacklogOnly.data.backlog), 'context include=backlog should include backlog');
+  assert(contextBacklogOnly.data.tasks === undefined, 'context include=backlog should omit tasks');
+  assert(contextBacklogOnly.data.logs === undefined, 'context include=backlog should omit logs');
+
+  const contextTasksAndLogs = await request(`/projects/context?url=${encodeURIComponent(projectUrl)}&include=tasks,logs`);
+  assert(Array.isArray(contextTasksAndLogs.data.tasks), 'context include=tasks,logs should include tasks');
+  assert(Array.isArray(contextTasksAndLogs.data.logs), 'context include=tasks,logs should include logs');
+  assert(contextTasksAndLogs.data.backlog === undefined, 'context include=tasks,logs should omit backlog');
+
+  const constraints = await request(`/projects/${encodeURIComponent(projectUrl)}/constraints`);
+  assert(constraints.data.project_url === projectUrl, 'project constraints should include project_url');
+  assert(Object.prototype.hasOwnProperty.call(constraints.data, 'test_command'), 'project constraints should include test_command field');
+  assert(Object.prototype.hasOwnProperty.call(constraints.data, 'conventions'), 'project constraints should include conventions field');
+}
+
 async function runBatchSmoke() {
   const seed = Date.now();
   const projectUrl = `https://github.com/agentic-org/apts-batch-${seed}`;
@@ -424,6 +464,12 @@ async function runBatchSmoke() {
     taskId: taskIds[0],
   });
 
+  await runTargetedReadEndpointsRegression({
+    projectUrl,
+    backlogIds,
+    taskIds,
+  });
+
   const updateBacklogBatch = await request('/backlog', {
     method: 'PATCH',
     body: [
@@ -457,6 +503,7 @@ async function runBatchSmoke() {
 
   console.log('Batch success checks: OK');
   console.log('Strict all-or-nothing rollback check: OK');
+  console.log('Targeted read endpoint checks: OK');
   console.log('Blocker/log and resume regressions: OK');
   console.log('--- Batch Smoke Completed ---');
 }
