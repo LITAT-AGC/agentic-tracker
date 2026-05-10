@@ -37,6 +37,25 @@ Use a workspace-local installation strategy for APTS integration artifacts:
 - If a runtime needs its own discovery path, add a thin adapter at `.github/skills/apts/`, `.agents/skills/apts/`, or `.claude/skills/apts/` that delegates to `.ia/apts/`.
 - Avoid user-global skill installation for project integrations to prevent cross-project config leakage and version drift.
 
+## OpenCode process plugins (recommended)
+
+If the client project runs agents through OpenCode with a synchronous `bash` tool (common on Windows with Git Bash), install both official process plugins to avoid hanging server commands during validation runs:
+
+- `@zenobius/opencode-background` (tested with `v0.1.0-alpha.2`)
+- `opencode-pty` (tested with `v0.3.4`)
+
+Recommended `opencode.json` snippet:
+
+```json
+{
+	"$schema": "https://opencode.ai/config.json",
+	"plugin": [
+		"@zenobius/opencode-background",
+		"opencode-pty"
+	]
+}
+```
+
 ```md
 You are a development agent integrated with APTS.
 

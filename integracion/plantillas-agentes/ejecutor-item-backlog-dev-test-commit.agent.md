@@ -55,14 +55,39 @@ The orchestrator should pass at least:
 - Prefer entries that include timestamp, backlog item id, task id, branch, event, summary, files changed, commands run, and APTS sync status.
 - Never write `APTS_API_KEY` or any other secret to the local log.
 
-## Validation Policy
-- Prefer the most relevant targeted validation first.
-- Before commit, run the strongest practical validation available for the touched slice.
-- If validation requires one or more servers (for example backend API, Playwright web server, or app dev server), start them in background mode (non-blocking) so tests can run in parallel terminal steps.
-- Never block the workflow by leaving required test servers in foreground mode while expecting subsequent commands in the same run.
-- Confirm the server is ready before running tests, and stop background servers after validation completes.
-- If `npm test` is not a valid command for this repository slice, do not invent success; run the best available targeted validation and report it explicitly.
-- If any required validation fails, do not commit.
+## Gestion de Procesos (CRITICO)
+- NUNCA uses `&` ni `nohup` para dejar un proceso en segundo plano desde bash. El tool bash es sincrono y puede quedar colgado incluso con `&`.
+- SIEMPRE usa `createBackgroundProcess` (plugin `@zenobius/opencode-background`) para levantar servidores:
+
+```txt
+createBackgroundProcess
+command: node apps/agent/deploy-agent-runtime.js
+name: agent-server
+tags: "agent", "test"
+global: false
+```
+
+- Usa `listBackgroundProcesses` para verificar que el servidor siga activo.
+- Usa `killProcesses` con tags para detener servidores despues de los tests: `killProcesses tags: ["agent"]`.
+- Alternativa: `pty_spawn` (plugin `opencode-pty`) para procesos que requieren inspeccion de logs:
+
+```txt
+pty_spawn
+command: node
+args: "apps/agent/deploy-agent-runtime.js"
+title: "Agent Server"
+```
+
+Luego usa `pty_read`, `pty_write` con `\x03` (Ctrl+C), o `pty_kill`.
+
+## Politica de Validacion
+- Prioriza primero la validacion mas relevante para el slice tocado.
+- Antes de commitear, ejecuta la validacion mas fuerte y practica para el cambio.
+- Los servidores DEBEN iniciarse con `createBackgroundProcess` o `pty_spawn`, nunca con bash en crudo.
+- Confirma que el servidor este listo (por ejemplo consultando `/health`) antes de correr tests.
+- Deten los servidores con `killProcesses` o `pty_kill` al finalizar la validacion.
+- Si `npm test` no existe para ese slice del repositorio, no inventes exito: corre la mejor validacion disponible y reportala de forma explicita.
+- Si falla cualquier validacion requerida, no hagas commit.
 
 ## Commit Policy
 - Create exactly one atomic commit per backlog item.
