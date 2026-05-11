@@ -1951,10 +1951,18 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.34';
+const integrationManifestSchemaVersion = '2.0.35';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.35',
+    date: '2026-05-11',
+    changes: [
+      'APTS bugfix intake policy now requires read-only triage first and explicit user confirmation before creating/updating bug backlog items or registering bugfix execution tasks.',
+      'Downloadable intake agent templates, VS Code adapter, skills contract, and base guidelines were updated so chat false positives do not get registered as tracked bugs without operator approval.'
+    ]
+  },
   {
     version: '2.0.34',
     date: '2026-05-11',
@@ -2344,8 +2352,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts_skills.json'),
     fileName: 'apts_skills.json',
     contentType: 'application/json; charset=utf-8',
-    artifactVersion: '2.0.26',
-    updatedInSchemaVersion: '2.0.26',
+    artifactVersion: '2.0.35',
+    updatedInSchemaVersion: '2.0.35',
     kind: 'skills_contract',
     recommended: true,
     syncAction: 'overwrite',
@@ -2357,8 +2365,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'SKILL.md'),
     fileName: 'SKILL.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.34',
-    updatedInSchemaVersion: '2.0.34',
+    artifactVersion: '2.0.35',
+    updatedInSchemaVersion: '2.0.35',
     kind: 'skill_package',
     recommended: false,
     syncAction: 'overwrite',
@@ -2370,8 +2378,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-agent-guidelines.md'),
     fileName: 'apts-agent-guidelines.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.34',
-    updatedInSchemaVersion: '2.0.34',
+    artifactVersion: '2.0.35',
+    updatedInSchemaVersion: '2.0.35',
     kind: 'agent_guidelines',
     recommended: true,
     syncAction: 'overwrite',
@@ -2414,13 +2422,13 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'plantillas-agentes', 'intake-bugfix-apts.agent.md'),
     fileName: 'intake-bugfix-apts.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.33',
-    updatedInSchemaVersion: '2.0.33',
+    artifactVersion: '2.0.35',
+    updatedInSchemaVersion: '2.0.35',
     kind: 'agent_template',
     recommended: false,
     syncAction: 'overwrite',
     deprecatedFilenames: [],
-    description: 'Bug intake agent template that creates or reuses a tracked APTS bug item before implementation starts.'
+    description: 'Bug intake agent template that triages first and registers a tracked APTS bug only after explicit user confirmation.'
   },
   vscode_orchestrator_agent_adapter: {
     route: `${publicIntegrationBasePath}/agentes/vscode/apts-backlog-orchestrator.agent.md`,
@@ -2467,8 +2475,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'runtime-adapters', 'vscode', 'agents', 'apts-bugfix-intake.agent.md'),
     fileName: 'apts-bugfix-intake.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.33',
-    updatedInSchemaVersion: '2.0.33',
+    artifactVersion: '2.0.35',
+    updatedInSchemaVersion: '2.0.35',
     kind: 'agent_runtime_adapter',
     recommended: true,
     syncAction: 'overwrite',

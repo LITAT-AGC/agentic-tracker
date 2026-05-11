@@ -153,18 +153,19 @@ Mandatory rules:
 0.1.2. In VS Code on Windows, route tests through WSL terminals/tasks and route non-test operations through PowerShell terminals/tasks.
 0.2. Invoke APTS operations using contract-first JSON object payloads (for example `{"task_id":"...","status":"review",...}`), even when a legacy positional signature is still supported for backward compatibility.
 0.3. If `APTS Bugfix Intake` is installed in the client project, invoke it first for new bug, error, regression, or broken-behavior requests coming from chat.
-0.4. If the current chat asks to fix a bug, investigate an error, or resolve a regression or broken behavior, first inspect APTS backlog for an existing matching non-deleted bug item.
+0.4. If the current chat asks to fix a bug, investigate an error, or resolve a regression or broken behavior, run read-only triage first: inspect APTS backlog for an existing matching non-deleted bug item and verify that the symptom is likely a real defect.
 0.4.1. Prefer `search_similar_bug_reports` with the symptom summary before deciding whether a new `bug` item is needed.
-0.5. If no matching bug item exists, create it with `create_backlog_item` before implementation starts, using `item_type` = `bug` and capturing the symptom, expected behavior, observed behavior, and any reproduction evidence available from the chat.
-0.6. When the runtime exposes a stable conversation or thread identifier, store `source_kind` = `chat_request` and persist that identifier in `source_ref` for the bug backlog item.
-0.7. Do not start direct implementation or register execution work for a new defect request until the work is represented in APTS backlog and the task can reference that `backlog_item_id`.
+0.5. If explicit user confirmation to fix is missing, do not run mutating intake writes (`create_backlog_item`, `update_backlog_item`, `register_task`); return a confirmation request and stop before registration.
+0.6. After explicit user confirmation, if no matching bug item exists, create it with `create_backlog_item` using `item_type` = `bug` and capture symptom, expected behavior, observed behavior, and reproduction evidence from chat.
+0.7. When the runtime exposes a stable conversation or thread identifier, store `source_kind` = `chat_request` and persist that identifier in `source_ref` for the tracked bug backlog item.
+0.8. Do not start direct implementation or register execution work for a new defect request until the user confirms the fix intent, the work is represented in APTS backlog, and the task can reference that `backlog_item_id`.
 1. Read the project backlog with `list_backlog_items` and select an item suitable for execution.
 2. Call `register_task` with `backlog_item_id` for execution work and always use the returned `task_id`; this may resume interrupted work instead of creating a duplicate task.
 3. Before modifying code, use `read_project_context`.
 4. While working, send `heartbeat` periodically.
 5. Each important milestone must be recorded with `log_agent_progress`.
 6. If you cannot continue, use `report_blocker` and stop work.
-7. If you are refining scope, planning, or capturing a new defect request from chat, use `create_backlog_item` or `update_backlog_item` instead of inventing work outside APTS.
+7. If you are refining scope or planning, use `create_backlog_item` or `update_backlog_item` only when the operator already confirmed registration for that work item; otherwise keep intake read-only and request confirmation.
 8. At completion, set `review` first; use `done` only from review and only when recent execution activity exists.
 9. Never invent `project_url`, `agent_name`, or `branch`; let the official client/CLI auto-resolve them from env/local context/Git or provide them explicitly with real values.
 10. If `APTS_API_KEY` is missing, stop operational integration, request it from the operator, and continue only after it is stored as an environment secret.
@@ -198,7 +199,7 @@ When you use the official client/CLI, missing identity fields are auto-filled fr
 
 - Reuse an item only when an active backlog item already describes exactly the same scope.
 - If no active item matches exactly, create a new backlog item before execution.
-- For new bug, error, or regression requests from chat, look for an existing non-deleted `bug` item first, then create one only if no matching item exists.
+- For new bug, error, or regression requests from chat, look for an existing non-deleted `bug` item first, then create or update only after explicit user confirmation to fix.
 - For small chores such as documentation adjustments, follow the same exact-scope rule instead of guessing based on size alone.
 
 ### Happy Path

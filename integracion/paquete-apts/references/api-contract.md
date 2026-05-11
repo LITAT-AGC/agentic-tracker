@@ -67,7 +67,9 @@ La tabla refleja campos obligatorios a nivel de API. El cliente/CLI oficial pued
 
 - Si no hay un backlog item activo que describa exactamente el cambio actual, crear uno nuevo.
 - Si ya existe un item activo que cubre exactamente el mismo alcance, reutilizarlo.
-- Para bugs, errores o regresiones reportadas por chat, primero buscar un item `bug` no eliminado equivalente.
+- Para bugs, errores o regresiones reportadas por chat, primero ejecutar triage en modo lectura para validar que sea un defecto real y buscar un item `bug` no eliminado equivalente.
+- Si no hay confirmacion explicita del usuario para arreglar ese bug detectado, no crear ni registrar trabajo todavia; devolver confirmacion pendiente.
+- Crear/actualizar el item `bug` y registrar tarea de ejecucion solo despues de la confirmacion explicita del usuario.
 - Para chores pequenos, reutilizar solo cuando el item activo ya cubra exactamente ese ajuste documental o de mantenimiento.
 
 ## Endpoints

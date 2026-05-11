@@ -96,13 +96,15 @@ Task close note: prefer `review` first and promote to `done` only after review p
 
 - If a user chat asks to fix a bug, investigate an error, or resolve a regression or broken behavior, first inspect APTS backlog for an existing matching non-deleted bug item.
 - If the client runtime supports custom agents, install and invoke `APTS Bugfix Intake` as the first entrypoint for those defect requests.
-- If a matching bug item already exists, reuse it instead of creating a duplicate defect entry.
+- Run read-only triage first and determine whether there is enough evidence that this is a real defect rather than a question or false positive.
 - Before creating a new bug item, prefer `search_similar_bug_reports` with the defect symptom to detect semantic duplicates.
-- If no matching bug item exists, create it in APTS before implementation starts using `create_backlog_item` with `item_type: "bug"`.
-- Capture the symptom, expected behavior, observed behavior, and any reproduction evidence available from the chat in that backlog item.
+- Do not run mutating APTS calls for defect intake (`create_backlog_item`, `update_backlog_item`, `register_task`) until the user explicitly confirms they want to fix the detected bug.
+- After explicit confirmation, if a matching bug item already exists, reuse it instead of creating a duplicate defect entry.
+- After explicit confirmation, if no matching bug item exists, create it in APTS using `create_backlog_item` with `item_type: "bug"`.
+- Capture the symptom, expected behavior, observed behavior, and any reproduction evidence available from the chat in the tracked bug item.
 - When the runtime exposes a stable conversation or thread identifier, store `source_kind: "chat_request"` and persist that identifier in `source_ref`.
-- If `APTS Bugfix Intake` is not installed, apply the same backlog-first defect intake policy manually from the general agent.
-- Do not begin direct implementation until the execution task can reference the tracked bug backlog item.
+- If `APTS Bugfix Intake` is not installed, apply the same confirm-before-write intake policy manually from the general agent.
+- Do not begin direct implementation until the user confirms, the bug is represented in backlog, and the execution task can reference that tracked `backlog_item_id`.
 
 ## Expected result
 
@@ -112,3 +114,4 @@ The client project ends up with:
 - a reusable HTTP layer and optional shell entrypoint,
 - runtime-aware process management guidance for server-based validations, including OpenCode plugin recommendations only when that runtime uses synchronous bash,
 - and an operational instruction so agents report work consistently, including creating or reusing bug backlog items before implementing chat-triggered defect fixes.
+- and an operational instruction so agents report work consistently, including triaging possible bug reports in read-only mode and registering backlog bug items only after explicit user confirmation.

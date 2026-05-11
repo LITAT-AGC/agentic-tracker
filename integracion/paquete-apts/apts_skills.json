@@ -284,7 +284,7 @@
     },
     {
       "name": "create_backlog_item",
-      "description": "Create a managed backlog item for a project. Minimum payload in official client/CLI: title (project_url auto-resolves from env/local managed context/Git when omitted). Mandatory before direct implementation when a chat introduces a new bug, error, or regression not yet tracked in APTS; use item_type 'bug' for defect intake.",
+      "description": "Create a managed backlog item for a project. Minimum payload in official client/CLI: title (project_url auto-resolves from env/local managed context/Git when omitted). For chat-triggered bug intake, create or update bug items only after read-only triage confirms a real defect and the user explicitly confirms they want to fix it; use item_type 'bug' for defect intake.",
       "parameters": {
         "oneOf": [
           {
