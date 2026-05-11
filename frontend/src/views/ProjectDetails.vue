@@ -35,6 +35,22 @@
     </div>
 
     <div v-else-if="selectedProject" class="space-y-8">
+      <div class="flex items-center gap-1 p-1 rounded-xl bg-gray-800/40 border border-gray-700/50 w-fit">
+        <button
+          @click="activeTab = 'execution'"
+          :class="['px-4 py-2 rounded-lg text-sm font-semibold transition-colors', activeTab === 'execution' ? 'bg-indigo-500/20 text-indigo-200 border border-indigo-500/30' : 'text-gray-400 hover:text-gray-200']"
+        >
+          Ejecución
+        </button>
+        <button
+          @click="activeTab = 'semantic'"
+          :class="['px-4 py-2 rounded-lg text-sm font-semibold transition-colors', activeTab === 'semantic' ? 'bg-cyan-500/20 text-cyan-200 border border-cyan-500/30' : 'text-gray-400 hover:text-gray-200']"
+        >
+          Semántico
+        </button>
+      </div>
+
+      <div v-if="activeTab === 'semantic'" class="space-y-8">
       <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1.35fr)] gap-6">
         <section class="rounded-2xl border border-cyan-500/20 bg-cyan-500/5 p-5 space-y-4">
           <div class="flex flex-wrap items-start justify-between gap-3">
@@ -238,7 +254,9 @@
           </div>
         </section>
       </div>
+      </div>
 
+      <div v-if="activeTab === 'execution'" class="space-y-8">
       <div>
         <div class="flex items-center space-x-2 mb-4">
           <div class="w-1 h-5 bg-indigo-500 rounded-full"></div>
@@ -542,6 +560,7 @@
           </DataTable>
         </div>
       </div>
+      </div>
     </div>
 
     <Dialog
@@ -674,6 +693,7 @@ import { apiFetchJson, getApiErrorMessage } from '../config/api';
 const route = useRoute();
 const router = useRouter();
 
+const activeTab = ref('execution');
 const selectedProject = ref(null);
 const loadingProject = ref(true);
 const loadError = ref(null);
@@ -754,6 +774,7 @@ const getInitialBacklogForm = () => ({
 });
 
 const resetDetails = () => {
+  activeTab.value = 'execution';
   projectTasks.value = [];
   projectBacklog.value = [];
   projectLogs.value = [];
