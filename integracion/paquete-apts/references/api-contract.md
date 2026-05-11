@@ -15,6 +15,8 @@ Authorization: Bearer <APTS_API_KEY>
 
 ## Resolucion de identidad
 
+Regla anti-friccion: cuando uses el cliente/CLI oficial, no hagas pre-pasos manuales para obtener identidad Git en cada llamada. Envia payload minimo y deja que el CLI autocomplemente.
+
 En cliente/CLI oficial APTS, los campos de identidad se autocompletan cuando faltan en el payload usando este orden: variables de entorno -> contexto local gestionado -> Git local.
 
 ```env
@@ -85,14 +87,12 @@ La tabla refleja campos obligatorios a nivel de API. El cliente/CLI oficial pued
 - Comportamiento de reanudacion: cuando se envia `backlog_item_id` y ese backlog item ya tiene una `active_task_id` en estado `todo`, `in_progress` o `stalled`, APTS reanuda esa tarea en lugar de crear una duplicada.
 - Respuesta incluye: `task_id`, `status`, `resumed`, `previous_task_id`, `previous_status`, `backlog_item_id`.
 - Payload obligatorio: `project_url`, `title`, `agent_name`, `agent_email`
+- Payload minimo recomendado con cliente/CLI oficial: solo `title` (los campos de identidad se autocompletan).
 - Body minimo:
 
 ```json
 {
-  "project_url": "https://github.com/org/repo",
-  "title": "Implementar autenticacion",
-  "agent_name": "Copilot",
-  "agent_email": "agent@example.com"
+  "title": "Implementar autenticacion"
 }
 ```
 
@@ -101,6 +101,7 @@ La tabla refleja campos obligatorios a nivel de API. El cliente/CLI oficial pued
 - Metodo: `GET`
 - Ruta: `/projects/context?url=<project_url>&limit=5`
 - Query minima: `url`
+- Query minima recomendada con cliente/CLI oficial: `{}` (url autocompletada).
 - Query params opcionales:
   - `backlog_status=<draft|needs_details|ready|in_progress|review|blocked|done|archived>`
   - `include=<tasks|backlog|logs>` o lista separada por comas (`include=tasks,backlog`) para devolver solo secciones necesarias

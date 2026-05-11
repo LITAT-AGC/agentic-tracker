@@ -348,7 +348,7 @@ Regla de backlog:
 
 Happy path operativo:
 
-1. Resolver `project_url`, `agent_name`, `agent_email` y `branch` desde Git.
+1. Configurar `APTS_BASE_URL` y `APTS_API_KEY`; luego usar el CLI/cliente oficial con autofill (sin resolver identidad manualmente en cada llamada).
 2. Llamar `list_backlog_items` y decidir si reutilizas o creas item.
 3. Llamar `register_task` y conservar `task_id`.
 4. Llamar `read_project_context` antes de editar.
@@ -361,37 +361,22 @@ Payloads minimos listos para copiar:
 ```json
 {
   "create_backlog_item": {
-    "project_url": "https://github.com/org/repo",
     "title": "Documentar payloads minimos de APTS"
   },
   "register_task": {
-    "project_url": "https://github.com/org/repo",
-    "title": "Documentar payloads minimos de APTS",
-    "agent_name": "Copilot",
-    "agent_email": "copilot@example.com"
+    "title": "Documentar payloads minimos de APTS"
   },
   "read_project_context": {
-    "url": "https://github.com/org/repo",
     "limit": 5
   },
   "heartbeat": {
-    "task_id": "22222222-2222-2222-2222-222222222222",
-    "agent_name": "Copilot",
-    "project_url": "https://github.com/org/repo"
+    "task_id": "22222222-2222-2222-2222-222222222222"
   },
   "log_agent_progress": {
-    "task_id": "22222222-2222-2222-2222-222222222222",
-    "project_url": "https://github.com/org/repo",
-    "agent_name": "Copilot",
-    "branch": "main",
     "message": "Se documentaron ejemplos listos para copiar."
   },
   "update_task_status": {
-    "task_id": "22222222-2222-2222-2222-222222222222",
-    "status": "review",
-    "project_url": "https://github.com/org/repo",
-    "agent_name": "Copilot",
-    "agent_email": "copilot@example.com"
+    "status": "review"
   }
 }
 ```

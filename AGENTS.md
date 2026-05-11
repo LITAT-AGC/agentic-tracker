@@ -76,7 +76,7 @@ If there is no active backlog item that describes exactly the change you are abo
 
 ### Happy Path
 
-1. Ensure identity context is available: official client/CLI auto-resolves `project_url`, `agent_name`, `agent_email`, and `branch` from env/local context/Git.
+1. Ensure `APTS_BASE_URL` and `APTS_API_KEY` are available, then use official client/CLI with minimum payloads and auto-resolved identity/context (no manual identity pre-flight by default).
 2. List backlog and decide whether to reuse an existing item or create a new one.
 3. Call `register_task` and keep the returned `task_id`.
 4. Call `read_project_context` before editing.
@@ -92,7 +92,6 @@ These examples use the public contract shape exposed to clients and the official
 
 ```json
 {
-	"project_url": "https://github.com/org/repo",
 	"title": "Document APTS minimum command payloads",
 	"description": "Add required-field summaries, examples, and troubleshooting for APTS commands.",
 	"acceptance_criteria": "AGENTS.md and README include copy-ready examples for the base APTS workflow.",
@@ -106,10 +105,7 @@ These examples use the public contract shape exposed to clients and the official
 
 ```json
 {
-	"project_url": "https://github.com/org/repo",
 	"title": "Document APTS minimum command payloads",
-	"agent_name": "Copilot",
-	"agent_email": "copilot@example.com",
 	"context": "Improve operator guidance for APTS contract-first commands.",
 	"backlog_item_id": "11111111-1111-1111-1111-111111111111"
 }
@@ -119,7 +115,6 @@ These examples use the public contract shape exposed to clients and the official
 
 ```json
 {
-	"url": "https://github.com/org/repo",
 	"limit": 5,
 	"backlog_status": "in_progress"
 }
@@ -129,9 +124,7 @@ These examples use the public contract shape exposed to clients and the official
 
 ```json
 {
-	"task_id": "22222222-2222-2222-2222-222222222222",
-	"agent_name": "Copilot",
-	"project_url": "https://github.com/org/repo"
+	"task_id": "22222222-2222-2222-2222-222222222222"
 }
 ```
 
@@ -139,10 +132,6 @@ These examples use the public contract shape exposed to clients and the official
 
 ```json
 {
-	"task_id": "22222222-2222-2222-2222-222222222222",
-	"project_url": "https://github.com/org/repo",
-	"agent_name": "Copilot",
-	"branch": "main",
 	"message": "Added explicit required-field examples to AGENTS.md.",
 	"technical_details": {
 		"files_modified": [
@@ -160,11 +149,7 @@ These examples use the public contract shape exposed to clients and the official
 
 ```json
 {
-	"task_id": "22222222-2222-2222-2222-222222222222",
-	"status": "review",
-	"project_url": "https://github.com/org/repo",
-	"agent_name": "Copilot",
-	"agent_email": "copilot@example.com"
+	"status": "review"
 }
 ```
 
