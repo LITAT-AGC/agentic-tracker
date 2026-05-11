@@ -316,6 +316,15 @@ Tienes dos opciones validas.
 
 Si quieres una base lista para descargar, copia directamente la carpeta `integracion/paquete-apts/` de este repositorio al proyecto cliente y reutiliza sus assets.
 
+Para VS Code en Windows, si quieres replicar el routing de shell (tests por WSL y operaciones no-test por PowerShell), toma como base `docs/vscode-tasks.windows.example.json` y copialo al proyecto cliente como `.vscode/tasks.json`.
+
+Regla recomendada:
+
+- ejecutar tests con tareas etiquetadas como `tests:wsl`;
+- ejecutar operaciones no-test con tareas etiquetadas como `ops:powershell`.
+
+Nota: en este repositorio `.vscode/` esta ignorado por git, por eso la plantilla versionable vive en `docs/`.
+
 Para el cliente HTTP exportable:
 
 - usa `apts-client.js` si el proyecto cliente corre en CommonJS,

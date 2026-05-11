@@ -1,0 +1,66 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "ops:powershell",
+      "type": "shell",
+      "command": "${input:opsCommand}",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "shell": {
+          "executable": "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+          "args": [
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command"
+          ]
+        }
+      }
+    },
+    {
+      "label": "tests:wsl",
+      "type": "shell",
+      "command": "cd \"$(wslpath '${workspaceFolder}')\" && ${input:testCommand}",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "shell": {
+          "executable": "C:\\Windows\\System32\\wsl.exe",
+          "args": [
+            "bash",
+            "-lc"
+          ]
+        }
+      }
+    },
+    {
+      "label": "tests:e2e:playwright:wsl",
+      "type": "shell",
+      "command": "cd \"$(wslpath '${workspaceFolder}')\" && cd frontend && npx playwright test",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "shell": {
+          "executable": "C:\\Windows\\System32\\wsl.exe",
+          "args": [
+            "bash",
+            "-lc"
+          ]
+        }
+      }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "opsCommand",
+      "type": "promptString",
+      "description": "PowerShell command for non-test operations",
+      "default": "git status"
+    },
+    {
+      "id": "testCommand",
+      "type": "promptString",
+      "description": "WSL command for test execution",
+      "default": "npm test"
+    }
+  ]
+}
