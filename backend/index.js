@@ -1951,10 +1951,18 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.32';
+const integrationManifestSchemaVersion = '2.0.33';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.33',
+    date: '2026-05-11',
+    changes: [
+      'Integration guidance and downloadable agent templates now enforce a CLI-first protocol policy: avoid manual Git identity discovery in normal flows and prefer minimum payloads with official client/CLI auto-fill.',
+      'Operational docs now clarify that protocol fields should be inspected only when required-field failures occur (for example via show-execution-context), reducing setup overhead for APTS-integrated clients.'
+    ]
+  },
   {
     version: '2.0.32',
     date: '2026-05-10',
@@ -2341,8 +2349,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'SKILL.md'),
     fileName: 'SKILL.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.29',
-    updatedInSchemaVersion: '2.0.29',
+    artifactVersion: '2.0.33',
+    updatedInSchemaVersion: '2.0.33',
     kind: 'skill_package',
     recommended: false,
     syncAction: 'overwrite',
@@ -2354,8 +2362,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-agent-guidelines.md'),
     fileName: 'apts-agent-guidelines.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.32',
-    updatedInSchemaVersion: '2.0.32',
+    artifactVersion: '2.0.33',
+    updatedInSchemaVersion: '2.0.33',
     kind: 'agent_guidelines',
     recommended: true,
     syncAction: 'overwrite',
@@ -2367,8 +2375,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'plantillas-agentes', 'ejecutor-item-backlog-dev-test-commit.agent.md'),
     fileName: 'ejecutor-item-backlog-dev-test-commit.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.32',
-    updatedInSchemaVersion: '2.0.32',
+    artifactVersion: '2.0.33',
+    updatedInSchemaVersion: '2.0.33',
     kind: 'agent_template',
     recommended: false,
     syncAction: 'overwrite',
@@ -2382,8 +2390,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'plantillas-agentes', 'orquestador-backlog-apts.agent.md'),
     fileName: 'orquestador-backlog-apts.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.27',
-    updatedInSchemaVersion: '2.0.27',
+    artifactVersion: '2.0.33',
+    updatedInSchemaVersion: '2.0.33',
     kind: 'agent_template',
     recommended: false,
     syncAction: 'overwrite',
@@ -2398,8 +2406,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'plantillas-agentes', 'intake-bugfix-apts.agent.md'),
     fileName: 'intake-bugfix-apts.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.24',
-    updatedInSchemaVersion: '2.0.24',
+    artifactVersion: '2.0.33',
+    updatedInSchemaVersion: '2.0.33',
     kind: 'agent_template',
     recommended: false,
     syncAction: 'overwrite',
@@ -2411,8 +2419,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'runtime-adapters', 'vscode', 'agents', 'apts-backlog-orchestrator.agent.md'),
     fileName: 'apts-backlog-orchestrator.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.27',
-    updatedInSchemaVersion: '2.0.27',
+    artifactVersion: '2.0.33',
+    updatedInSchemaVersion: '2.0.33',
     kind: 'agent_runtime_adapter',
     recommended: true,
     syncAction: 'overwrite',
@@ -2431,8 +2439,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'runtime-adapters', 'vscode', 'agents', 'backlog-item-executor-dev-test-commit.agent.md'),
     fileName: 'backlog-item-executor-dev-test-commit.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.32',
-    updatedInSchemaVersion: '2.0.32',
+    artifactVersion: '2.0.33',
+    updatedInSchemaVersion: '2.0.33',
     kind: 'agent_runtime_adapter',
     recommended: true,
     syncAction: 'overwrite',
@@ -2451,8 +2459,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'runtime-adapters', 'vscode', 'agents', 'apts-bugfix-intake.agent.md'),
     fileName: 'apts-bugfix-intake.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.24',
-    updatedInSchemaVersion: '2.0.24',
+    artifactVersion: '2.0.33',
+    updatedInSchemaVersion: '2.0.33',
     kind: 'agent_runtime_adapter',
     recommended: true,
     syncAction: 'overwrite',
@@ -2801,7 +2809,7 @@ const buildIntegrationManifest = (req) => {
         forbidden_content: ['APTS_API_KEY', 'other secrets', 'tokens', 'credentials']
       },
       recommended_first_steps: [
-        'Resolve project and agent identity from local Git.',
+        'Use official client/CLI with minimal payloads first; avoid manual Git identity discovery unless a required-field error forces protocol debugging.',
         'If APTS_API_KEY is not yet present in the environment, request APTS_API_KEY from the operator and confirm APTS_BASE_URL as well.',
         'Create or update a .env file at the client project root with APTS_BASE_URL and APTS_API_KEY before using protected APIs.',
         'Ensure the project has AGENTS.md or .github/copilot-instructions.md. Create AGENTS.md from apts-agent-guidelines.md if neither file exists, or merge/update one APTS-managed section if an instruction file already exists.',
@@ -2848,6 +2856,7 @@ const buildIntegrationManifest = (req) => {
       'If the runtime supports custom agents, install and use APTS Bugfix Intake as the first entrypoint for chat-triggered defect intake.',
       'Choose the reference client that matches the client project module system: apts-client.js for CommonJS or apts-client.mjs for ESM.',
       'If the runtime prefers shellable command entrypoints over importing JavaScript modules, download the matching CLI as well: apts-cli.js for CommonJS or apts-cli.mjs for ESM, keeping it beside the matching client file.',
+      'Do not run manual identity pre-flight commands by default; let official client/CLI auto-fill protocol fields and inspect execution context only when a call reports missing required data.',
       'Official APTS client/CLI auto-fills missing identity fields from environment variables first, local managed execution context second, and local Git as fallback; provide explicit identity fields only when raw API calls are used.',
       'Official client/CLI persist managed execution context in .apts/execution-context.json by default (override with APTS_CONTEXT_FILE) so repeated execution calls can omit task_id and identity fields.',
       'Use register_task with backlog_item_id to resume interrupted work for that backlog item before creating additional execution tasks.',
