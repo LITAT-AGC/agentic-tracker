@@ -36,6 +36,12 @@ npx playwright test
 ### 3. Cleanup (Optional but recommended)
 After testing is completed, reset or drop the PostgreSQL test database if you need a clean state for the next run.
 
+### 4. VS Code Shell Routing on Windows
+When developing from VS Code on Windows:
+- Run test commands from a WSL terminal/task.
+- Run non-test operations (setup, file ops, git workflows, docs updates, local utilities) from a PowerShell terminal/task.
+- Prefer VS Code tasks that pin the shell per purpose so shell selection stays deterministic.
+
 ---
 
 ## 🛠️ General Rules
