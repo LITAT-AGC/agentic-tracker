@@ -1951,10 +1951,18 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.33';
+const integrationManifestSchemaVersion = '2.0.34';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.34',
+    date: '2026-05-11',
+    changes: [
+      'APTS integration guidance now defines explicit shell routing for VS Code on Windows: run tests through WSL and run non-test operations through PowerShell.',
+      'The downloadable skill package and base agent guidelines now publish this routing policy so client agents can replicate deterministic shell usage in Windows + VS Code workflows.'
+    ]
+  },
   {
     version: '2.0.33',
     date: '2026-05-11',
@@ -2349,8 +2357,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'SKILL.md'),
     fileName: 'SKILL.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.33',
-    updatedInSchemaVersion: '2.0.33',
+    artifactVersion: '2.0.34',
+    updatedInSchemaVersion: '2.0.34',
     kind: 'skill_package',
     recommended: false,
     syncAction: 'overwrite',
@@ -2362,8 +2370,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-agent-guidelines.md'),
     fileName: 'apts-agent-guidelines.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.33',
-    updatedInSchemaVersion: '2.0.33',
+    artifactVersion: '2.0.34',
+    updatedInSchemaVersion: '2.0.34',
     kind: 'agent_guidelines',
     recommended: true,
     syncAction: 'overwrite',
@@ -2854,6 +2862,7 @@ const buildIntegrationManifest = (req) => {
       'Ensure AGENTS.md or .github/copilot-instructions.md exists before protected calls: create AGENTS.md if neither exists, or merge/update one APTS-managed section if an instruction file already exists.',
       'If the current chat introduces a new bug, error, or regression request, ensure it is represented in APTS backlog as a bug item before registering execution work or starting implementation.',
       'If the runtime supports custom agents, install and use APTS Bugfix Intake as the first entrypoint for chat-triggered defect intake.',
+      'If the runtime is VS Code on Windows, route tests through WSL terminals/tasks and route non-test operations through PowerShell terminals/tasks.',
       'Choose the reference client that matches the client project module system: apts-client.js for CommonJS or apts-client.mjs for ESM.',
       'If the runtime prefers shellable command entrypoints over importing JavaScript modules, download the matching CLI as well: apts-cli.js for CommonJS or apts-cli.mjs for ESM, keeping it beside the matching client file.',
       'Do not run manual identity pre-flight commands by default; let official client/CLI auto-fill protocol fields and inspect execution context only when a call reports missing required data.',
