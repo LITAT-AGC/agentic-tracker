@@ -211,7 +211,8 @@ Ejemplo:
 - Ruta: `/projects/backlog`
 - Body: objeto unico o array de objetos `create_backlog_item`
 - Intake recomendado para bugs desde chat: si la solicitud actual describe un bug, error o regresion nueva, primero listar backlog para buscar un item `bug` existente; si no existe, crear uno con `item_type: "bug"`, documentar sintoma, comportamiento esperado, comportamiento observado y evidencia disponible, y usar `source_kind: "chat_request"` con `source_ref` cuando el runtime exponga un identificador estable.
-- Si el runtime soporta agentes custom y esta instalada la plantilla `APTS Bugfix Intake`, usarla como entrypoint para este paso de intake antes de pasar a implementacion.
+- Si la solicitud es "reporta esto como BUG en APTS", crear o reutilizar directamente el item `bug` sin depender de agentes de intake dedicados.
+- Si la solicitud es "reporta esto que has solucionado como bug resuelto en APTS", actualizar el item `bug` con `update_backlog_item`, moverlo a `review` o `done`, y adjuntar resumen de resolucion y evidencia de validacion.
 - Payload obligatorio: `project_url`, `title`
 - Body minimo:
 
@@ -363,8 +364,8 @@ Ejemplo:
 
 1. Resolver identidad desde Git.
 2. Listar backlog y decidir si reutilizar item existente o crear uno nuevo usando la regla de alcance exacto.
-3. Si la solicitud actual es un bugfix, error o regresion reportada por chat, verificar si ya existe un backlog item `bug` equivalente y reutilizarlo cuando corresponda.
-4. Crear o actualizar backlog en APTS (incluyendo soft-delete cuando corresponda). Para defectos nuevos, crear primero el item `bug` antes de implementar.
+3. Si la solicitud actual es un bugfix, error o regresion reportada por chat, verificar si ya existe un backlog item `bug` equivalente y reutilizarlo cuando corresponda; si no existe, crearlo.
+4. Si la solicitud es reportar un bug ya solucionado, actualizar ese item `bug` a `review` o `done` con evidencia de resolucion y validacion.
 5. Crear o reanudar tarea con `register_task` usando `backlog_item_id` cuando aplique.
 6. Leer `read_project_context` antes de editar.
 7. Reportar progreso en cada hito importante.

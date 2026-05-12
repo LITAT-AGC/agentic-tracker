@@ -153,13 +153,12 @@ Mandatory rules:
 0.1.1. With the official CLI/client, prefer minimum payloads and avoid pre-flight Git identity commands. Only inspect identity sources (for example with `show-execution-context`) when an APTS call fails due to missing required fields.
 0.1.2. In VS Code on Windows, route tests and APTS calls through WSL terminals/tasks, and route non-APTS non-test operations through PowerShell terminals/tasks.
 0.2. Invoke APTS operations using contract-first JSON object payloads (for example `{"task_id":"...","status":"review",...}`), even when a legacy positional signature is still supported for backward compatibility.
-0.3. If `APTS Bugfix Intake` is installed in the client project, invoke it first for new bug, error, regression, or broken-behavior requests coming from chat.
 0.4. If the current chat asks to fix a bug, investigate an error, or resolve a regression or broken behavior, run read-only triage first: inspect APTS backlog for an existing matching non-deleted bug item and verify that the symptom is likely a real defect.
 0.4.1. Prefer `search_similar_bug_reports` with the symptom summary before deciding whether a new `bug` item is needed.
-0.5. If explicit user confirmation to fix is missing, do not run mutating intake writes (`create_backlog_item`, `update_backlog_item`, `register_task`); return a confirmation request and stop before registration.
-0.6. After explicit user confirmation, if no matching bug item exists, create it with `create_backlog_item` using `item_type` = `bug` and capture symptom, expected behavior, observed behavior, and reproduction evidence from chat.
-0.7. When the runtime exposes a stable conversation or thread identifier, store `source_kind` = `chat_request` and persist that identifier in `source_ref` for the tracked bug backlog item.
-0.8. Do not start direct implementation or register execution work for a new defect request until the user confirms the fix intent, the work is represented in APTS backlog, and the task can reference that `backlog_item_id`.
+0.5. If no matching bug item exists, create it with `create_backlog_item` using `item_type` = `bug` and capture symptom, expected behavior, observed behavior, and reproduction evidence from chat.
+0.6. When the runtime exposes a stable conversation or thread identifier, store `source_kind` = `chat_request` and persist that identifier in `source_ref` for the tracked bug backlog item.
+0.7. For requests such as "report this as a resolved bug in APTS", update the tracked bug item with `update_backlog_item`, set status to `review` or `done`, and include concise resolution plus validation evidence.
+0.8. Do not start direct implementation or register execution work for a new defect request until the work is represented in APTS backlog and the task can reference that `backlog_item_id`.
 1. Read the project backlog with `list_backlog_items` and select an item suitable for execution.
 2. Call `register_task` with `backlog_item_id` for execution work and always use the returned `task_id`; this may resume interrupted work instead of creating a duplicate task.
 3. Before modifying code, use `read_project_context`.

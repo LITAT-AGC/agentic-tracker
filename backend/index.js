@@ -1951,10 +1951,18 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.36';
+const integrationManifestSchemaVersion = '2.0.37';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.37',
+    date: '2026-05-12',
+    changes: [
+      'The dedicated bug-intake custom agent and VS Code runtime adapter were removed from the public integration manifest and downloadable artifacts.',
+      'Bootstrap and integration instructions now use direct backlog actions for defects: report bug situations as backlog item_type=bug and report solved bugs by updating tracked bug items to review/done with resolution evidence.'
+    ]
+  },
   {
     version: '2.0.36',
     date: '2026-05-12',
@@ -2425,19 +2433,6 @@ const integrationArtifacts = {
     ],
     description: 'Orchestrator agent template that pulls ready backlog items from APTS.'
   },
-  bugfix_intake_agent: {
-    route: `${publicIntegrationBasePath}/agentes/intake-bugfix-apts.agent.md`,
-    filePath: path.join(integrationRoot, 'plantillas-agentes', 'intake-bugfix-apts.agent.md'),
-    fileName: 'intake-bugfix-apts.agent.md',
-    contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.35',
-    updatedInSchemaVersion: '2.0.35',
-    kind: 'agent_template',
-    recommended: false,
-    syncAction: 'overwrite',
-    deprecatedFilenames: [],
-    description: 'Bug intake agent template that triages first and registers a tracked APTS bug only after explicit user confirmation.'
-  },
   vscode_orchestrator_agent_adapter: {
     route: `${publicIntegrationBasePath}/agentes/vscode/apts-backlog-orchestrator.agent.md`,
     filePath: path.join(integrationRoot, 'paquete-apts', 'runtime-adapters', 'vscode', 'agents', 'apts-backlog-orchestrator.agent.md'),
@@ -2477,28 +2472,6 @@ const integrationArtifacts = {
     invocationName: 'Backlog Item Executor Dev Test Commit',
     invocationAliases: ['Ejecutor Item Backlog Dev Test Commit'],
     description: 'VS Code discovery adapter for the backlog item worker agent.'
-  },
-  vscode_bugfix_intake_agent_adapter: {
-    route: `${publicIntegrationBasePath}/agentes/vscode/apts-bugfix-intake.agent.md`,
-    filePath: path.join(integrationRoot, 'paquete-apts', 'runtime-adapters', 'vscode', 'agents', 'apts-bugfix-intake.agent.md'),
-    fileName: 'apts-bugfix-intake.agent.md',
-    contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.35',
-    updatedInSchemaVersion: '2.0.35',
-    kind: 'agent_runtime_adapter',
-    recommended: true,
-    syncAction: 'overwrite',
-    deprecatedFilenames: [
-      'intake-bugfix-apts.agent.md'
-    ],
-    runtime: 'vscode',
-    discoveryPath: '.github/agents',
-    requiredGlob: '*.agent.md',
-    targetRelativePath: '.github/agents/apts-bugfix-intake.agent.md',
-    canonicalSourceArtifactId: 'bugfix_intake_agent',
-    invocationName: 'APTS Bugfix Intake',
-    invocationAliases: ['Intake Bugfix APTS'],
-    description: 'VS Code discovery adapter for the bugfix intake agent.'
   },
   js_client_commonjs: {
     route: `${publicIntegrationBasePath}/apts-client.js`,
@@ -2635,8 +2608,6 @@ const buildIntegrationManifest = (req) => {
         'existing scope documents or acceptance criteria'
       ],
       chat_request_triage: {
-        bugfix_intake_required: true,
-        recommended_agent_entrypoint: 'APTS Bugfix Intake',
         detect_as_bugfix_when_request_mentions: [
           'bug fixes',
           'errors or exceptions',
@@ -2647,12 +2618,12 @@ const buildIntegrationManifest = (req) => {
         required_backlog_item_type: 'bug',
         existing_item_policy: 'Before creating a new defect entry, inspect APTS backlog and reuse an existing non-deleted bug item when it already tracks the same symptom, scope, or failure. Prefer search_similar_bug_reports for semantic duplicate detection.',
         new_item_policy: 'If no matching bug item exists, create one in APTS before implementation starts and capture the symptom, expected behavior, observed behavior, and any reproduction evidence available from the chat.',
+        resolved_item_policy: 'When a defect has already been solved, report it by updating the tracked bug backlog item to review or done and include the fix summary, validation evidence, and changed scope in acceptance_criteria or implementation_notes.',
         task_link_policy: 'Only register or continue execution work after the task can reference that backlog_item_id.',
         source_tracking: {
           source_kind: 'chat_request',
           source_ref_rule: 'Persist a stable conversation or thread identifier in source_ref when the runtime exposes one; otherwise omit source_ref.'
         },
-        custom_agent_policy: 'If the client runtime supports custom agents and APTS Bugfix Intake is installed, invoke it first for new defect requests from chat. Otherwise follow the same backlog-first policy manually.',
         bypass_rule: 'Do not jump directly into code changes for a new untracked bug report, error-fix request, or regression repair.'
       },
       access_model: {
@@ -2743,7 +2714,7 @@ const buildIntegrationManifest = (req) => {
         required_glob: '*.agent.md',
         reload_required_after_sync: true,
         validation_checklist: [
-          'Confirm orchestrator, executor, and bugfix intake adapters exist in .github/agents.',
+          'Confirm orchestrator and executor adapters exist in .github/agents.',
           'Validate YAML frontmatter for each adapter and ensure name is present and unique.',
           'Reload VS Code window so the runtime reindexes custom agents.'
         ]
@@ -2767,14 +2738,6 @@ const buildIntegrationManifest = (req) => {
             target_relative_path: '.github/agents/backlog-item-executor-dev-test-commit.agent.md',
             invocation_name: 'Backlog Item Executor Dev Test Commit',
             invocation_aliases: ['Ejecutor Item Backlog Dev Test Commit']
-          },
-          {
-            runtime: 'vscode',
-            canonical_artifact_id: 'bugfix_intake_agent',
-            adapter_artifact_id: 'vscode_bugfix_intake_agent_adapter',
-            target_relative_path: '.github/agents/apts-bugfix-intake.agent.md',
-            invocation_name: 'APTS Bugfix Intake',
-            invocation_aliases: ['Intake Bugfix APTS']
           }
         ]
       },
@@ -2845,6 +2808,7 @@ const buildIntegrationManifest = (req) => {
         'Prepare a local append-only resilience journal, for example at .apts/agent-resilience-log.jsonl, without treating it as a source of truth.',
         'Inspect local files that currently contain backlog, planning, or operational tracking.',
         'If the current chat request is a new bugfix, error investigation, or regression report, run search_similar_bug_reports and inspect APTS backlog for a matching bug item before creating a new item_type=bug.',
+        'If the current chat request asks to report a solved defect, update the tracked bug item status to review or done and include resolution evidence.',
         'Create or update backlog_items in APTS to reflect that initial state.',
         'From that point onward, use APTS as the primary tracking system and do not invent work outside APTS.'
       ],
@@ -2877,7 +2841,7 @@ const buildIntegrationManifest = (req) => {
       'Read the base agent guidelines before the first APTS API call.',
       'Ensure AGENTS.md or .github/copilot-instructions.md exists before protected calls: create AGENTS.md if neither exists, or merge/update one APTS-managed section if an instruction file already exists.',
       'If the current chat introduces a new bug, error, or regression request, ensure it is represented in APTS backlog as a bug item before registering execution work or starting implementation.',
-      'If the runtime supports custom agents, install and use APTS Bugfix Intake as the first entrypoint for chat-triggered defect intake.',
+      'If the current chat asks to report a solved bug, update the tracked bug backlog item and add resolution details with verification evidence.',
       'If the runtime is VS Code on Windows, route tests through WSL terminals/tasks and route non-test operations through PowerShell terminals/tasks.',
       'Choose the reference client that matches the client project module system: apts-client.js for CommonJS or apts-client.mjs for ESM.',
       'If the runtime prefers shellable command entrypoints over importing JavaScript modules, download the matching CLI as well: apts-cli.js for CommonJS or apts-cli.mjs for ESM, keeping it beside the matching client file.',
@@ -2965,12 +2929,8 @@ app.get(`${publicIntegrationBasePath}/skill.md`, async (req, res) => sendIntegra
 app.get(`${publicIntegrationBasePath}/agent-guidelines.md`, async (req, res) => sendIntegrationArtifact(req, res, 'agent_guidelines'));
 app.get(`${publicIntegrationBasePath}/agentes/ejecutor-item-backlog-dev-test-commit.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'executor_agent'));
 app.get(`${publicIntegrationBasePath}/agentes/orquestador-backlog-apts.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'orchestrator_agent'));
-app.get(`${publicIntegrationBasePath}/agentes/intake-bugfix-apts.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'bugfix_intake_agent'));
-app.get(`${publicIntegrationBasePath}/agentes/apts-bugfix-intake.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'bugfix_intake_agent'));
 app.get(`${publicIntegrationBasePath}/agentes/vscode/apts-backlog-orchestrator.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'vscode_orchestrator_agent_adapter'));
 app.get(`${publicIntegrationBasePath}/agentes/vscode/backlog-item-executor-dev-test-commit.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'vscode_executor_agent_adapter'));
-app.get(`${publicIntegrationBasePath}/agentes/vscode/apts-bugfix-intake.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'vscode_bugfix_intake_agent_adapter'));
-app.get(`${publicIntegrationBasePath}/agentes/vscode/intake-bugfix-apts.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'vscode_bugfix_intake_agent_adapter'));
 app.get(`${publicIntegrationBasePath}/apts-client.js`, async (req, res) => sendIntegrationArtifact(req, res, 'js_client_commonjs'));
 app.get(`${publicIntegrationBasePath}/apts-client.mjs`, async (req, res) => sendIntegrationArtifact(req, res, 'js_client_esm'));
 app.get(`${publicIntegrationBasePath}/apts-cli.js`, async (req, res) => sendIntegrationArtifact(req, res, 'js_cli_commonjs'));
