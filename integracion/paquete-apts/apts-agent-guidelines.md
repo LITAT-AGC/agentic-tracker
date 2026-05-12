@@ -68,7 +68,8 @@ Runtime-specific guidance:
 When the active runtime is VS Code on Windows:
 
 - Route test execution through WSL terminals/tasks.
-- Route non-test operations through PowerShell terminals/tasks.
+- Route APTS calls (official client/CLI commands) through WSL terminals/tasks.
+- Route non-test operations not related to APTS through PowerShell terminals/tasks.
 - Keep shell routing explicit in VS Code tasks so shell selection is deterministic and reproducible.
 - If a task runner is available, prefer labels such as `tests:wsl` and `ops:powershell` instead of ad-hoc shell switching.
 
@@ -150,7 +151,7 @@ Mandatory rules:
 0. If the user asks for "next task", "continue backlog", "run backlog", or equivalent requests, you must invoke `APTS Backlog Orchestrator` first and not run direct implementation from the general agent.
 0.1. Use only the official APTS client or CLI (`apts-client.js`, `apts-client.mjs`, `apts-cli.js`, or `apts-cli.mjs`) as the base integration layer; do not build parallel scripts for base contract operations, do not merge legacy wrapper snippets into official scripts, and retire older local wrappers for those operations during migration.
 0.1.1. With the official CLI/client, prefer minimum payloads and avoid pre-flight Git identity commands. Only inspect identity sources (for example with `show-execution-context`) when an APTS call fails due to missing required fields.
-0.1.2. In VS Code on Windows, route tests through WSL terminals/tasks and route non-test operations through PowerShell terminals/tasks.
+0.1.2. In VS Code on Windows, route tests and APTS calls through WSL terminals/tasks, and route non-APTS non-test operations through PowerShell terminals/tasks.
 0.2. Invoke APTS operations using contract-first JSON object payloads (for example `{"task_id":"...","status":"review",...}`), even when a legacy positional signature is still supported for backward compatibility.
 0.3. If `APTS Bugfix Intake` is installed in the client project, invoke it first for new bug, error, regression, or broken-behavior requests coming from chat.
 0.4. If the current chat asks to fix a bug, investigate an error, or resolve a regression or broken behavior, run read-only triage first: inspect APTS backlog for an existing matching non-deleted bug item and verify that the symptom is likely a real defect.

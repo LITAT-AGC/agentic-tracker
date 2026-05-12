@@ -1951,10 +1951,18 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.35';
+const integrationManifestSchemaVersion = '2.0.36';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.0.36',
+    date: '2026-05-12',
+    changes: [
+      'APTS integration shell routing for VS Code on Windows now requires APTS client/CLI calls to run through WSL terminals/tasks, alongside test execution.',
+      'Downloadable integration guides now clarify that only non-APTS non-test operations should run through PowerShell terminals/tasks.'
+    ]
+  },
   {
     version: '2.0.35',
     date: '2026-05-11',
@@ -2365,8 +2373,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'SKILL.md'),
     fileName: 'SKILL.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.35',
-    updatedInSchemaVersion: '2.0.35',
+    artifactVersion: '2.0.36',
+    updatedInSchemaVersion: '2.0.36',
     kind: 'skill_package',
     recommended: false,
     syncAction: 'overwrite',
@@ -2378,8 +2386,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-agent-guidelines.md'),
     fileName: 'apts-agent-guidelines.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.35',
-    updatedInSchemaVersion: '2.0.35',
+    artifactVersion: '2.0.36',
+    updatedInSchemaVersion: '2.0.36',
     kind: 'agent_guidelines',
     recommended: true,
     syncAction: 'overwrite',

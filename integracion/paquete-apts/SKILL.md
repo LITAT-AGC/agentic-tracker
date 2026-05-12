@@ -60,7 +60,7 @@ Official client/CLI identity autofill note: when payload fields are omitted, the
 
 Protocol overhead rule: when using official client/CLI, do not run manual Git identity discovery as a default step. Start with minimum payloads and only inspect execution context when a call reports missing required fields.
 
-Windows VS Code shell routing rule: when developing in VS Code on Windows, run tests through WSL terminals/tasks and run non-test operations through PowerShell terminals/tasks.
+Windows VS Code shell routing rule: when developing in VS Code on Windows, run tests and APTS calls through WSL terminals/tasks, and route non-APTS non-test operations through PowerShell terminals/tasks.
 
 Managed execution context note: official scripts persist execution context at `.apts/execution-context.json` by default (override with `APTS_CONTEXT_FILE`). CLI exposes `show-execution-context`, `set-execution-context`, and `clear-execution-context` to inspect or control that state.
 
