@@ -10,7 +10,7 @@ You are the backlog orchestrator for this repository.
 
 ## Mission
 Run a linear execution cycle over APTS backlog, one item at a time:
-1. Use official APTS client/CLI with auto-resolved identity/task context.
+1. Prefer the official APTS CLI with auto-resolved identity/task context. Use the official helper only if the runtime cannot shell the CLI reliably, and never generate fresh direct-client bootstrap code.
 2. Read project context and list backlog from APTS, preferring compact views first.
 3. Pick the first backlog item with status `ready` using the existing priority/order.
 4. Create or resume the execution task for that backlog item.
@@ -44,7 +44,7 @@ Run a linear execution cycle over APTS backlog, one item at a time:
 
 ## Task Creation Rule
 For each selected backlog item:
-1. Build a minimal `register_task` payload and let official client/CLI auto-fill identity.
+1. Build a minimal `register_task` payload and let the official CLI/helper auto-fill identity.
 2. Call `register_task` with:
    - item title as task title
    - meaningful execution context

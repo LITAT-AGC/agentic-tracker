@@ -6,14 +6,16 @@ Se mantiene fuera de `.github/` para evitar que VS Code/Copilot lo trate como cu
 
 ## Estructura
 
-- `plantillas-agentes/`: plantillas de agentes para orquestacion y ejecucion contra APTS, incluyendo `orquestador-backlog-apts.agent.md` y `ejecutor-item-backlog-dev-test-commit.agent.md`.
-- `paquete-apts/`: paquete exportable con contrato JSON, clientes HTTP para CommonJS y ESM, CLI oficial para CommonJS y ESM, guia operativa y referencia de API.
+- `plantillas-agentes/`: plantillas de agentes para intake, orquestacion y ejecucion contra APTS, incluyendo `intake-bugfix-apts.agent.md`, `orquestador-backlog-apts.agent.md` y `ejecutor-item-backlog-dev-test-commit.agent.md`.
+- `paquete-apts/`: paquete exportable con contrato JSON, helper oficial para CommonJS y ESM, clientes HTTP para CommonJS y ESM, CLI oficial para CommonJS y ESM, guia operativa y referencia de API.
 
 ## Uso recomendado
 
-1. Toma desde `paquete-apts/` el contrato JSON, el cliente HTTP adecuado para CommonJS o ESM, y si tu runtime prefiere invocacion por terminal, la CLI oficial del mismo modulo.
-2. Copia desde `plantillas-agentes/` las plantillas de agentes si quieres un flujo orquestador/ejecutor apoyado en backlog de APTS.
-3. Instala esos archivos en el proyecto cliente dentro de las ubicaciones que su runtime de agentes soporte.
+1. Toma desde `paquete-apts/` el contrato JSON, el cliente HTTP adecuado para CommonJS o ESM y la CLI oficial del mismo modulo como interfaz principal para agentes.
+2. Si tu runtime no puede invocar shell de forma fiable, agrega el helper oficial como fallback seguro; no expongas el cliente crudo directamente al agente.
+3. Copia desde `plantillas-agentes/` las plantillas de agentes si quieres un flujo de intake/orquestador/ejecutor apoyado en backlog de APTS.
+4. Para opencode.ai, instala `SKILL.md` y `apts_skills.json` bajo `.agents/skills/apts/` y crea un Custom Tool fino que shell-e el CLI oficial.
+5. Instala esos archivos en el proyecto cliente dentro de las ubicaciones que su runtime de agentes soporte.
 
 ## Separacion obligatoria entre skills y agentes
 
@@ -28,6 +30,7 @@ Para evitar conflictos de discovery en runtimes mixtos:
 ## Regla de cobertura del cliente exportable
 
 - El cliente HTTP oficial que APTS distribuye (`apts-client.js` y `apts-client.mjs`) debe cubrir todas las funcionalidades de integracion publicadas en `apts_skills.json`.
+- El helper oficial (`apts-helper.js` y `apts-helper.mjs`) debe permanecer como wrapper fino y seguro sobre ese cliente, sin introducir un contrato paralelo.
 - La CLI oficial (`apts-cli.js` y `apts-cli.mjs`) es una entrada de ejecucion estable sobre ese cliente; no reemplaza al cliente y debe vivir junto a su variante correspondiente.
 - El proyecto cliente no deberia tener que desarrollar scripts extra para completar operaciones base de integracion (por ejemplo listado, alta, actualizacion y soft-delete de backlog).
 - Al migrar al cliente o CLI oficial, elimina wrappers o scripts locales viejos de APTS que solo deleguen operaciones base. Conserva unicamente adapters finos de discovery si el runtime los necesita.
@@ -46,6 +49,8 @@ Si una plantilla de agente no aparece en VS Code/Copilot, valida este checklist:
 Recomendacion: manten `Orquestador Backlog APTS` y `Ejecutor Item Backlog Dev Test Commit` en la misma carpeta `.github/agents/` para asegurar discovery consistente cuando el runtime soporte agentes custom.
 
 Si modificas el cliente HTTP exportable, replica el cambio tanto en `paquete-apts/apts-client.js` como en `paquete-apts/apts-client.mjs` para mantener alineadas las variantes CommonJS y ESM.
+
+Si modificas el helper oficial, replica el cambio tanto en `paquete-apts/apts-helper.js` como en `paquete-apts/apts-helper.mjs` para mantener alineadas las variantes CommonJS y ESM.
 
 Si modificas la CLI oficial, replica el cambio tanto en `paquete-apts/apts-cli.js` como en `paquete-apts/apts-cli.mjs` y confirma que siga delegando a la variante de cliente que le corresponde.
 

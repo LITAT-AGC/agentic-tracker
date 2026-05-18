@@ -29,6 +29,7 @@ The orchestrator should pass at least:
 - repository constraints
 
 ## APTS Rules
+- Prefer the official APTS CLI for every normal operation. Use the official helper only when shell execution is unavailable in the active runtime. Never invent fresh direct-client bootstrap code inside the task.
 - Do not run manual Git identity discovery as a default step. Start with minimum JSON payloads and let official client/CLI auto-fill protocol fields.
 - If an APTS call fails because of missing context, inspect managed context (`show-execution-context`) and only then fill missing identity explicitly.
 - Call `register_task` with `backlog_item_id` before editing; treat its response as create-or-resume and always continue with the returned `task_id`.

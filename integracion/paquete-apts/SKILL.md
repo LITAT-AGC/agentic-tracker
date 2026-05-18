@@ -22,16 +22,25 @@ Note: in this repository, it is published as integration material under the repo
 
 - [API contract](./references/api-contract.md)
 - [Skills JSON contract](./apts_skills.json)
+- [CommonJS helper](./apts-helper.js)
+- [ESM helper](./apts-helper.mjs)
 - [CommonJS sample HTTP client](./apts-client.js)
 - [ESM sample HTTP client](./apts-client.mjs)
 - [CommonJS CLI entrypoint](./apts-cli.js)
 - [ESM CLI entrypoint](./apts-cli.mjs)
 - [Base guide for AGENTS.md or copilot-instructions.md](./apts-agent-guidelines.md)
 
+## Uso recomendado para Agentes de IA
+
+- Prefer the official CLI as the first integration surface.
+- Use the official helper only when the runtime cannot shell the CLI reliably.
+- Use the raw client only inside predefined helpers or wrappers that already belong to the project.
+- Never generate fresh direct-client bootstrap code during each interaction.
+
 ## Workspace installation policy (recommended)
 
 - Use a workspace-local, runtime-neutral base folder: `.ia/apts/`.
-- Keep the APTS contract, the matching HTTP client, and the optional matching CLI in that base folder.
+- Keep the APTS contract, the matching HTTP client, the primary CLI, and the optional helper in that base folder.
 - Treat official APTS scripts as managed artifacts: replace them as full files on updates and do not merge code from legacy local wrappers into those scripts.
 - Add runtime-specific adapter folders only for discovery when needed: `.github/skills/apts/` (VS Code/Copilot), `.agents/skills/apts/` (agent loaders using `.agents`), and `.claude/skills/apts/` (Claude-style loaders).
 - Avoid user-global skill installation for project integrations because it increases cross-project configuration leakage and version drift.
@@ -47,14 +56,22 @@ Note: in this repository, it is published as integration material under the repo
 
 1. Review the [API contract](./references/api-contract.md) to confirm variables, endpoints, and payloads.
 2. Create `.ia/apts/` in the client project and copy [apts_skills.json](./apts_skills.json) there.
-3. Copy [apts-client.js](./apts-client.js) if the client project uses CommonJS, or [apts-client.mjs](./apts-client.mjs) if it uses ESM (`"type": "module"`), into `.ia/apts/`.
-4. If your runtime prefers shellable command entrypoints over importing JavaScript modules directly, copy the matching CLI beside that client: [apts-cli.js](./apts-cli.js) for CommonJS or [apts-cli.mjs](./apts-cli.mjs) for ESM.
-5. If the client project previously used ad-hoc APTS wrapper scripts for base operations, remove them after the official client or CLI is in place. Keep only thin runtime-specific adapters when discovery still requires them.
-6. If your runtime requires a specific discovery path, add a thin adapter under `.github/skills/apts/`, `.agents/skills/apts/`, or `.claude/skills/apts/` that delegates to `.ia/apts/`.
-7. Apply the AGENTS setup policy: create `AGENTS.md` when no instruction file exists, or merge/update one APTS-managed section in `AGENTS.md` or `.github/copilot-instructions.md` when a file already exists.
-8. Configure `APTS_BASE_URL` and `APTS_API_KEY` in a `.env` file at the client project root (or an equivalent secret manager that exposes them as environment variables).
-8.1. Optional but recommended: set `APTS_PROJECT_URL`, `APTS_AGENT_NAME`, `APTS_AGENT_EMAIL`, `APTS_BRANCH`, `APTS_TASK_ID`, and `APTS_CONTEXT_FILE` to reduce repeated protocol payload fields in official client/CLI calls.
-9. Validate the integration by running `register_task`, then `log_agent_progress`, and then `heartbeat`, using minimal payloads.
+3. Copy the matching client into `.ia/apts/`: [apts-client.js](./apts-client.js) for CommonJS or [apts-client.mjs](./apts-client.mjs) for ESM (`"type": "module"`).
+4. Copy the matching CLI beside that client and treat it as the default agent interface: [apts-cli.js](./apts-cli.js) for CommonJS or [apts-cli.mjs](./apts-cli.mjs) for ESM.
+5. Only if the runtime cannot shell the CLI reliably, copy the matching helper beside the client: [apts-helper.js](./apts-helper.js) for CommonJS or [apts-helper.mjs](./apts-helper.mjs) for ESM.
+6. If the client project previously used ad-hoc APTS wrapper scripts for base operations, remove them after the official CLI or helper is in place. Keep only thin runtime-specific adapters when discovery still requires them.
+7. If your runtime requires a specific discovery path, add a thin adapter under `.github/skills/apts/`, `.agents/skills/apts/`, or `.claude/skills/apts/` that delegates to `.ia/apts/`.
+8. Apply the AGENTS setup policy: create `AGENTS.md` when no instruction file exists, or merge/update one APTS-managed section in `AGENTS.md` or `.github/copilot-instructions.md` when a file already exists.
+9. Configure `APTS_BASE_URL` and `APTS_API_KEY` in a `.env` file at the client project root (or an equivalent secret manager that exposes them as environment variables).
+9.1. Optional but recommended: set `APTS_PROJECT_URL`, `APTS_AGENT_NAME`, `APTS_AGENT_EMAIL`, `APTS_BRANCH`, `APTS_TASK_ID`, `APTS_CONTEXT_FILE`, and `APTS_ENV_FILE` to reduce repeated protocol payload fields and make env resolution deterministic.
+10. Validate the integration by running `register_task`, then `log_agent_progress`, and then `heartbeat`, using the CLI with minimal payloads.
+
+## opencode.ai setup
+
+- Keep the canonical scripts in `.ia/apts/`.
+- Install [SKILL.md](./SKILL.md) and [apts_skills.json](./apts_skills.json) under `.agents/skills/apts/` for discovery.
+- Create one thin opencode.ai Custom Tool that shells the official CLI and requests structured output (`--output structured`).
+- If that runtime cannot shell reliably, implement that Custom Tool on top of the official helper instead of importing the raw client.
 
 Official client/CLI identity autofill note: when payload fields are omitted, the official scripts resolve identity from env first, then local managed execution context file, and then local Git (`project_url/url`, `agent_name`, `agent_email`, `branch`), and resolve `task_id` from `APTS_TASK_ID` or managed context for execution calls.
 
@@ -71,8 +88,9 @@ Task close note: prefer `review` first and promote to `done` only after review p
 ## Official client coverage
 
 - The exported APTS client (`apts-client.js` / `apts-client.mjs`) must include every operation in the integration contract, including backlog management with soft-delete.
+- The exported APTS helper (`apts-helper.js` / `apts-helper.mjs`) must stay a thin, safe wrapper over the client and must never introduce parallel protocol behavior.
 - The official CLI (`apts-cli.js` / `apts-cli.mjs`) is a thin executable entrypoint over the matching client and must stay aligned with that client variant.
-- For base APTS contract operations, the integration layer must use only official scripts published by APTS (`apts-client.js`, `apts-client.mjs`, `apts-cli.js`, `apts-cli.mjs`).
+- For base APTS contract operations, the integration layer must use only official scripts published by APTS (`apts-client.js`, `apts-client.mjs`, `apts-helper.js`, `apts-helper.mjs`, `apts-cli.js`, `apts-cli.mjs`).
 - Do not merge or splice code from old project-local wrappers into those official scripts.
 - The client project should not create parallel wrappers or scripts to cover missing functions of the base flow.
 - When migrating to the official client or CLI, retire any older project-local APTS wrappers that only proxy those base operations.
@@ -83,6 +101,7 @@ Task close note: prefer `review` first and promote to `done` only after review p
 
 - `apts-client.js` and `apts-client.mjs` must keep the same public API and behavior.
 - If an endpoint, payload, helper, or error handling changes in one file, replicate the same change in the other.
+- `apts-helper.js` and `apts-helper.mjs` must keep the same public API and behavior.
 - `apts-cli.js` and `apts-cli.mjs` must keep the same command surface and behavior.
 - Each CLI file must keep delegating to its matching client file in the same folder.
 
@@ -108,7 +127,7 @@ Task close note: prefer `review` first and promote to `done` only after review p
 The client project ends up with:
 
 - a consistent tools contract for APTS,
-- a reusable HTTP layer and optional shell entrypoint,
+- a reusable HTTP layer, a CLI-first shell entrypoint, and a safe helper fallback,
 - runtime-aware process management guidance for server-based validations, including OpenCode plugin recommendations only when that runtime uses synchronous bash,
 - and an operational instruction so agents report work consistently, including creating or reusing bug backlog items before implementing chat-triggered defect fixes.
 - and an operational instruction so agents can report solved defects in APTS by updating tracked bug items with resolution evidence.

@@ -2,7 +2,7 @@
   "skills": [
     {
       "name": "register_task",
-      "description": "Create or resume a task in the project. Minimum payload in official client/CLI: title (project_url, agent_name, and agent_email are auto-resolved from env/local managed context/Git when omitted). When backlog_item_id points to an active task in todo, in_progress, or stalled, APTS resumes that task instead of creating a duplicate.",
+      "description": "Create or resume a task in the project. Minimum payload in official CLI/helper: title (project_url, agent_name, and agent_email are auto-resolved from env/local managed context/Git when omitted). AI-agent flows should prefer the CLI, use the helper only when shell execution is unavailable, and never generate fresh direct-client bootstrap code. When backlog_item_id points to an active task in todo, in_progress, or stalled, APTS resumes that task instead of creating a duplicate.",
       "parameters": {
         "oneOf": [
           {
@@ -66,7 +66,7 @@
     },
     {
       "name": "read_project_context",
-      "description": "Read current project state with optional section selection. Minimum payload in official client/CLI: none for identity (url auto-resolves from env/local managed context/Git when omitted). Optional: limit, backlog_status, include, and view. Agent flows now default to compact summaries; request view=full only when raw detail is needed.",
+      "description": "Read current project state with optional section selection. Minimum payload in official CLI/helper: none for identity (url auto-resolves from env/local managed context/Git when omitted). Optional: limit, backlog_status, include, and view. Agent flows now default to compact summaries; request view=full only when raw detail is needed.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -123,7 +123,7 @@
     },
     {
       "name": "list_backlog_items",
-      "description": "List backlog items for a project ordered by priority and sort order. Minimum payload in official client/CLI: none for identity (url auto-resolves from env/local managed context/Git when omitted). Optional filters include id, ids, status, and pagination with limit/offset. Agent flows now default to compact summaries; request view=full only for chosen items.",
+      "description": "List backlog items for a project ordered by priority and sort order. Minimum payload in official CLI/helper: none for identity (url auto-resolves from env/local managed context/Git when omitted). Optional filters include id, ids, status, and pagination with limit/offset. Agent flows now default to compact summaries; request view=full only for chosen items.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -238,7 +238,7 @@
     },
     {
       "name": "get_project_constraints",
-      "description": "Read project constraints registered in APTS (test/lint/typecheck commands, framework, language, and conventions). Minimum payload in official client/CLI: none for identity (url auto-resolves from env/local managed context/Git when omitted).",
+      "description": "Read project constraints registered in APTS (test/lint/typecheck commands, framework, language, and conventions). Minimum payload in official CLI/helper: none for identity (url auto-resolves from env/local managed context/Git when omitted).",
       "parameters": {
         "type": "object",
         "properties": {
@@ -251,7 +251,7 @@
     },
     {
       "name": "search_similar_bug_reports",
-      "description": "Find semantically similar non-deleted bug reports using OpenRouter embeddings to reduce duplicate bug intake. Minimum payload in official client/CLI: query_text (url auto-resolves from env/local managed context/Git when omitted).",
+      "description": "Find semantically similar non-deleted bug reports using OpenRouter embeddings to reduce duplicate bug intake. Minimum payload in official CLI/helper: query_text (url auto-resolves from env/local managed context/Git when omitted).",
       "parameters": {
         "type": "object",
         "properties": {
@@ -284,7 +284,7 @@
     },
     {
       "name": "create_backlog_item",
-      "description": "Create a managed backlog item for a project. Minimum payload in official client/CLI: title (project_url auto-resolves from env/local managed context/Git when omitted). For chat-triggered bug intake, create or update bug items only after read-only triage confirms a real defect and the user explicitly confirms they want to fix it; use item_type 'bug' for defect intake.",
+      "description": "Create a managed backlog item for a project. Minimum payload in official CLI/helper: title (project_url auto-resolves from env/local managed context/Git when omitted). For chat-triggered bug intake, create or update bug items only after read-only triage confirms a real defect and the user explicitly confirms they want the issue tracked as a bug in APTS; use item_type 'bug' for defect intake.",
       "parameters": {
         "oneOf": [
           {
@@ -564,7 +564,7 @@
     },
     {
       "name": "update_task_status",
-      "description": "Update the status of a task. Minimum payload in official client/CLI: status (task_id auto-resolves from APTS_TASK_ID or local managed execution context when omitted; project_url, agent_name, and agent_email auto-resolve from env/local managed context/Git). Use strict transitions: close with review first, then done only from review and with recent execution activity.",
+      "description": "Update the status of a task. Minimum payload in official CLI/helper: status (task_id auto-resolves from APTS_TASK_ID or local managed execution context when omitted; project_url, agent_name, and agent_email auto-resolve from env/local managed context/Git). Use strict transitions: close with review first, then done only from review and with recent execution activity.",
       "parameters": {
         "oneOf": [
           {
@@ -636,7 +636,7 @@
     },
     {
       "name": "log_agent_progress",
-      "description": "Log agent progress, bugs fixed, architectural decisions. Minimum payload in official client/CLI: message (task_id auto-resolves from APTS_TASK_ID or local managed execution context when omitted; project_url, agent_name, and branch auto-resolve from env/local managed context/Git).",
+      "description": "Log agent progress, bugs fixed, architectural decisions. Minimum payload in official CLI/helper: message (task_id auto-resolves from APTS_TASK_ID or local managed execution context when omitted; project_url, agent_name, and branch auto-resolve from env/local managed context/Git).",
       "parameters": {
         "oneOf": [
           {
@@ -742,7 +742,7 @@
     },
     {
       "name": "report_blocker",
-      "description": "Emergency skill to use when blocked. Minimum payload in official client/CLI: error_message (task_id auto-resolves from APTS_TASK_ID or local managed execution context when omitted; project_url and agent_name auto-resolve from env/local managed context/Git).",
+      "description": "Emergency skill to use when blocked. Minimum payload in official CLI/helper: error_message (task_id auto-resolves from APTS_TASK_ID or local managed execution context when omitted; project_url and agent_name auto-resolve from env/local managed context/Git).",
       "parameters": {
         "oneOf": [
           {
@@ -794,7 +794,7 @@
     },
     {
       "name": "heartbeat",
-      "description": "Periodic life signal sent every 5 minutes. Minimum payload in official client/CLI: none when APTS_TASK_ID or local managed execution context is available (task_id auto-resolves from env/context; agent_name and project_url auto-resolve from env/Git/context).",
+      "description": "Periodic life signal sent every 5 minutes. Minimum payload in official CLI/helper: none when APTS_TASK_ID or local managed execution context is available (task_id auto-resolves from env/context; agent_name and project_url auto-resolve from env/Git/context).",
       "parameters": {
         "oneOf": [
           {

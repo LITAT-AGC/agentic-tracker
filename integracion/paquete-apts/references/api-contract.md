@@ -13,11 +13,27 @@ Todas las llamadas de agentes deben incluir:
 Authorization: Bearer <APTS_API_KEY>
 ```
 
+## Uso recomendado para Agentes de IA
+
+Orden de preferencia:
+
+1. CLI oficial (`apts-cli.js` / `apts-cli.mjs`)
+2. Helper oficial (`apts-helper.js` / `apts-helper.mjs`) solo si el runtime no puede invocar shell de forma fiable
+3. Cliente crudo (`apts-client.js` / `apts-client.mjs`) solo dentro de helpers o wrappers predefinidos del proyecto
+
+Reglas obligatorias:
+
+- Preferir el CLI via shell para operaciones base de APTS.
+- Usar el helper oficial solo cuando el runtime no permite shell o solo admite tools importables.
+- Nunca generar codigo nuevo por interaccion que importe o bootstrapee el cliente crudo desde cero.
+- Nunca construir JSON a mano con concatenacion cuando puedes pasar objetos, `--stdin`, o `--json @archivo.json`.
+- Dejar que el CLI/helper oficial resuelva identidad y contexto local antes de intentar rellenar campos manualmente.
+
 ## Resolucion de identidad
 
-Regla anti-friccion: cuando uses el cliente/CLI oficial, no hagas pre-pasos manuales para obtener identidad Git en cada llamada. Envia payload minimo y deja que el CLI autocomplemente.
+Regla anti-friccion: cuando uses el CLI/helper oficial, no hagas pre-pasos manuales para obtener identidad Git en cada llamada. Envia payload minimo y deja que la capa oficial autocomplemente.
 
-En cliente/CLI oficial APTS, los campos de identidad se autocompletan cuando faltan en el payload usando este orden: variables de entorno -> contexto local gestionado -> Git local.
+En CLI/helper oficial APTS, los campos de identidad se autocompletan cuando faltan en el payload usando este orden: variables de entorno -> contexto local gestionado -> Git local.
 
 ```env
 APTS_PROJECT_URL=https://github.com/org/repo
@@ -30,6 +46,7 @@ APTS_CONTEXT_FILE=.apts/execution-context.json
 
 `APTS_TASK_ID` lets the official client/CLI omit `task_id` in repeated execution calls such as `heartbeat`, `log_agent_progress`, `report_blocker`, and `update_task_status`.
 `APTS_CONTEXT_FILE` can override where official client/CLI store managed execution context used for automatic field resolution.
+`APTS_ENV_FILE` can point the official CLI to a specific env file when the runtime does not execute from the project root.
 
 By default, official client/CLI persist execution context in `.apts/execution-context.json` and use it as an additional fallback source after env variables.
 
@@ -47,11 +64,11 @@ agent_email=$(git config user.email)
 branch=$(git branch --show-current)
 ```
 
-Si llamas la API HTTP sin pasar por el cliente/CLI oficial, debes enviar explicitamente todos los campos requeridos por endpoint.
+Si llamas la API HTTP sin pasar por el CLI/helper oficial, debes enviar explicitamente todos los campos requeridos por endpoint.
 
 ## Campos comunes obligatorios
 
-La tabla refleja campos obligatorios a nivel de API. El cliente/CLI oficial puede completar los campos de identidad automaticamente.
+La tabla refleja campos obligatorios a nivel de API. El CLI/helper oficial puede completar los campos de identidad automaticamente.
 
 | Campo | Operaciones |
 | --- | --- |
@@ -68,7 +85,8 @@ La tabla refleja campos obligatorios a nivel de API. El cliente/CLI oficial pued
 - Si no hay un backlog item activo que describa exactamente el cambio actual, crear uno nuevo.
 - Si ya existe un item activo que cubre exactamente el mismo alcance, reutilizarlo.
 - Para bugs, errores o regresiones reportadas por chat, primero ejecutar triage en modo lectura para validar que sea un defecto real y buscar un item `bug` no eliminado equivalente.
-- Si no hay confirmacion explicita del usuario para arreglar ese bug detectado, no crear ni registrar trabajo todavia; devolver confirmacion pendiente.
+- Si el mensaje podria ser solo una pregunta, aclaracion o diagnostico, no asumir que es un bug reportable: pedir confirmacion antes de registrarlo en APTS.
+- Si no hay confirmacion explicita del usuario para registrar o tratar ese caso como bug, no crear ni actualizar el item `bug` ni registrar trabajo todavia; devolver confirmacion pendiente.
 - Crear/actualizar el item `bug` y registrar tarea de ejecucion solo despues de la confirmacion explicita del usuario.
 - Para chores pequenos, reutilizar solo cuando el item activo ya cubra exactamente ese ajuste documental o de mantenimiento.
 
@@ -362,16 +380,40 @@ Ejemplo:
 
 ## Flujo operativo recomendado
 
-1. Resolver identidad desde Git.
-2. Listar backlog y decidir si reutilizar item existente o crear uno nuevo usando la regla de alcance exacto.
-3. Si la solicitud actual es un bugfix, error o regresion reportada por chat, verificar si ya existe un backlog item `bug` equivalente y reutilizarlo cuando corresponda; si no existe, crearlo.
-4. Si la solicitud es reportar un bug ya solucionado, actualizar ese item `bug` a `review` o `done` con evidencia de resolucion y validacion.
-5. Crear o reanudar tarea con `register_task` usando `backlog_item_id` cuando aplique.
-6. Leer `read_project_context` antes de editar.
-7. Reportar progreso en cada hito importante.
-8. Enviar heartbeat mientras la tarea siga activa.
-9. Reportar blocker si el agente queda detenido.
-10. Cerrar primero en `review`; pasar a `done` solo desde `review` y con actividad reciente de ejecucion.
+1. Instalar el CLI oficial junto al cliente gemelo en `.ia/apts/` y usar esa superficie como via principal.
+2. Si el runtime no puede shellar el CLI de forma fiable, instalar el helper oficial y usarlo como fallback seguro.
+3. Empezar con payload minimo y dejar que el CLI/helper resuelva identidad automaticamente.
+4. Listar backlog y decidir si reutilizar item existente o crear uno nuevo usando la regla de alcance exacto.
+5. Si la solicitud actual es un bugfix, error o regresion reportada por chat, verificar si ya existe un backlog item `bug` equivalente y reutilizarlo cuando corresponda; si no existe, crearlo.
+6. Si la solicitud es reportar un bug ya solucionado, actualizar ese item `bug` a `review` o `done` con evidencia de resolucion y validacion.
+7. Crear o reanudar tarea con `register_task` usando `backlog_item_id` cuando aplique.
+8. Leer `read_project_context` antes de editar.
+9. Reportar progreso en cada hito importante.
+10. Enviar heartbeat mientras la tarea siga activa.
+11. Reportar blocker si el agente queda detenido.
+12. Cerrar primero en `review`; pasar a `done` solo desde `review` y con actividad reciente de ejecucion.
+
+## Ejemplos CLI-first
+
+Usa `--output structured` cuando quieras una envoltura estable para Custom Tools o parsers de agentes.
+
+```bash
+node .ia/apts/apts-cli.mjs register-task --json '{"title":"Documentar payloads minimos de APTS"}' --output structured
+node .ia/apts/apts-cli.mjs read-project-context --json '{}' --output structured
+node .ia/apts/apts-cli.mjs heartbeat --json '{}' --output structured
+node .ia/apts/apts-cli.mjs log-agent-progress --json '{"message":"Se actualizaron las guias de integracion."}' --output structured
+node .ia/apts/apts-cli.mjs update-task-status --json '{"status":"review"}' --output structured
+node .ia/apts/apts-cli.mjs report-blocker --json '{"error_message":"Falta APTS_API_KEY"}' --output structured
+```
+
+Fallback con helper oficial:
+
+```js
+import apts from './.ia/apts/apts-helper.mjs';
+
+await apts.run('register-task', { title: 'Documentar payloads minimos de APTS' });
+await apts.run('heartbeat', {});
+```
 
 ## Ejemplos PowerShell
 
@@ -433,6 +475,19 @@ function Invoke-AptsCli {
 }
 ```
 
+CLI con env file explicito:
+
+```powershell
+node .ia/apts/apts-cli.mjs show-execution-context --env-file .env --output structured
+```
+
+## opencode.ai: Custom Tools y Skills
+
+- Instala `SKILL.md` y `apts_skills.json` en `.agents/skills/apts/` para discovery.
+- Crea un Custom Tool fino que reenvie `<command>` y el payload JSON al CLI oficial, por ejemplo `node .ia/apts/apts-cli.mjs <command> --json @payload.json --output structured`.
+- Si tu entorno de opencode.ai no puede invocar shell de forma fiable, implementa ese Custom Tool usando `apts-helper.mjs` o `apts-helper.js` en vez del cliente crudo.
+- Mantener la logica en el CLI/helper oficial reduce errores de quoting, identidad y formato.
+
 ## Troubleshooting PowerShell (sin sorpresas)
 
 Problemas mas comunes y regla de resolucion:
@@ -484,14 +539,24 @@ Validacion final obligatoria:
 
 - Usar payload JSON con forma de contrato para cada operacion (contract-first).
 - Para compatibilidad hacia atras, el cliente oficial puede aceptar firmas posicionales legadas en algunas funciones, pero la forma recomendada y estable es siempre objeto JSON.
-- Si el runtime prefiere invocacion por terminal en lugar de imports, usar la CLI oficial (`apts-cli.js` o `apts-cli.mjs`) junto a su cliente gemelo en la misma carpeta (`apts-client.js` o `apts-client.mjs`).
-- Al migrar al cliente o CLI oficial, retirar wrappers o scripts propios viejos que solo proxyeen operaciones base de APTS.
+- Para agentes, el camino recomendado es la CLI oficial (`apts-cli.js` o `apts-cli.mjs`) junto a su cliente gemelo en la misma carpeta (`apts-client.js` o `apts-client.mjs`).
+- Si el runtime no puede usar shell, usar el helper oficial (`apts-helper.js` o `apts-helper.mjs`) junto al cliente gemelo.
+- El cliente crudo solo debe quedar dentro de helpers o wrappers predefinidos; nunca generar codigo nuevo que lo bootstrapee en cada interaccion.
+- Al migrar al CLI o helper oficial, retirar wrappers o scripts propios viejos que solo proxyeen operaciones base de APTS.
 
 ## Cobertura esperada del cliente oficial
 
 - El cliente oficial de APTS (`apts-client.js` o `apts-client.mjs`) debe cubrir todas las operaciones de integracion publicadas en este contrato y en `apts_skills.json`.
+- El helper oficial de APTS (`apts-helper.js` o `apts-helper.mjs`) debe exponer esas mismas operaciones como superficie importable segura y delgada.
 - La CLI oficial de APTS (`apts-cli.js` o `apts-cli.mjs`) debe exponer esas mismas operaciones como comandos estables sin obligar al proyecto cliente a crear wrappers ad-hoc.
 - Un proyecto cliente integrado no deberia necesitar desarrollar scripts adicionales para cubrir operaciones base de APTS.
+
+## Anti-patrones
+
+- Instanciar o bootstrapear `apts-client.*` manualmente desde snippets generados por el agente en cada conversacion.
+- Armar JSON a mano con concatenacion de strings cuando puedes pasar objetos o archivos.
+- Hacer pre-flight de identidad Git antes de cada llamada en lugar de dejar que el CLI/helper oficial resuelva el contexto.
+- Llamar al HTTP raw para operaciones base cuando la CLI/helper ya cubre el contrato.
 
 ## Validacion minima
 
