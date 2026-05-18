@@ -258,7 +258,9 @@ function usageError(message) {
 function parseCliArgs(argv) {
   const flags = {
     cwd: undefined,
+    envFile: undefined,
     json: undefined,
+    output: undefined,
     options: undefined,
     pretty: false,
     stdin: false,
@@ -284,6 +286,21 @@ function parseCliArgs(argv) {
       continue;
     }
 
+    if (token.startsWith('--env-file=')) {
+      flags.envFile = token.slice('--env-file='.length);
+      continue;
+    }
+
+    if (token.startsWith('--output=')) {
+      flags.output = token.slice('--output='.length);
+      continue;
+    }
+
+    if (token.startsWith('--format=')) {
+      flags.output = token.slice('--format='.length);
+      continue;
+    }
+
     if (token.startsWith('--cwd=')) {
       flags.cwd = token.slice('--cwd='.length);
       continue;
@@ -296,6 +313,28 @@ function parseCliArgs(argv) {
 
     if (token.startsWith('--options=')) {
       flags.options = token.slice('--options='.length);
+      continue;
+    }
+
+    if (token === '--env-file') {
+      const nextToken = argv[index + 1];
+      if (nextToken === undefined) {
+        throw usageError('Missing value for --env-file');
+      }
+
+      flags.envFile = nextToken;
+      index += 1;
+      continue;
+    }
+
+    if (token === '--output' || token === '--format') {
+      const nextToken = argv[index + 1];
+      if (nextToken === undefined) {
+        throw usageError(`Missing value for ${token}`);
+      }
+
+      flags.output = nextToken;
+      index += 1;
       continue;
     }
 
@@ -352,6 +391,8 @@ function buildHelp(commandName) {
       '  --stdin              Read the JSON payload from stdin.',
       '  --options <json>     Optional JSON options for batch strict mode.',
       '  --cwd <path>         Resolve .env and Git identity from a different working directory.',
+      '  --env-file <path>    Load APTS variables from an explicit env file before running.',
+      '  --output <mode>      raw|structured (structured wraps success in a stable envelope).',
       '  --pretty             Pretty-print JSON output.',
       '  --help               Show this help.',
       '  Note:                Official client/CLI auto-fills project_url, agent identity, branch, and task_id (from env, local context file, or Git fallback) when missing.',
@@ -362,7 +403,7 @@ function buildHelp(commandName) {
   return [
     'APTS CLI',
     '',
-    'Thin official CLI over the exported APTS JavaScript client.',
+    'CLI-first official APTS interface for agents.',
     'Commands accept kebab-case or skill_name form, for example register-task or register_task.',
     '',
     'Usage:',
@@ -374,6 +415,8 @@ function buildHelp(commandName) {
     '',
     'Global flags:',
     '  --cwd <path>         Resolve .env and Git identity from a different working directory.',
+    '  --env-file <path>    Load APTS variables from a specific env file before running.',
+    '  --output <mode>      raw|structured (structured wraps success in a stable envelope).',
     '  --pretty             Pretty-print JSON output.',
     '  --help               Show this help.',
     '',
@@ -388,6 +431,7 @@ function buildHelp(commandName) {
     'Examples:',
     '  node .ia/apts/apts-cli.mjs resolve-git-identity --cwd .',
     '  node .ia/apts/apts-cli.mjs show-execution-context --pretty',
+    '  node .ia/apts/apts-cli.mjs register-task --json "{""title"":""Implement feature""}" --output structured',
     '  Get-Content register-task.json | node .ia/apts/apts-cli.mjs register-task --stdin',
     "  Get-Content payload.json | node .ia/apts/apts-cli.mjs update-task-status --stdin --options '{\"strict\":true}'",
   ].join('\n');
@@ -510,9 +554,42 @@ function resolveWorkingDirectory(rawPath) {
   return resolvedPath;
 }
 
+function resolveEnvFilePath(rawPath) {
+  const resolvedPath = path.resolve(rawPath);
+  if (!fs.existsSync(resolvedPath) || !fs.statSync(resolvedPath).isFile()) {
+    throw usageError(`--env-file must point to an existing file: ${rawPath}`);
+  }
+  return resolvedPath;
+}
+
+function resolveOutputFormat(rawValue) {
+  if (rawValue === undefined) {
+    return 'raw';
+  }
+
+  const normalized = String(rawValue).trim().toLowerCase();
+  if (normalized === 'raw' || normalized === 'json') {
+    return 'raw';
+  }
+
+  if (normalized === 'structured') {
+    return 'structured';
+  }
+
+  throw usageError('--output must be one of: raw, json, structured');
+}
+
 function writeJson(stream, value, pretty) {
   const spacing = pretty ? 2 : 0;
   stream.write(`${JSON.stringify(value, null, spacing)}\n`);
+}
+
+function buildSuccessPayload(result, commandName) {
+  return {
+    ok: true,
+    command: commandName || null,
+    data: result,
+  };
 }
 
 function buildErrorPayload(error, commandName) {
@@ -559,12 +636,17 @@ async function main() {
     process.chdir(resolveWorkingDirectory(flags.cwd));
   }
 
+  if (flags.envFile !== undefined) {
+    process.env.APTS_ENV_FILE = resolveEnvFilePath(flags.envFile);
+  }
+
   const client = await import('./apts-client.mjs');
   const payload = readPayload(flags, command);
   const options = readOptions(flags, command);
   const pretty = flags.pretty || process.stdout.isTTY;
+  const outputFormat = resolveOutputFormat(flags.output);
   const result = await command.invoke(client, payload, options);
-  writeJson(process.stdout, result, pretty);
+  writeJson(process.stdout, outputFormat === 'structured' ? buildSuccessPayload(result, commandName) : result, pretty);
 }
 
 main().catch((error) => {

@@ -40,8 +40,10 @@ const IDENTITY_FIELD_HINTS = {
   task_id: { env: 'APTS_TASK_ID', git: null },
   backlog_item_id: { env: 'APTS_BACKLOG_ITEM_ID', git: null },
 };
+const DEFAULT_ENV_FILE_NAMES = ['.env.local', '.env'];
 let envLoaded = false;
 let executionIdentityCache = null;
+let loadedEnvFiles = [];
 let storedExecutionContextCache = null;
 let storedExecutionContextLoaded = false;
 
@@ -89,13 +91,58 @@ function loadEnvFile(filePath) {
   }
 }
 
+function normalizeExplicitEnvFilePath(rawValue) {
+  if (typeof rawValue !== 'string') return '';
+
+  const trimmed = rawValue.trim();
+  if (!trimmed) return '';
+
+  const startsWithDouble = trimmed.startsWith('"') && trimmed.endsWith('"');
+  const startsWithSingle = trimmed.startsWith("'") && trimmed.endsWith("'");
+  const normalized = startsWithDouble || startsWithSingle ? trimmed.slice(1, -1) : trimmed;
+
+  return normalized.trim();
+}
+
+function buildEnvFileCandidates() {
+  const explicitEnvFile = normalizeExplicitEnvFilePath(process.env.APTS_ENV_FILE || process.env.APTS_DOTENV_PATH);
+  const candidates = [];
+
+  if (explicitEnvFile) {
+    candidates.push(path.resolve(explicitEnvFile));
+  }
+
+  let currentDirectory = process.cwd();
+  while (true) {
+    for (const fileName of DEFAULT_ENV_FILE_NAMES) {
+      candidates.push(path.join(currentDirectory, fileName));
+    }
+
+    const parentDirectory = path.dirname(currentDirectory);
+    if (parentDirectory === currentDirectory) {
+      break;
+    }
+
+    currentDirectory = parentDirectory;
+  }
+
+  return [...new Set(candidates)];
+}
+
+function getLoadedEnvFiles() {
+  return [...loadedEnvFiles];
+}
+
 function loadProjectEnv() {
   if (envLoaded) return;
   envLoaded = true;
 
-  const envPath = path.join(process.cwd(), '.env');
-  if (fs.existsSync(envPath) && fs.statSync(envPath).isFile()) {
-    loadEnvFile(envPath);
+  loadedEnvFiles = [];
+  for (const envPath of buildEnvFileCandidates()) {
+    if (fs.existsSync(envPath) && fs.statSync(envPath).isFile()) {
+      loadEnvFile(envPath);
+      loadedEnvFiles.push(envPath);
+    }
   }
 }
 
@@ -129,8 +176,10 @@ function getBaseUrl() {
 function getHeaders() {
   const apiKey = process.env.APTS_API_KEY;
   if (!apiKey) {
-    const expectedEnvPath = path.join(process.cwd(), '.env');
-    throw new AptsClientError(`Missing APTS_API_KEY. Checked process.env and ${expectedEnvPath}. Run this script from the project root or export APTS_API_KEY in your environment.`, {
+    const searchedEnvFiles = loadedEnvFiles.length
+      ? loadedEnvFiles.join(', ')
+      : `no .env.local or .env file found from ${process.cwd()} upward`;
+    throw new AptsClientError(`Missing APTS_API_KEY. Checked process.env and ${searchedEnvFiles}. Run this script from the project root, pass --env-file, or export APTS_API_KEY in your environment.`, {
       errorCode: 'MISSING_API_KEY',
       retriable: false,
     });
@@ -1536,6 +1585,7 @@ export {
   deleteBacklogItem,
   getBacklogItem,
   getExecutionContext,
+  getLoadedEnvFiles,
   getProjectConstraints,
   getTask,
   heartbeat,
