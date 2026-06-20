@@ -1,0 +1,67 @@
+<!-- GENERADO — no editar; fuente: spec/apts-surface.json -->
+
+<!-- APTS:START -->
+## APTS integration (managed section)
+
+You are a development agent integrated with APTS (Agentic Project Tracking Service).
+
+### Surface
+
+- **MCP-first.** The APTS MCP server (`apts-mcp`) is the primary surface and exposes one native tool per operation: `register_task`, `read_project_context`, `list_backlog_items`, `get_backlog_item`, `get_task`, `get_project_constraints`, `search_similar_bug_reports`, `create_backlog_item`, `update_backlog_item`, `delete_backlog_item`, `update_task_status`, `log_agent_progress`, `report_blocker`, `heartbeat`. Prefer these tools.
+- **CLI fallback.** When MCP is not available in the active runtime, use `node .ia/apts/apts-cli.js <command> --json @payload.json --output structured`. Same operations, same identity autofill.
+- Never generate fresh code that imports or bootstraps `apts-client.js` from scratch during a chat turn. Direct client usage lives only inside the bundled CLI/MCP entrypoints.
+
+### Backlog is the source of truth
+
+- The APTS backlog and APTS task state are the single operational source of truth for what to work on and its status.
+- Do not use local planning or tracking documents (checklists, mirrors, deleted compatibility files) as operational tracking, and do not read pending status from them. Enrich planning inside the APTS backlog with backlog operations instead of local checklist files.
+
+### Credentials
+
+If `APTS_API_KEY` is not available in the project environment, request it from the human operator before any protected APTS call. Store it as an environment variable or in the project's secret system. Never hardcode it in source, prompts, JSON, or backlog documents.
+
+Define `APTS_BASE_URL` and `APTS_API_KEY` in a `.env` file at the client project root:
+
+```env
+APTS_BASE_URL=https://apts.informaticos.ar/api
+APTS_API_KEY=place-your-api-key-here
+```
+
+If a secret manager is used instead of `.env`, it must expose the same variable names.
+
+### Identity autofill
+
+Identity fields are resolved from environment variables first, then the managed local execution context (`.apts/execution-context.json`, or `APTS_CONTEXT_FILE`), then local Git, when omitted in payloads:
+- `project_url`/`url`: `APTS_PROJECT_URL` or `git remote get-url origin`
+- `agent_name`: `APTS_AGENT_NAME` or `git config user.name`
+- `agent_email`: `APTS_AGENT_EMAIL` or `git config user.email`
+- `branch`: `APTS_BRANCH` or `git branch --show-current`
+- `task_id` for execution calls: `APTS_TASK_ID` or managed context
+
+Do not spend turns resolving identity manually. Use minimal payloads first and let the MCP server / CLI resolve protocol fields. Inspect identity sources only when a call reports missing required fields. If you call the raw HTTP API directly (without the official MCP/CLI), you must send all required identity fields explicitly.
+
+### Shell routing by runtime
+
+- **Claude Code:** use the Bash tool for POSIX scripts and tests; use PowerShell for Windows-native operations. Use the runtime's native non-blocking process primitives for long-running validation servers and stop them after tests.
+- **opencode:** use bash. For long-running servers under synchronous bash, use a background/PTY process primitive (e.g. an opencode background/pty plugin) rather than relying only on `&` or `nohup`.
+- Other runtimes: use the runtime's native background/PTY primitives; if unavailable, avoid server-dependent validation and report a blocker.
+
+### Resilience journal
+
+Maintain a local append-only resilience journal (e.g. `.apts/agent-resilience-log.jsonl`). It is an operational fallback, not a source of truth, and never replaces APTS. Record execution start, milestones, blockers, APTS sync failures, and completion. Never store secrets in it.
+
+### Mandatory rules
+
+0. For "next task", "continue backlog", "run backlog", or equivalent, invoke the APTS backlog orchestrator agent first; do not run direct implementation from the general agent. If the orchestrator is not installed/invocable, stop and ask the operator to install/fix it.
+1. Use MCP tools as the primary integration layer; use the CLI fallback only when MCP is unavailable. Prefer minimum payloads and avoid pre-flight Git identity commands.
+2. Invoke operations with contract-first JSON object payloads (e.g. `{"status":"review"}`).
+3. For bug/error/regression requests from chat, run read-only triage first: search the backlog for a matching non-deleted `bug` item (prefer `search_similar_bug_reports`) and verify the symptom is a real defect.
+   - If intent is ambiguous (question, clarification, diagnosis), stop at read-only triage and ask whether to register it as a bug in APTS.
+4. If no matching bug item exists, create it with `create_backlog_item` (`item_type: "bug"`) only after explicit user confirmation, capturing symptom, expected/observed behavior, and reproduction evidence. When a stable thread id exists, set `source_kind: "chat_request"` and `source_ref`.
+5. For "report this as a resolved bug in APTS", update the tracked item with `update_backlog_item`, set status `review` or `done`, and include resolution plus validation evidence.
+6. Do not start direct implementation for a new defect until it is represented in the backlog and the task can reference its `backlog_item_id`.
+7. Backlog execution: read with `list_backlog_items`; call `register_task` with `backlog_item_id` and use the returned `task_id` (this may resume interrupted work); call `read_project_context` before editing; send `heartbeat` periodically; record milestones with `log_agent_progress`; on blockers use `report_blocker` and stop.
+8. At completion set `review` first; promote to `done` only from review and only with recent execution activity.
+9. Never invent `project_url`, `agent_name`, or `branch`; let autofill resolve them or provide real values.
+10. Anti-loop retry policy: do not retry on `400/401/403/404` (contract/auth/existence — record and ask). Retry only on network errors, `429`, and `5xx`, at most 2 retries with short backoff; then report a blocker and stop.
+<!-- APTS:END -->

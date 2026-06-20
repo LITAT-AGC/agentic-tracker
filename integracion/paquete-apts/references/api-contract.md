@@ -17,17 +17,16 @@ Authorization: Bearer <APTS_API_KEY>
 
 Orden de preferencia:
 
-1. CLI oficial (`apts-cli.js` / `apts-cli.mjs`)
-2. Helper oficial (`apts-helper.js` / `apts-helper.mjs`) solo si el runtime no puede invocar shell de forma fiable
-3. Cliente crudo (`apts-client.js` / `apts-client.mjs`) solo dentro de helpers o wrappers predefinidos del proyecto
+1. MCP oficial (`apts-mcp.js`): superficie primaria con una tool nativa por operacion (Claude Code y opencode).
+2. CLI oficial (`apts-cli.js`): fallback universal para runtimes sin MCP y uso manual/automatizado.
+3. Cliente crudo (`apts-client.js`) solo dentro de los entrypoints MCP/CLI empaquetados.
 
 Reglas obligatorias:
 
-- Preferir el CLI via shell para operaciones base de APTS.
-- Usar el helper oficial solo cuando el runtime no permite shell o solo admite tools importables.
+- Preferir las tools MCP cuando el runtime soporte MCP; usar el CLI como fallback.
 - Nunca generar codigo nuevo por interaccion que importe o bootstrapee el cliente crudo desde cero.
 - Nunca construir JSON a mano con concatenacion cuando puedes pasar objetos, `--stdin`, o `--json @archivo.json`.
-- Dejar que el CLI/helper oficial resuelva identidad y contexto local antes de intentar rellenar campos manualmente.
+- Dejar que el MCP/CLI oficial resuelva identidad y contexto local antes de intentar rellenar campos manualmente.
 
 ## Resolucion de identidad
 
@@ -336,7 +335,7 @@ Ejemplo:
       "README.md"
     ],
     "commands_run": [
-      "node .ia/apts/apts-cli.mjs help heartbeat"
+      "node .ia/apts/apts-cli.js help heartbeat"
     ],
     "outcome": "success"
   }
@@ -380,9 +379,9 @@ Ejemplo:
 
 ## Flujo operativo recomendado
 
-1. Instalar el CLI oficial junto al cliente gemelo en `.ia/apts/` y usar esa superficie como via principal.
-2. Si el runtime no puede shellar el CLI de forma fiable, instalar el helper oficial y usarlo como fallback seguro.
-3. Empezar con payload minimo y dejar que el CLI/helper resuelva identidad automaticamente.
+1. Registrar el servidor MCP (`apts-mcp.js`) en el runtime y usar sus tools nativas como via principal.
+2. Si el runtime no soporta MCP, instalar el CLI oficial en `.ia/apts/` y usarlo como fallback.
+3. Empezar con payload minimo y dejar que el MCP/CLI resuelva identidad automaticamente.
 4. Listar backlog y decidir si reutilizar item existente o crear uno nuevo usando la regla de alcance exacto.
 5. Si la solicitud actual es un bugfix, error o regresion reportada por chat, verificar si ya existe un backlog item `bug` equivalente y reutilizarlo cuando corresponda; si no existe, crearlo.
 6. Si la solicitud es reportar un bug ya solucionado, actualizar ese item `bug` a `review` o `done` con evidencia de resolucion y validacion.
@@ -398,22 +397,15 @@ Ejemplo:
 Usa `--output structured` cuando quieras una envoltura estable para Custom Tools o parsers de agentes.
 
 ```bash
-node .ia/apts/apts-cli.mjs register-task --json '{"title":"Documentar payloads minimos de APTS"}' --output structured
-node .ia/apts/apts-cli.mjs read-project-context --json '{}' --output structured
-node .ia/apts/apts-cli.mjs heartbeat --json '{}' --output structured
-node .ia/apts/apts-cli.mjs log-agent-progress --json '{"message":"Se actualizaron las guias de integracion."}' --output structured
-node .ia/apts/apts-cli.mjs update-task-status --json '{"status":"review"}' --output structured
-node .ia/apts/apts-cli.mjs report-blocker --json '{"error_message":"Falta APTS_API_KEY"}' --output structured
+node .ia/apts/apts-cli.js register-task --json '{"title":"Documentar payloads minimos de APTS"}' --output structured
+node .ia/apts/apts-cli.js read-project-context --json '{}' --output structured
+node .ia/apts/apts-cli.js heartbeat --json '{}' --output structured
+node .ia/apts/apts-cli.js log-agent-progress --json '{"message":"Se actualizaron las guias de integracion."}' --output structured
+node .ia/apts/apts-cli.js update-task-status --json '{"status":"review"}' --output structured
+node .ia/apts/apts-cli.js report-blocker --json '{"error_message":"Falta APTS_API_KEY"}' --output structured
 ```
 
-Fallback con helper oficial:
-
-```js
-import apts from './.ia/apts/apts-helper.mjs';
-
-await apts.run('register-task', { title: 'Documentar payloads minimos de APTS' });
-await apts.run('heartbeat', {});
-```
+Via MCP (superficie primaria): las mismas operaciones se invocan como tools nativas (`register_task`, `heartbeat`, ...) tomando el `inputSchema` del contrato. El CLI anterior es el fallback cuando el runtime no soporta MCP.
 
 ## Ejemplos PowerShell
 
@@ -428,7 +420,7 @@ $heartbeat = @'
 }
 '@
 
-$heartbeat | node .ia/apts/apts-cli.mjs heartbeat --stdin --pretty
+$heartbeat | node .ia/apts/apts-cli.js heartbeat --stdin --pretty
 ```
 
 ```powershell
@@ -441,7 +433,7 @@ $heartbeat | node .ia/apts/apts-cli.mjs heartbeat --stdin --pretty
 }
 '@ | Set-Content -Path register-task.json
 
-Get-Content .\register-task.json | node .ia/apts/apts-cli.mjs register-task --stdin --pretty
+Get-Content .\register-task.json | node .ia/apts/apts-cli.js register-task --stdin --pretty
 ```
 
 `--json` robusto en PowerShell:
@@ -453,7 +445,7 @@ Get-Content .\register-task.json | node .ia/apts/apts-cli.mjs register-task --st
 Ejemplo `@archivo`:
 
 ```powershell
-node .ia/apts/apts-cli.mjs get-task --json @task-query.json --pretty
+node .ia/apts/apts-cli.js get-task --json @task-query.json --pretty
 ```
 
 Wrapper recomendado:
@@ -471,22 +463,21 @@ function Invoke-AptsCli {
     $args += '--pretty'
   }
 
-  node .ia/apts/apts-cli.mjs @args
+  node .ia/apts/apts-cli.js @args
 }
 ```
 
 CLI con env file explicito:
 
 ```powershell
-node .ia/apts/apts-cli.mjs show-execution-context --env-file .env --output structured
+node .ia/apts/apts-cli.js show-execution-context --env-file .env --output structured
 ```
 
 ## opencode.ai: Custom Tools y Skills
 
-- Instala `SKILL.md` y `apts_skills.json` en `.agents/skills/apts/` para discovery.
-- Crea un Custom Tool fino que reenvie `<command>` y el payload JSON al CLI oficial, por ejemplo `node .ia/apts/apts-cli.mjs <command> --json @payload.json --output structured`.
-- Si tu entorno de opencode.ai no puede invocar shell de forma fiable, implementa ese Custom Tool usando `apts-helper.mjs` o `apts-helper.js` en vez del cliente crudo.
-- Mantener la logica en el CLI/helper oficial reduce errores de quoting, identidad y formato.
+- Registra el servidor MCP en `opencode.json` (`mcp`) apuntando a `node .ia/apts/apts-mcp.js`; es la superficie primaria.
+- Como fallback, crea un Custom Tool fino que reenvie `<command>` y el payload JSON al CLI oficial, por ejemplo `node .ia/apts/apts-cli.js <command> --json @payload.json --output structured`.
+- Mantener la logica en el MCP/CLI oficial reduce errores de quoting, identidad y formato.
 
 ## Troubleshooting PowerShell (sin sorpresas)
 
@@ -501,7 +492,7 @@ Problemas mas comunes y regla de resolucion:
 Secuencia recomendada para `update-backlog-item`:
 
 ```powershell
-node .ia/apts/apts-cli.mjs update-backlog-item --json '{"backlog_item_id":"11111111-1111-1111-1111-111111111111","status":"review"}' --pretty
+node .ia/apts/apts-cli.js update-backlog-item --json '{"backlog_item_id":"11111111-1111-1111-1111-111111111111","status":"review"}' --pretty
 
 @'
 {
@@ -510,7 +501,7 @@ node .ia/apts/apts-cli.mjs update-backlog-item --json '{"backlog_item_id":"11111
 }
 '@ | Set-Content -Path backlog-update.json
 
-Get-Content .\backlog-update.json | node .ia/apts/apts-cli.mjs update-backlog-item --stdin --pretty
+Get-Content .\backlog-update.json | node .ia/apts/apts-cli.js update-backlog-item --stdin --pretty
 ```
 
 Validacion final obligatoria:
@@ -539,16 +530,14 @@ Validacion final obligatoria:
 
 - Usar payload JSON con forma de contrato para cada operacion (contract-first).
 - Para compatibilidad hacia atras, el cliente oficial puede aceptar firmas posicionales legadas en algunas funciones, pero la forma recomendada y estable es siempre objeto JSON.
-- Para agentes, el camino recomendado es la CLI oficial (`apts-cli.js` o `apts-cli.mjs`) junto a su cliente gemelo en la misma carpeta (`apts-client.js` o `apts-client.mjs`).
-- Si el runtime no puede usar shell, usar el helper oficial (`apts-helper.js` o `apts-helper.mjs`) junto al cliente gemelo.
-- El cliente crudo solo debe quedar dentro de helpers o wrappers predefinidos; nunca generar codigo nuevo que lo bootstrapee en cada interaccion.
-- Al migrar al CLI o helper oficial, retirar wrappers o scripts propios viejos que solo proxyeen operaciones base de APTS.
+- Para agentes, la superficie primaria es el servidor MCP (`apts-mcp.js`); el CLI oficial (`apts-cli.js`) es el fallback. Ambos viven en `.ia/apts/` junto al cliente unico (`apts-client.js`, ESM).
+- El cliente crudo solo debe quedar dentro de los entrypoints MCP/CLI empaquetados; nunca generar codigo nuevo que lo bootstrapee en cada interaccion.
+- Al migrar al MCP/CLI oficial, retirar wrappers o scripts propios viejos que solo proxyeen operaciones base de APTS.
 
 ## Cobertura esperada del cliente oficial
 
-- El cliente oficial de APTS (`apts-client.js` o `apts-client.mjs`) debe cubrir todas las operaciones de integracion publicadas en este contrato y en `apts_skills.json`.
-- El helper oficial de APTS (`apts-helper.js` o `apts-helper.mjs`) debe exponer esas mismas operaciones como superficie importable segura y delgada.
-- La CLI oficial de APTS (`apts-cli.js` o `apts-cli.mjs`) debe exponer esas mismas operaciones como comandos estables sin obligar al proyecto cliente a crear wrappers ad-hoc.
+- El cliente oficial de APTS (`apts-client.js`, ESM-only) debe exportar exactamente las operaciones publicadas en este contrato y en `apts_skills.json`.
+- El servidor MCP (`apts-mcp.js`) y el CLI (`apts-cli.js`) exponen esas mismas operaciones; sus tablas se derivan del contrato y `contract-check.js` aborta si hay desalineacion.
 - Un proyecto cliente integrado no deberia necesitar desarrollar scripts adicionales para cubrir operaciones base de APTS.
 
 ## Anti-patrones

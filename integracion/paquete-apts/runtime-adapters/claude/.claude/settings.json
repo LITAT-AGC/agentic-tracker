@@ -1,0 +1,24 @@
+{
+  "_generated": "GENERADO — no editar; fuente: spec/apts-surface.json",
+  "permissions": {
+    "allow": [
+      "Bash(node*apts-cli.js*)",
+      "Bash(node*apts-mcp.js*)",
+      "mcp__apts__register_task",
+      "mcp__apts__read_project_context",
+      "mcp__apts__list_backlog_items",
+      "mcp__apts__get_backlog_item",
+      "mcp__apts__get_task",
+      "mcp__apts__get_project_constraints",
+      "mcp__apts__search_similar_bug_reports",
+      "mcp__apts__create_backlog_item",
+      "mcp__apts__update_backlog_item",
+      "mcp__apts__delete_backlog_item",
+      "mcp__apts__update_task_status",
+      "mcp__apts__log_agent_progress",
+      "mcp__apts__report_blocker",
+      "mcp__apts__heartbeat"
+    ]
+  },
+  "hooks": {}
+}

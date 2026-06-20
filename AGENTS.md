@@ -36,12 +36,11 @@ npx playwright test
 ### 3. Cleanup (Optional but recommended)
 After testing is completed, reset or drop the PostgreSQL test database if you need a clean state for the next run.
 
-### 4. VS Code Shell Routing on Windows
-When developing from VS Code on Windows:
-- Run test commands from a WSL terminal/task.
-- Run APTS calls (official client/CLI commands) from a WSL terminal/task.
-- Run non-test operations not related to APTS (setup, file ops, git workflows, docs updates, local utilities) from a PowerShell terminal/task.
-- Prefer VS Code tasks that pin the shell per purpose so shell selection stays deterministic.
+### 4. Shell Routing by Runtime (Windows)
+Pick the shell by the active agent runtime, not by VS Code task:
+- **Claude Code:** use the Bash tool for POSIX scripts, tests, and APTS CLI calls; use PowerShell for Windows-native operations (setup, file ops, git workflows, docs updates, local utilities). Start long-running validation servers with a non-blocking process primitive (Bash background mode, or PowerShell `Start-Job`/`Start-Process`) and stop them after tests.
+- **opencode:** use bash; route long-running servers through a background/PTY primitive rather than relying only on `&` or `nohup`.
+- This mirrors the canonical *Shell routing by runtime* guidance shipped to client projects in the APTS integration package (`integracion/paquete-apts/runtime-adapters/spec/apts-surface.json` → `instructions.body`).
 
 ---
 
@@ -53,7 +52,7 @@ When developing from VS Code on Windows:
 - For any functional change in APTS that affects behavior exposed to integrators (API routes, payloads, statuses, auth flow, downloadable artifacts, or integration guidance), you must bump the public integration manifest `schema_version` and add a matching entry to `bootstrap.manifest_updates.notes`.
 - `bootstrap.manifest_updates.notes` is append-only version history: never replace it with only the latest change, never delete previous entries, and always prepend the new version entry.
 - If any downloadable integration artifact changes (clients, skills contract, guidelines, or agent templates), you must also version that specific artifact explicitly in the public manifest metadata (for example `artifact_version` / `updated_in_schema_version`) so local updaters can detect, overwrite, and clean legacy files deterministically.
-- Any new capability added to the APTS service must be reflected in the official downloadable integration client scripts (`integracion/paquete-apts/apts-client.js` and `integracion/paquete-apts/apts-client.mjs`) and in `integracion/paquete-apts/apts_skills.json`. Client integrators must not need to build ad-hoc scripts to cover base APTS integration features.
+- Any new capability added to the APTS service must be reflected in the single official downloadable integration client (`integracion/paquete-apts/apts-client.js`, ESM-only), in the MCP server (`integracion/paquete-apts/apts-mcp.js`), and in `integracion/paquete-apts/apts_skills.json` (the single source of truth). The CLI command table and the MCP tool list are derived/validated from the contract by `contract-check.js`, so a contract change propagates without hand-editing N files. Client integrators must not need to build ad-hoc scripts to cover base APTS integration features.
 
 ## APTS Operational Contract Quick Reference
 
@@ -145,7 +144,7 @@ These examples use the public contract shape exposed to clients and the official
 			"AGENTS.md"
 		],
 		"commands_run": [
-			"node .ia/apts/apts-cli.mjs heartbeat --stdin"
+			"node .ia/apts/apts-cli.js heartbeat --stdin"
 		],
 		"outcome": "success"
 	}
@@ -173,7 +172,7 @@ Prefer file payloads or here-strings on Windows instead of inline escaped JSON.
 }
 '@ | Set-Content -Path heartbeat.json
 
-Get-Content .\heartbeat.json | node .ia/apts/apts-cli.mjs heartbeat --stdin --pretty
+Get-Content .\heartbeat.json | node .ia/apts/apts-cli.js heartbeat --stdin --pretty
 ```
 
 ```powershell
@@ -186,7 +185,7 @@ $payload = @'
 }
 '@
 
-$payload | node .ia/apts/apts-cli.mjs register-task --stdin --pretty
+$payload | node .ia/apts/apts-cli.js register-task --stdin --pretty
 ```
 
 ### Frequent Errors

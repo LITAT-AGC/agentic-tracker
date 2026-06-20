@@ -1,10 +1,15 @@
 ---
-name: "APTS Backlog Orchestrator"
 description: "Use when: user asks to run next task, continue backlog, execute backlog, or orchestrate backlog-driven execution from APTS by taking the next ready item and delegating implementation to a subagent until completion or blocker."
-tools: ['agent', 'read', 'search', 'edit', 'execute']
-agents: ['Backlog Item Executor Dev Test Commit']
-argument-hint: "Global objective and scope for the cycle, for example: execute the next ready backlog items for this repository in APTS"
-user-invocable: true
+mode: primary
+tools:
+  task: true
+  read: true
+  grep: true
+  glob: true
+  list: true
+  edit: true
+  write: true
+  bash: true
 ---
 <!-- GENERADO — no editar; fuente: spec/apts-surface.json -->
 

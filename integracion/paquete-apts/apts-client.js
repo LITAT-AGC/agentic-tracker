@@ -1,6 +1,6 @@
-const { execSync } = require('node:child_process');
-const fs = require('node:fs');
-const path = require('node:path');
+import { execSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const TASK_STATUSES = ['todo', 'in_progress', 'review', 'done', 'stalled'];
@@ -1578,7 +1578,7 @@ async function heartbeat(inputOrTaskId, payload, options) {
   });
 }
 
-module.exports = {
+export {
   AptsClientError,
   clearStoredExecutionContext,
   createBacklogItem,

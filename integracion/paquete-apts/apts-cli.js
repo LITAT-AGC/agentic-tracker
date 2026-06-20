@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 
-const fs = require('node:fs');
-const path = require('node:path');
+import fs from 'node:fs';
+import path from 'node:path';
+import { contractOperations, checkCliContract } from './contract-check.js';
 
-const COMMANDS = {
+// Utility commands are not contract operations; they manage local identity and
+// execution context. Contract operations are derived from apts_skills.json below.
+const UTILITY_COMMANDS = {
   'resolve-git-identity': {
     description: 'Resolve project_url, agent_name, agent_email, and branch from local Git.',
     usage: 'apts-cli resolve-git-identity [--cwd <path>] [--pretty]',
@@ -23,6 +26,7 @@ const COMMANDS = {
     usage: 'apts-cli set-execution-context (--json <payload> | --stdin) [--cwd <path>] [--pretty]',
     expectsPayload: true,
     supportsOptions: false,
+    requiredFields: [],
     invoke: (client, payload) => client.setExecutionContext(payload),
   },
   'clear-execution-context': {
@@ -32,217 +36,52 @@ const COMMANDS = {
     supportsOptions: false,
     invoke: (client) => client.clearStoredExecutionContext(),
   },
-  'register-task': {
-    description: 'Create one task or a batch of tasks.',
-    usage: 'apts-cli register-task (--json <payload> | --stdin) [--options <json>] [--cwd <path>] [--pretty]',
-    expectsPayload: true,
-    supportsOptions: true,
-    invoke: (client, payload, options) => client.registerTask(payload, options),
-  },
-  'read-project-context': {
-    description: 'Read backlog, tasks, and recent history for one project.',
-    usage: 'apts-cli read-project-context (--json <payload> | --stdin) [--cwd <path>] [--pretty]',
-    expectsPayload: true,
-    supportsOptions: false,
-    invoke: (client, payload) => client.readProjectContext(payload),
-  },
-  'list-backlog-items': {
-    description: 'List backlog items ordered by priority and sort order.',
-    usage: 'apts-cli list-backlog-items (--json <payload> | --stdin) [--cwd <path>] [--pretty]',
-    expectsPayload: true,
-    supportsOptions: false,
-    invoke: (client, payload) => client.listBacklogItems(payload),
-  },
-  'get-backlog-item': {
-    description: 'Get one backlog item by id with optional full or compact view.',
-    usage: 'apts-cli get-backlog-item (--json <payload> | --stdin) [--cwd <path>] [--pretty]',
-    expectsPayload: true,
-    supportsOptions: false,
-    invoke: (client, payload) => client.getBacklogItem(payload),
-  },
-  'get-task': {
-    description: 'Get one task by id including associated logs and recent heartbeat data.',
-    usage: 'apts-cli get-task (--json <payload> | --stdin) [--cwd <path>] [--pretty]',
-    expectsPayload: true,
-    supportsOptions: false,
-    invoke: (client, payload) => client.getTask(payload),
-  },
-  'get-project-constraints': {
-    description: 'Get registered project constraints used by orchestrator and executor agents.',
-    usage: 'apts-cli get-project-constraints (--json <payload> | --stdin) [--cwd <path>] [--pretty]',
-    expectsPayload: true,
-    supportsOptions: false,
-    invoke: (client, payload) => client.getProjectConstraints(payload),
-  },
-  'search-similar-bug-reports': {
-    description: 'Find semantically similar bug reports in APTS backlog using OpenRouter embeddings.',
-    usage: 'apts-cli search-similar-bug-reports (--json <payload> | --stdin) [--cwd <path>] [--pretty]',
-    expectsPayload: true,
-    supportsOptions: false,
-    invoke: (client, payload) => client.searchSimilarBugReports(payload),
-  },
-  'create-backlog-item': {
-    description: 'Create one backlog item or a batch of backlog items.',
-    usage: 'apts-cli create-backlog-item (--json <payload> | --stdin) [--options <json>] [--cwd <path>] [--pretty]',
-    expectsPayload: true,
-    supportsOptions: true,
-    invoke: (client, payload, options) => client.createBacklogItem(payload, options),
-  },
-  'update-backlog-item': {
-    description: 'Update one backlog item or a batch of backlog items.',
-    usage: 'apts-cli update-backlog-item (--json <payload> | --stdin) [--options <json>] [--cwd <path>] [--pretty]',
-    expectsPayload: true,
-    supportsOptions: true,
-    invoke: (client, payload, options) => client.updateBacklogItem(payload, options),
-  },
-  'delete-backlog-item': {
-    description: 'Soft-delete one backlog item or a batch of backlog items.',
-    usage: 'apts-cli delete-backlog-item (--json <payload> | --stdin) [--options <json>] [--cwd <path>] [--pretty]',
-    expectsPayload: true,
-    supportsOptions: true,
-    invoke: (client, payload, options) => client.deleteBacklogItem(payload, options),
-  },
-  'update-task-status': {
-    description: 'Update one task status or a batch of task statuses.',
-    usage: 'apts-cli update-task-status (--json <payload> | --stdin) [--options <json>] [--cwd <path>] [--pretty]',
-    expectsPayload: true,
-    supportsOptions: true,
-    invoke: (client, payload, options) => client.updateTaskStatus(payload, options),
-  },
-  'log-agent-progress': {
-    description: 'Log technical progress for one task or a batch of tasks.',
-    usage: 'apts-cli log-agent-progress (--json <payload> | --stdin) [--options <json>] [--cwd <path>] [--pretty]',
-    expectsPayload: true,
-    supportsOptions: true,
-    invoke: (client, payload, options) => client.logAgentProgress(payload, options),
-  },
-  'report-blocker': {
-    description: 'Report one blocker or a batch of blockers.',
-    usage: 'apts-cli report-blocker (--json <payload> | --stdin) [--options <json>] [--cwd <path>] [--pretty]',
-    expectsPayload: true,
-    supportsOptions: true,
-    invoke: (client, payload, options) => client.reportBlocker(payload, options),
-  },
-  heartbeat: {
-    description: 'Send one heartbeat or a batch of heartbeats.',
-    usage: 'apts-cli heartbeat (--json <payload> | --stdin) [--options <json>] [--cwd <path>] [--pretty]',
-    expectsPayload: true,
-    supportsOptions: true,
-    invoke: (client, payload, options) => client.heartbeat(payload, options),
-  },
 };
 
-const COMMAND_HELP_DETAILS = {
-  'set-execution-context': {
-    requiredFields: [],
-    examples: [
-      "node .ia/apts/apts-cli.js set-execution-context --json '{\"task_id\":\"22222222-2222-2222-2222-222222222222\"}'",
-    ],
-  },
-  'register-task': {
-    requiredFields: ['title'],
-    examples: [
-      "node .ia/apts/apts-cli.js register-task --json '{\"title\":\"Implement feature\"}'",
-      'Get-Content register-task.json | node .ia/apts/apts-cli.js register-task --stdin --pretty',
-    ],
-  },
-  'read-project-context': {
-    requiredFields: [],
-    notes: [
-      'Use view=compact for agent loops that only need a summary and want to reduce token usage.',
-    ],
-    examples: [
-      "node .ia/apts/apts-cli.js read-project-context --json '{\"limit\":5,\"view\":\"compact\"}'",
-    ],
-  },
-  'list-backlog-items': {
-    requiredFields: [],
-    notes: [
-      'Use view=compact to list backlog with summary fields only when the agent does not need full descriptions yet.',
-    ],
-    examples: [
-      "node .ia/apts/apts-cli.js list-backlog-items --json '{\"status\":\"ready\",\"view\":\"compact\"}'",
-    ],
-  },
-  'get-backlog-item': {
-    requiredFields: ['backlog_item_id'],
-    examples: [
-      "node .ia/apts/apts-cli.js get-backlog-item --json '{\"backlog_item_id\":\"11111111-1111-1111-1111-111111111111\",\"view\":\"full\"}'",
-    ],
-  },
-  'get-task': {
-    requiredFields: ['task_id'],
-    examples: [
-      "node .ia/apts/apts-cli.js get-task --json '{\"task_id\":\"22222222-2222-2222-2222-222222222222\"}'",
-    ],
-  },
-  'get-project-constraints': {
-    requiredFields: [],
-    notes: [
-      'url auto-resolves from env/local context/Git when omitted in official client/CLI flows.',
-    ],
-    examples: [
-      "node .ia/apts/apts-cli.js get-project-constraints --json '{}'",
-    ],
-  },
-  'search-similar-bug-reports': {
-    requiredFields: ['query_text'],
-    examples: [
-      "node .ia/apts/apts-cli.js search-similar-bug-reports --json '{\"query_text\":\"Error 500 al guardar backlog\",\"top_k\":5,\"threshold\":0.78}'",
-    ],
-  },
-  'create-backlog-item': {
-    requiredFields: ['title'],
-    examples: [
-      "node .ia/apts/apts-cli.js create-backlog-item --json '{\"title\":\"Document APTS examples\"}'",
-    ],
-  },
-  'update-backlog-item': {
-    requiredFields: ['backlog_item_id'],
-    notes: [
-      'Use backlog_item_id in payloads. Do not send id for this command.',
-      'In PowerShell, validate with a short status-only payload first, then apply long acceptance_criteria text via file + --stdin if needed.',
-    ],
-    examples: [
-      "node .ia/apts/apts-cli.js update-backlog-item --json '{\"backlog_item_id\":\"11111111-1111-1111-1111-111111111111\",\"status\":\"review\"}'",
-      'Get-Content backlog-update.json | node .ia/apts/apts-cli.js update-backlog-item --stdin --pretty',
-    ],
-  },
-  'delete-backlog-item': {
-    requiredFields: ['backlog_item_id'],
-    notes: [
-      'Use backlog_item_id in payloads. Do not send id for this command.',
-    ],
-    examples: [
-      "node .ia/apts/apts-cli.js delete-backlog-item --json '{\"backlog_item_id\":\"11111111-1111-1111-1111-111111111111\"}'",
-    ],
-  },
-  'update-task-status': {
-    requiredFields: ['status'],
-    examples: [
-      "node .ia/apts/apts-cli.js update-task-status --json '{\"status\":\"review\"}'",
-    ],
-  },
-  'log-agent-progress': {
-    requiredFields: ['message'],
-    examples: [
-      "node .ia/apts/apts-cli.js log-agent-progress --json '{\"message\":\"Checkpoint\"}'",
-    ],
-  },
-  'report-blocker': {
-    requiredFields: ['error_message'],
-    examples: [
-      "node .ia/apts/apts-cli.js report-blocker --json '{\"error_message\":\"Tests are blocked by missing fixture\"}'",
-    ],
-  },
-  heartbeat: {
-    requiredFields: [],
-    examples: [
-      "node .ia/apts/apts-cli.js heartbeat --json '{}'",
-      'Get-Content heartbeat.json | node .ia/apts/apts-cli.js heartbeat --stdin --pretty',
-    ],
-  },
-};
+// Derive one command per contract operation. Name, description, payload/options
+// shape, and required fields all come from apts_skills.json (single source of truth).
+function buildCommands() {
+  const commands = { ...UTILITY_COMMANDS };
+
+  for (const op of contractOperations()) {
+    commands[op.cliCommand] = {
+      description: op.description,
+      usage: `apts-cli ${op.cliCommand} (--json <payload> | --stdin)${op.supportsBatch ? ' [--options <json>]' : ''} [--cwd <path>] [--pretty]`,
+      expectsPayload: true,
+      supportsOptions: op.supportsBatch,
+      requiredFields: op.requiredFields,
+      invoke: (client, payload, options) => client[op.clientExport](payload, options),
+    };
+  }
+
+  return commands;
+}
+
+const COMMANDS = buildCommands();
+
+// Fail fast if the derived command table drifts from the contract.
+checkCliContract(Object.keys(COMMANDS));
+
+function buildSamplePayload(requiredFields) {
+  const samples = {
+    title: 'Example title',
+    status: 'review',
+    message: 'Checkpoint reached',
+    error_message: 'Blocked: missing fixture',
+    query_text: 'Error 500 when saving backlog',
+    backlog_item_id: '11111111-1111-1111-1111-111111111111',
+    task_id: '22222222-2222-2222-2222-222222222222',
+    project_url: 'https://github.com/org/repo',
+    url: 'https://github.com/org/repo',
+    agent_name: 'Agent',
+    agent_email: 'agent@example.com',
+  };
+  const payload = {};
+  for (const field of requiredFields) {
+    payload[field] = samples[field] ?? 'value';
+  }
+  return payload;
+}
 
 function canonicalizeCommandName(value) {
   return String(value || '').trim().toLowerCase().replace(/_/g, '-');
@@ -374,17 +213,21 @@ function buildHelp(commandName) {
   }
 
   if (command) {
-    const details = COMMAND_HELP_DETAILS[normalized];
+    const requiredFields = command.requiredFields;
+    const hasRequiredInfo = command.expectsPayload && Array.isArray(requiredFields);
+    const example = hasRequiredInfo
+      ? `node .ia/apts/apts-cli.js ${normalized} --json '${JSON.stringify(buildSamplePayload(requiredFields))}'`
+      : null;
+
     return [
-      `APTS CLI`,
+      'APTS CLI',
       '',
       `${normalized}: ${command.description}`,
       '',
       `Usage: ${command.usage}`,
-      ...(details
-        ? ['', `Minimum payload fields: ${details.requiredFields.length ? details.requiredFields.join(', ') : 'none (resolved automatically from env, local context, or Git)'}`]
+      ...(hasRequiredInfo
+        ? ['', `Minimum payload fields: ${requiredFields.length ? requiredFields.join(', ') : 'none (resolved automatically from env, local context, or Git)'}`]
         : []),
-      ...(details?.notes?.length ? ['', 'Command notes:', ...details.notes.map((note) => `  - ${note}`)] : []),
       '',
       'Flags:',
       '  --json <payload>     Inline JSON payload or @path/to/payload.json.',
@@ -396,22 +239,23 @@ function buildHelp(commandName) {
       '  --pretty             Pretty-print JSON output.',
       '  --help               Show this help.',
       '  Note:                Official client/CLI auto-fills project_url, agent identity, branch, and task_id (from env, local context file, or Git fallback) when missing.',
-      ...(details ? ['', 'Examples:', ...details.examples.map((example) => `  ${example}`)] : []),
+      ...(example ? ['', 'Example:', `  ${example}`] : []),
     ].join('\n');
   }
 
   return [
     'APTS CLI',
     '',
-    'CLI-first official APTS interface for agents.',
+    'CLI fallback for the APTS workflow (MCP is the primary surface).',
     'Commands accept kebab-case or skill_name form, for example register-task or register_task.',
+    'The command table is derived from apts_skills.json (single source of truth).',
     '',
     'Usage:',
     '  apts-cli <command> [flags]',
     '  apts-cli help <command>',
     '',
     'Commands:',
-    ...Object.entries(COMMANDS).map(([name, command]) => `  ${name.padEnd(20)} ${command.description}`),
+    ...Object.entries(COMMANDS).map(([name, command]) => `  ${name.padEnd(28)} ${command.description.split('. ')[0]}`),
     '',
     'Global flags:',
     '  --cwd <path>         Resolve .env and Git identity from a different working directory.',
@@ -426,15 +270,27 @@ function buildHelp(commandName) {
     '  --options <json>     Optional JSON options for batch strict mode.',
     '  PowerShell tip:      Prefer --stdin or --json @payload.json for long payloads and multiline text.',
     '',
-    'Run `apts-cli help <command>` to see minimum required fields and copy-ready examples for that operation.',
+    'Run `apts-cli help <command>` to see minimum required fields and a copy-ready example for that operation.',
     '',
     'Examples:',
     '  node .ia/apts/apts-cli.js resolve-git-identity --cwd .',
     '  node .ia/apts/apts-cli.js show-execution-context --pretty',
     '  node .ia/apts/apts-cli.js register-task --json "{""title"":""Implement feature""}" --output structured',
     '  Get-Content register-task.json | node .ia/apts/apts-cli.js register-task --stdin',
-    "  Get-Content payload.json | node .ia/apts/apts-cli.js update-task-status --stdin --options '{\"strict\":true}'",
   ].join('\n');
+}
+
+function unwrapMatchingQuotes(value) {
+  if (typeof value !== 'string') return value;
+
+  const trimmed = value.trim();
+  if (trimmed.length < 2) return trimmed;
+
+  const startsWithDouble = trimmed.startsWith('"') && trimmed.endsWith('"');
+  const startsWithSingle = trimmed.startsWith('\'') && trimmed.endsWith('\'');
+
+  if (!startsWithDouble && !startsWithSingle) return trimmed;
+  return trimmed.slice(1, -1).trim();
 }
 
 function parseJsonText(rawText, label) {
@@ -487,19 +343,6 @@ function parseJsonText(rawText, label) {
   }
 
   throw usageError(`Invalid JSON in ${label}. If using PowerShell, prefer --stdin or --json @payload.json.`);
-}
-
-function unwrapMatchingQuotes(value) {
-  if (typeof value !== 'string') return value;
-
-  const trimmed = value.trim();
-  if (trimmed.length < 2) return trimmed;
-
-  const startsWithDouble = trimmed.startsWith('"') && trimmed.endsWith('"');
-  const startsWithSingle = trimmed.startsWith('\'') && trimmed.endsWith('\'');
-
-  if (!startsWithDouble && !startsWithSingle) return trimmed;
-  return trimmed.slice(1, -1).trim();
 }
 
 function readPayload(flags, command) {
@@ -640,7 +483,7 @@ async function main() {
     process.env.APTS_ENV_FILE = resolveEnvFilePath(flags.envFile);
   }
 
-  const client = require('./apts-client.js');
+  const client = await import('./apts-client.js');
   const payload = readPayload(flags, command);
   const options = readOptions(flags, command);
   const pretty = flags.pretty || process.stdout.isTTY;

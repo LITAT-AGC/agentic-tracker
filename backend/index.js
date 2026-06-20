@@ -1951,10 +1951,19 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.0.39';
+const integrationManifestSchemaVersion = '2.1.0';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.1.0',
+    date: '2026-06-20',
+    changes: [
+      'The APTS integration client was re-engineered to an MCP-first surface: a new zero-dependency stdio MCP server (apts-mcp.js) is the primary surface in Claude Code and opencode, with the official CLI (apts-cli.js) as the universal fallback for runtimes without MCP.',
+      'The downloadable package is now ESM-only and single-source: a 14-operation contract (apts_skills.json) drives a self-checked client/CLI/MCP via contract-check.js, one runtime-surface spec (runtime-adapters/spec/apts-surface.json) plus an idempotent generator (scripts/generate-adapters.js) materializes the per-runtime adapters client-side, and the operational instructions are unified in one managed section.',
+      'Legacy CommonJS client/CLI twins, the standalone helper artifacts, and the per-file VS Code agent adapters were retired from the manifest; only sources are published now and adapters are generated locally. Deprecated filenames (apts-client.mjs, apts-cli.mjs, apts-helper.js, apts-helper.mjs, intake-bugfix-apts.agent.md) are published for deterministic local cleanup.'
+    ]
+  },
   {
     version: '2.0.39',
     date: '2026-05-18',
@@ -2398,8 +2407,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'SKILL.md'),
     fileName: 'SKILL.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.39',
-    updatedInSchemaVersion: '2.0.39',
+    artifactVersion: '2.1.0',
+    updatedInSchemaVersion: '2.1.0',
     kind: 'skill_package',
     recommended: false,
     usagePriority: 'discovery',
@@ -2412,8 +2421,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-agent-guidelines.md'),
     fileName: 'apts-agent-guidelines.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.39',
-    updatedInSchemaVersion: '2.0.39',
+    artifactVersion: '2.1.0',
+    updatedInSchemaVersion: '2.1.0',
     kind: 'agent_guidelines',
     recommended: true,
     usagePriority: 'discovery',
@@ -2468,174 +2477,125 @@ const integrationArtifacts = {
     ],
     description: 'Orchestrator agent template that pulls ready backlog items from APTS.'
   },
-  vscode_bugfix_intake_agent_adapter: {
-    route: `${publicIntegrationBasePath}/agentes/vscode/intake-bugfix-apts.agent.md`,
-    filePath: path.join(integrationRoot, 'paquete-apts', 'runtime-adapters', 'vscode', 'agents', 'intake-bugfix-apts.agent.md'),
-    fileName: 'intake-bugfix-apts.agent.md',
-    contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.39',
-    updatedInSchemaVersion: '2.0.39',
-    kind: 'agent_runtime_adapter',
-    recommended: false,
-    usagePriority: 'optional_entrypoint',
-    syncAction: 'overwrite',
-    deprecatedFilenames: [],
-    runtime: 'vscode',
-    discoveryPath: '.github/agents',
-    requiredGlob: '*.agent.md',
-    targetRelativePath: '.github/agents/intake-bugfix-apts.agent.md',
-    canonicalSourceArtifactId: 'intake_bugfix_agent',
-    invocationName: 'APTS Bugfix Intake',
-    invocationAliases: ['Intake Bugfix APTS'],
-    description: 'VS Code discovery adapter for the APTS bugfix intake agent.'
-  },
-  vscode_orchestrator_agent_adapter: {
-    route: `${publicIntegrationBasePath}/agentes/vscode/apts-backlog-orchestrator.agent.md`,
-    filePath: path.join(integrationRoot, 'paquete-apts', 'runtime-adapters', 'vscode', 'agents', 'apts-backlog-orchestrator.agent.md'),
-    fileName: 'apts-backlog-orchestrator.agent.md',
-    contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.39',
-    updatedInSchemaVersion: '2.0.39',
-    kind: 'agent_runtime_adapter',
+  mcp_server: {
+    route: `${publicIntegrationBasePath}/apts-mcp.js`,
+    filePath: path.join(integrationRoot, 'paquete-apts', 'apts-mcp.js'),
+    fileName: 'apts-mcp.js',
+    contentType: 'application/javascript; charset=utf-8',
+    artifactVersion: '2.1.0',
+    updatedInSchemaVersion: '2.1.0',
+    kind: 'reference_mcp_server',
     recommended: true,
-    usagePriority: 'entrypoint',
+    usagePriority: 'primary',
+    optional: false,
     syncAction: 'overwrite',
     deprecatedFilenames: [],
-    runtime: 'vscode',
-    discoveryPath: '.github/agents',
-    requiredGlob: '*.agent.md',
-    targetRelativePath: '.github/agents/apts-backlog-orchestrator.agent.md',
-    canonicalSourceArtifactId: 'orchestrator_agent',
-    invocationName: 'APTS Backlog Orchestrator',
-    invocationAliases: ['Orquestador Backlog APTS'],
-    description: 'VS Code discovery adapter for the APTS backlog orchestrator agent.'
-  },
-  vscode_executor_agent_adapter: {
-    route: `${publicIntegrationBasePath}/agentes/vscode/backlog-item-executor-dev-test-commit.agent.md`,
-    filePath: path.join(integrationRoot, 'paquete-apts', 'runtime-adapters', 'vscode', 'agents', 'backlog-item-executor-dev-test-commit.agent.md'),
-    fileName: 'backlog-item-executor-dev-test-commit.agent.md',
-    contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '2.0.39',
-    updatedInSchemaVersion: '2.0.39',
-    kind: 'agent_runtime_adapter',
-    recommended: true,
-    usagePriority: 'worker',
-    syncAction: 'overwrite',
-    deprecatedFilenames: [],
-    runtime: 'vscode',
-    discoveryPath: '.github/agents',
-    requiredGlob: '*.agent.md',
-    targetRelativePath: '.github/agents/backlog-item-executor-dev-test-commit.agent.md',
-    canonicalSourceArtifactId: 'executor_agent',
-    invocationName: 'Backlog Item Executor Dev Test Commit',
-    invocationAliases: ['Ejecutor Item Backlog Dev Test Commit'],
-    description: 'VS Code discovery adapter for the backlog item worker agent.'
-  },
-  js_client_commonjs: {
-    route: `${publicIntegrationBasePath}/apts-client.js`,
-    filePath: path.join(integrationRoot, 'paquete-apts', 'apts-client.js'),
-    fileName: 'apts-client.js',
-    contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.0.39',
-    updatedInSchemaVersion: '2.0.39',
-    kind: 'reference_client',
-    recommended: false,
-    usagePriority: 'internal_dependency',
-    optional: true,
-    syncAction: 'overwrite',
-    deprecatedFilenames: [],
-    module_system: 'commonjs',
-    selection_rule: 'Use this file when the client project runs Node.js in CommonJS mode, typically with require(...) and without type=module in package.json.',
-    description: 'Optional JavaScript HTTP client for CommonJS runtimes.'
-  },
-  js_client_esm: {
-    route: `${publicIntegrationBasePath}/apts-client.mjs`,
-    filePath: path.join(integrationRoot, 'paquete-apts', 'apts-client.mjs'),
-    fileName: 'apts-client.mjs',
-    contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.0.39',
-    updatedInSchemaVersion: '2.0.39',
-    kind: 'reference_client',
-    recommended: false,
-    usagePriority: 'internal_dependency',
-    optional: true,
-    syncAction: 'overwrite',
-    deprecatedFilenames: [],
+    dependsOnArtifactIds: ['js_client', 'contract_check'],
     module_system: 'esm',
-    selection_rule: 'Use this file when the client project runs Node.js in ESM mode, typically with import/export or type=module in package.json.',
-    description: 'Optional JavaScript HTTP client for ESM runtimes.'
+    selection_rule: 'Primary integration surface. Zero-dependency stdio JSON-RPC MCP server that exposes one tool per contract operation. Register it in .mcp.json (Claude Code) or opencode.json (opencode), both pointing at this file run with node.',
+    description: 'Official MCP (stdio) server for APTS; primary cross-runtime surface for Claude Code and opencode.'
   },
-  js_helper_commonjs: {
-    route: `${publicIntegrationBasePath}/apts-helper.js`,
-    filePath: path.join(integrationRoot, 'paquete-apts', 'apts-helper.js'),
-    fileName: 'apts-helper.js',
-    contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.0.39',
-    updatedInSchemaVersion: '2.0.39',
-    kind: 'reference_helper',
-    recommended: false,
-    usagePriority: 'secondary',
-    optional: true,
-    syncAction: 'overwrite',
-    deprecatedFilenames: [],
-    dependsOnArtifactIds: ['js_client_commonjs'],
-    module_system: 'commonjs',
-    selection_rule: 'Use this file only when the runtime cannot shell the official CLI reliably and the client project runs in CommonJS mode. Keep it in the same folder as apts-client.js.',
-    description: 'Safe CommonJS helper surface over the official APTS client.'
-  },
-  js_helper_esm: {
-    route: `${publicIntegrationBasePath}/apts-helper.mjs`,
-    filePath: path.join(integrationRoot, 'paquete-apts', 'apts-helper.mjs'),
-    fileName: 'apts-helper.mjs',
-    contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.0.39',
-    updatedInSchemaVersion: '2.0.39',
-    kind: 'reference_helper',
-    recommended: false,
-    usagePriority: 'secondary',
-    optional: true,
-    syncAction: 'overwrite',
-    deprecatedFilenames: [],
-    dependsOnArtifactIds: ['js_client_esm'],
-    module_system: 'esm',
-    selection_rule: 'Use this file only when the runtime cannot shell the official CLI reliably and the client project runs in ESM mode. Keep it in the same folder as apts-client.mjs.',
-    description: 'Safe ESM helper surface over the official APTS client.'
-  },
-  js_cli_commonjs: {
+  js_cli: {
     route: `${publicIntegrationBasePath}/apts-cli.js`,
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-cli.js'),
     fileName: 'apts-cli.js',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.0.38',
-    updatedInSchemaVersion: '2.0.38',
+    artifactVersion: '2.1.0',
+    updatedInSchemaVersion: '2.1.0',
     kind: 'reference_cli',
-    recommended: false,
-    usagePriority: 'primary',
-    optional: true,
+    recommended: true,
+    usagePriority: 'fallback',
+    optional: false,
     syncAction: 'overwrite',
-    deprecatedFilenames: [],
-    dependsOnArtifactIds: ['js_client_commonjs'],
-    module_system: 'commonjs',
-    selection_rule: 'Use this file when the runtime prefers shellable Node.js commands over direct module imports and the client project runs in CommonJS mode. Keep it in the same folder as apts-client.js.',
-    description: 'Optional CommonJS CLI wrapper over the official APTS client.'
-  },
-  js_cli_esm: {
-    route: `${publicIntegrationBasePath}/apts-cli.mjs`,
-    filePath: path.join(integrationRoot, 'paquete-apts', 'apts-cli.mjs'),
-    fileName: 'apts-cli.mjs',
-    contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.0.38',
-    updatedInSchemaVersion: '2.0.38',
-    kind: 'reference_cli',
-    recommended: false,
-    usagePriority: 'primary',
-    optional: true,
-    syncAction: 'overwrite',
-    deprecatedFilenames: [],
-    dependsOnArtifactIds: ['js_client_esm'],
+    deprecatedFilenames: ['apts-cli.mjs'],
+    dependsOnArtifactIds: ['js_client', 'contract_check'],
     module_system: 'esm',
-    selection_rule: 'Use this file when the runtime prefers shellable Node.js commands over direct module imports and the client project runs in ESM mode. Keep it in the same folder as apts-client.mjs.',
-    description: 'Optional ESM CLI wrapper over the official APTS client.'
+    selection_rule: 'Universal CLI fallback for runtimes without MCP. The command table is derived and self-checked from apts_skills.json. Keep it beside apts-client.js, contract-check.js, and package.json in the workspace-local folder.',
+    description: 'Official ESM CLI for APTS; fallback surface when MCP is unavailable.'
+  },
+  js_client: {
+    route: `${publicIntegrationBasePath}/apts-client.js`,
+    filePath: path.join(integrationRoot, 'paquete-apts', 'apts-client.js'),
+    fileName: 'apts-client.js',
+    contentType: 'application/javascript; charset=utf-8',
+    artifactVersion: '2.1.0',
+    updatedInSchemaVersion: '2.1.0',
+    kind: 'reference_client',
+    recommended: false,
+    usagePriority: 'internal_dependency',
+    optional: true,
+    syncAction: 'overwrite',
+    deprecatedFilenames: ['apts-client.mjs', 'apts-helper.js', 'apts-helper.mjs'],
+    module_system: 'esm',
+    selection_rule: 'Single ESM HTTP client (named exports). It is an internal dependency of the CLI and MCP server, executed as a Node subprocess rather than imported by the host project. The former CommonJS/ESM twins and the standalone helper were retired in 2.1.0.',
+    description: 'Official ESM-only JavaScript HTTP client for APTS (internal dependency of the CLI and MCP server).'
+  },
+  contract_check: {
+    route: `${publicIntegrationBasePath}/contract-check.js`,
+    filePath: path.join(integrationRoot, 'paquete-apts', 'contract-check.js'),
+    fileName: 'contract-check.js',
+    contentType: 'application/javascript; charset=utf-8',
+    artifactVersion: '2.1.0',
+    updatedInSchemaVersion: '2.1.0',
+    kind: 'reference_contract_check',
+    recommended: false,
+    usagePriority: 'internal_dependency',
+    optional: true,
+    syncAction: 'overwrite',
+    deprecatedFilenames: [],
+    module_system: 'esm',
+    selection_rule: 'Startup self-check used by the CLI and MCP server to verify that client, CLI, and MCP stay aligned with apts_skills.json (14 operations). Install it beside apts-cli.js and apts-mcp.js.',
+    description: 'Contract self-check that validates client/CLI/MCP alignment with apts_skills.json.'
+  },
+  package_manifest: {
+    route: `${publicIntegrationBasePath}/package.json`,
+    filePath: path.join(integrationRoot, 'paquete-apts', 'package.json'),
+    fileName: 'package.json',
+    contentType: 'application/json; charset=utf-8',
+    artifactVersion: '2.1.0',
+    updatedInSchemaVersion: '2.1.0',
+    kind: 'package_manifest',
+    recommended: false,
+    usagePriority: 'internal_dependency',
+    optional: true,
+    syncAction: 'overwrite',
+    deprecatedFilenames: [],
+    selection_rule: 'Marks the workspace-local APTS folder as ESM ({ "type": "module" }) and declares the apts-cli/apts-mcp bins. Install it alongside the scripts so Node treats them as ES modules.',
+    description: 'ESM package manifest ({ type: module }) for the workspace-local APTS scripts.'
+  },
+  surface_spec: {
+    route: `${publicIntegrationBasePath}/runtime-adapters/spec/apts-surface.json`,
+    filePath: path.join(integrationRoot, 'paquete-apts', 'runtime-adapters', 'spec', 'apts-surface.json'),
+    fileName: 'apts-surface.json',
+    contentType: 'application/json; charset=utf-8',
+    artifactVersion: '2.1.0',
+    updatedInSchemaVersion: '2.1.0',
+    kind: 'runtime_surface_spec',
+    recommended: true,
+    usagePriority: 'discovery',
+    optional: false,
+    syncAction: 'overwrite',
+    deprecatedFilenames: [],
+    selection_rule: 'Single source of the agent surface (agents, commands, permissions, unified instructions, hooks). Feed it to generate-adapters.js to materialize the per-runtime adapters locally; never hand-edit the generated adapters.',
+    description: 'Single runtime-surface spec; input to the adapter generator.'
+  },
+  adapter_generator: {
+    route: `${publicIntegrationBasePath}/scripts/generate-adapters.js`,
+    filePath: path.join(integrationRoot, 'paquete-apts', 'scripts', 'generate-adapters.js'),
+    fileName: 'generate-adapters.js',
+    contentType: 'application/javascript; charset=utf-8',
+    artifactVersion: '2.1.0',
+    updatedInSchemaVersion: '2.1.0',
+    kind: 'adapter_generator',
+    recommended: true,
+    usagePriority: 'primary',
+    optional: false,
+    syncAction: 'overwrite',
+    deprecatedFilenames: ['intake-bugfix-apts.agent.md'],
+    dependsOnArtifactIds: ['surface_spec', 'contract_check'],
+    module_system: 'esm',
+    selection_rule: 'Idempotent generator that reads apts-surface.json and emits runtime-adapters/{claude,opencode,vscode}/. Run it locally to (re)generate adapters; the generated files are managed and must not be hand-edited. It renames the former intake adapter intake-bugfix-apts.agent.md to apts-bugfix-intake.agent.md.',
+    description: 'Idempotent generator that emits the per-runtime adapters from the surface spec.'
   }
 };
 
@@ -2745,51 +2705,41 @@ const buildIntegrationManifest = (req) => {
         companion_env: 'APTS_BASE_URL must point to the /api base URL published by this manifest.'
       },
       client_download_guidance: {
-        decision_input: 'Choose the module pair that matches the client project, but treat the official CLI as the default integration surface for AI agents.',
-        priority_order: ['official_cli', 'official_helper', 'direct_client'],
-        choose_commonjs_when: [
-          'the project uses require(...)',
-          'package.json does not declare type=module',
-          'the runtime expects .js files treated as CommonJS modules'
-        ],
-        choose_esm_when: [
-          'the project uses import/export',
-          'package.json declares type=module',
-          'the runtime expects .mjs files or ESM modules'
+        decision_input: 'The package is ESM-only and single-source. Prefer the official MCP server for runtimes that support MCP; otherwise use the official CLI. Both run the same ESM client as a Node subprocess.',
+        module_system: 'esm_only',
+        priority_order: ['official_mcp', 'official_cli', 'direct_client'],
+        choose_mcp_when: [
+          'the runtime supports MCP servers (for example Claude Code via .mcp.json or opencode via opencode.json)',
+          'you want native tools backed by the contract, identical across runtimes',
+          'the integration is driven by an AI agent that can register an stdio MCP server'
         ],
         choose_cli_when: [
-          'the runtime can invoke shell commands or command-backed tools',
-          'the integration is driven by an AI agent, Custom Tool, task runner, or automation shell',
-          'you want the lowest-friction path with stable structured output and built-in env/context resolution'
+          'the runtime cannot register an MCP server but can invoke shell commands or command-backed tools',
+          'the integration is driven by an AI agent, Custom Tool, task runner, or automation shell without MCP',
+          'you want the lowest-friction fallback with stable structured output and built-in env/context resolution'
         ],
-        choose_helper_when: [
-          'the runtime cannot shell the CLI reliably',
-          'the project needs a predefined importable wrapper that hides the client surface from the agent',
-          'you need a safe direct-import surface without writing new bootstrap code during each interaction'
-        ],
-        ai_agent_rule: 'For AI agents, the official CLI is the primary interface. The helper is the only supported direct-import fallback when shell execution is not viable.',
-        cli_dependency_rule: 'apts-cli.js depends on apts-client.js and apts-cli.mjs depends on apts-client.mjs. Keep each CLI and its matching client artifact together in the same workspace-local folder.',
-        helper_dependency_rule: 'apts-helper.js depends on apts-client.js and apts-helper.mjs depends on apts-client.mjs. Keep each helper and its matching client artifact together in the same workspace-local folder.',
-        direct_client_rule: 'Direct apts-client usage is allowed only inside predefined helpers or thin project wrappers. Do not generate fresh direct-client bootstrap code during each interaction.',
-        structured_output_rule: 'When a Custom Tool or parser needs a stable response envelope, call the CLI with --output structured.',
+        ai_agent_rule: 'For AI agents, the official MCP server (apts-mcp.js) is the primary interface and the official CLI (apts-cli.js) is the universal fallback when MCP is unavailable.',
+        mcp_dependency_rule: 'apts-mcp.js and apts-cli.js both depend on apts-client.js and contract-check.js. Install package.json so Node treats the folder as ESM, and keep all of these files together in the same workspace-local folder.',
+        direct_client_rule: 'Direct apts-client usage is allowed only inside the official CLI/MCP server or thin project wrappers. Do not generate fresh direct-client bootstrap code during each interaction.',
+        structured_output_rule: 'When a Custom Tool or parser needs a stable response envelope from the CLI, call it with --output structured. The MCP server already returns structuredContent.',
         env_resolution_rule: 'When the runtime does not execute from the project root, call the CLI with --env-file <path> or set APTS_ENV_FILE so environment lookup stays deterministic.',
-        official_script_integrity_rule: 'For base APTS operations, use only official scripts published by this manifest (apts-cli.*, apts-helper.*, and apts-client.*). Do not merge legacy wrapper snippets into those files.',
-        adapter_exception_rule: 'If runtime-specific glue is still needed, keep it as a thin adapter that delegates to the official script unchanged.',
-        legacy_wrapper_cleanup_rule: 'After installing the official client or CLI, remove older project-local scripts that only wrapped base APTS operations such as register_task, read_project_context, update_task_status, log_agent_progress, report_blocker, or heartbeat. Keep only thin runtime-specific adapters when discovery requires them.',
+        official_script_integrity_rule: 'For base APTS operations, use only official scripts published by this manifest (apts-mcp.js, apts-cli.js, apts-client.js, contract-check.js). Do not merge legacy wrapper snippets into those files.',
+        adapter_exception_rule: 'If runtime-specific glue is still needed, keep it as a thin adapter that delegates to the official MCP/CLI unchanged.',
+        legacy_wrapper_cleanup_rule: 'After installing the official MCP server or CLI, remove older project-local scripts that only wrapped base APTS operations such as register_task, read_project_context, update_task_status, log_agent_progress, report_blocker, or heartbeat. Keep only thin runtime-specific adapters when discovery requires them.',
         anti_patterns: [
           'Generating ad-hoc code snippets that import or bootstrap apts-client during each interaction.',
           'Hand-building raw JSON strings when a file-backed or object-backed payload is available.',
           'Running manual Git identity pre-flight before every APTS call.'
         ],
-        default_rule: 'If in doubt, install the matching client plus CLI first. Only add the helper when shell execution is not viable.'
+        default_rule: 'If in doubt, register the MCP server first. Use the CLI as the fallback when the runtime cannot run MCP.'
       },
       ai_agent_recommended_usage: {
         title: 'Uso recomendado para Agentes de IA',
-        priority_order: ['CLI', 'Helper', 'Direct Client'],
+        priority_order: ['MCP', 'CLI', 'Direct Client'],
         rules: [
-          'Prefer the official CLI via shell instead of importing JavaScript modules directly.',
-          'Use the official helper only when shell execution is not viable in that runtime.',
-          'Instantiate or import the raw APTS client directly only inside predefined project helpers or wrappers.',
+          'Prefer the official MCP server (apts-mcp.js) registered as an stdio MCP server in the runtime.',
+          'Use the official CLI via shell as the fallback when the runtime cannot register an MCP server.',
+          'Instantiate or import the raw APTS client directly only inside the official CLI/MCP server or predefined project wrappers.',
           'Never generate new per-interaction code that bootstraps the client from scratch.',
           'Use contract-first JSON object payloads and avoid manual JSON string assembly whenever a safer transport exists.'
         ]
@@ -2797,20 +2747,20 @@ const buildIntegrationManifest = (req) => {
       opencode_ai_guidance: {
         title: 'opencode.ai',
         recommended_skill_path: '.agents/skills/apts',
-        custom_tool_strategy: 'Create one thin Custom Tool that shells the official CLI and requests --output structured.',
+        mcp_strategy: 'Register apts-mcp.js as an stdio MCP server in opencode.json so the contract tools are available natively.',
+        custom_tool_strategy: 'If a Custom Tool is preferred over MCP, create one thin tool that shells the official CLI and requests --output structured.',
         custom_tool_command_examples: [
-          'node .ia/apts/apts-cli.mjs <command> --json @payload.json --output structured',
           'node .ia/apts/apts-cli.js <command> --json @payload.json --output structured'
         ],
-        helper_fallback: 'If the opencode.ai runtime cannot shell reliably, implement the Custom Tool on top of apts-helper.* instead of importing the raw client.',
+        cli_fallback: 'If the opencode.ai runtime cannot register the MCP server, drive the integration through the official CLI instead of importing the raw client.',
         skill_strategy: 'Expose SKILL.md and apts_skills.json for discovery and keep them delegating to the scripts stored in .ia/apts.',
         anti_patterns: [
           'Duplicating the client bootstrap logic inside the Custom Tool implementation.',
-          'Embedding raw HTTP calls or handwritten JSON string assembly into the tool when the official CLI/helper already covers the operation.'
+          'Embedding raw HTTP calls or handwritten JSON string assembly into the tool when the official MCP/CLI already covers the operation.'
         ]
       },
       powershell_cli_safety: {
-        applies_to: ['apts-cli.js', 'apts-cli.mjs'],
+        applies_to: ['apts-cli.js'],
         mandatory_field_reminders: {
           update_backlog_item: 'Use backlog_item_id in payloads. Do not send id for update-backlog-item or delete-backlog-item operations.',
           update_payload_shape: 'Use one JSON object for single update calls, or a non-empty JSON array for batch calls.'
@@ -2857,8 +2807,9 @@ const buildIntegrationManifest = (req) => {
         discovery_path: '.github/agents',
         required_glob: '*.agent.md',
         reload_required_after_sync: true,
+        generation_note: 'Per-runtime adapters are no longer downloaded individually. Generate them locally with the adapter_generator (scripts/generate-adapters.js) from the surface_spec, then copy runtime-adapters/vscode/agents/*.agent.md into .github/agents.',
         validation_checklist: [
-          'Confirm orchestrator and executor adapters exist in .github/agents, plus the intake adapter when bug-intake custom flows are desired.',
+          'Confirm orchestrator and executor adapters exist in .github/agents, plus the intake adapter (apts-bugfix-intake.agent.md) when bug-intake custom flows are desired.',
           'Validate YAML frontmatter for each adapter and ensure name is present and unique.',
           'Reload VS Code window so the runtime reindexes custom agents.'
         ]
@@ -2866,19 +2817,25 @@ const buildIntegrationManifest = (req) => {
       agent_runtime_adapters: {
         required_for_custom_agents: true,
         installation_state_policy: 'If the runtime is VS Code and required adapters are missing in .github/agents, custom-agent installation is incomplete.',
+        generation: {
+          spec_artifact_id: 'surface_spec',
+          generator_artifact_id: 'adapter_generator',
+          output_dir: 'runtime-adapters/vscode/agents',
+          policy: 'Generated adapters are managed: run the generator to (re)materialize them; never hand-edit them. They are not published as individual downloadable artifacts.'
+        },
         mappings: [
           {
             runtime: 'vscode',
             canonical_artifact_id: 'intake_bugfix_agent',
-            adapter_artifact_id: 'vscode_bugfix_intake_agent_adapter',
-            target_relative_path: '.github/agents/intake-bugfix-apts.agent.md',
+            generated_by_artifact_id: 'adapter_generator',
+            target_relative_path: '.github/agents/apts-bugfix-intake.agent.md',
             invocation_name: 'APTS Bugfix Intake',
             invocation_aliases: ['Intake Bugfix APTS']
           },
           {
             runtime: 'vscode',
             canonical_artifact_id: 'orchestrator_agent',
-            adapter_artifact_id: 'vscode_orchestrator_agent_adapter',
+            generated_by_artifact_id: 'adapter_generator',
             target_relative_path: '.github/agents/apts-backlog-orchestrator.agent.md',
             invocation_name: 'APTS Backlog Orchestrator',
             invocation_aliases: ['Orquestador Backlog APTS']
@@ -2886,7 +2843,7 @@ const buildIntegrationManifest = (req) => {
           {
             runtime: 'vscode',
             canonical_artifact_id: 'executor_agent',
-            adapter_artifact_id: 'vscode_executor_agent_adapter',
+            generated_by_artifact_id: 'adapter_generator',
             target_relative_path: '.github/agents/backlog-item-executor-dev-test-commit.agent.md',
             invocation_name: 'Backlog Item Executor Dev Test Commit',
             invocation_aliases: ['Ejecutor Item Backlog Dev Test Commit']
@@ -2907,8 +2864,8 @@ const buildIntegrationManifest = (req) => {
       official_integration_script_policy: {
         required: true,
         scope: 'base_apts_contract_operations',
-        allowed_artifact_ids: ['js_client_commonjs', 'js_client_esm', 'js_helper_commonjs', 'js_helper_esm', 'js_cli_commonjs', 'js_cli_esm'],
-        single_source_of_truth: 'For base integration operations, invoke only official scripts published by APTS in this manifest, preferring CLI first and helper second.',
+        allowed_artifact_ids: ['mcp_server', 'js_cli', 'js_client', 'contract_check'],
+        single_source_of_truth: 'For base integration operations, invoke only official scripts published by APTS in this manifest, preferring the MCP server first and the CLI second.',
         mixed_script_forbidden: 'Do not merge, splice, or partially reuse legacy local wrapper code inside downloaded official scripts.',
         migration_rule: 'If legacy wrappers still contain project-specific logic, extract that logic into a thin adapter and keep official scripts unchanged.'
       },
@@ -2948,18 +2905,18 @@ const buildIntegrationManifest = (req) => {
         forbidden_content: ['APTS_API_KEY', 'other secrets', 'tokens', 'credentials']
       },
       recommended_first_steps: [
-        'Install the matching client and official CLI in a workspace-local folder such as .ia/apts, and use the CLI as the primary interface for AI agents.',
-        'Only if shell execution is unavailable, install the official helper as the direct-import fallback instead of exposing the raw client.',
-        'Use official CLI/helper with minimal payloads first; avoid manual Git identity discovery unless a required-field error forces protocol debugging.',
+        'Install the ESM-only scripts (apts-client.js, apts-cli.js, apts-mcp.js, contract-check.js, package.json) in a workspace-local folder such as .ia/apts; register apts-mcp.js as the primary MCP surface and keep apts-cli.js as the fallback.',
+        'If the runtime cannot register an MCP server, drive the integration through the official CLI instead of exposing the raw client.',
+        'Use the MCP server or CLI with minimal payloads first; avoid manual Git identity discovery unless a required-field error forces protocol debugging.',
         'If APTS_API_KEY is not yet present in the environment, request APTS_API_KEY from the operator and confirm APTS_BASE_URL as well.',
         'Create or update a .env file at the client project root with APTS_BASE_URL and APTS_API_KEY before using protected APIs.',
         'Ensure the project has AGENTS.md or .github/copilot-instructions.md. Create AGENTS.md from apts-agent-guidelines.md if neither file exists, or merge/update one APTS-managed section if an instruction file already exists.',
         'Create a workspace-local integration folder such as .ia/apts, place the APTS contract and matching scripts there, and only then wire runtime-specific adapters if needed.',
-        'If the runtime is VS Code and custom agents are required, install runtime adapters in .github/agents before backlog execution and reload the editor window after sync.',
-        'If the runtime is opencode.ai, install discovery assets under .agents/skills/apts and create one thin Custom Tool that shells the CLI with --output structured.',
+        'If the runtime is VS Code and custom agents are required, generate the adapters locally with scripts/generate-adapters.js, copy runtime-adapters/vscode/agents/*.agent.md into .github/agents, and reload the editor window after sync.',
+        'If the runtime is opencode.ai, register apts-mcp.js in opencode.json (or, without MCP, create one thin Custom Tool that shells the CLI with --output structured) and install discovery assets under .agents/skills/apts.',
         'Treat interrupted execution as resumable work: call register_task with backlog_item_id so APTS can resume existing stalled/todo/in_progress tasks for that backlog item instead of creating duplicates.',
         'Do not merge legacy local wrappers into official APTS scripts; keep official scripts unchanged and move extra project logic to thin adapters when needed.',
-        'If the project previously used ad-hoc APTS wrapper scripts for base operations, remove them once the official CLI or helper is installed and keep only thin discovery adapters when the runtime still needs them.',
+        'If the project previously used ad-hoc APTS wrapper scripts or the retired CommonJS/helper artifacts (apts-client.mjs, apts-cli.mjs, apts-helper.js, apts-helper.mjs), remove them once the official MCP server or CLI is installed and keep only thin discovery adapters when the runtime still needs them.',
         'Prepare a local append-only resilience journal, for example at .apts/agent-resilience-log.jsonl, without treating it as a source of truth.',
         'Inspect local files that currently contain backlog, planning, or operational tracking.',
         'If the runtime supports custom agents and the current chat may be a new defect report, install or invoke the APTS Bugfix Intake agent before direct execution.',
@@ -2968,7 +2925,7 @@ const buildIntegrationManifest = (req) => {
         'Create or update backlog_items in APTS to reflect that initial state.',
         'From that point onward, use APTS as the primary tracking system and do not invent work outside APTS.'
       ],
-      operator_prompt_template: 'Read this public manifest, understand that APTS is the tracking source of truth, install the official CLI plus matching client in .ia/apts as the primary integration surface for AI agents, request APTS_BASE_URL and APTS_API_KEY from the operator if missing, store them in a .env file at the client project root (or equivalent secret store), prepare a local append-only resilience journal, and if the current user request may describe a new bug, error, or regression from chat, first confirm whether the user wants it registered as a bug in APTS before creating or updating any tracked bug item.'
+      operator_prompt_template: 'Read this public manifest, understand that APTS is the tracking source of truth, install the ESM-only scripts in .ia/apts and register apts-mcp.js as the primary integration surface for AI agents (with apts-cli.js as the fallback), request APTS_BASE_URL and APTS_API_KEY from the operator if missing, store them in a .env file at the client project root (or equivalent secret store), prepare a local append-only resilience journal, and if the current user request may describe a new bug, error, or regression from chat, first confirm whether the user wants it registered as a bug in APTS before creating or updating any tracked bug item.'
     },
     entrypoint: buildAbsoluteUrl(req, publicIntegrationBasePath),
     api_base_url: buildAbsoluteUrl(req, '/api'),
@@ -2989,12 +2946,12 @@ const buildIntegrationManifest = (req) => {
       'If APTS_API_KEY is missing, request it from the operator before any protected API call.',
       'Store APTS_BASE_URL and APTS_API_KEY in a .env file at the root of the client project, or in an equivalent project secret store.',
       'Install APTS integration artifacts in a workspace-local base folder such as .ia/apts.',
-      'For AI agents, install the matching client plus the official CLI first and treat the CLI as the primary interface.',
-      'If shell execution is unavailable in that runtime, install the official helper as the only supported direct-import fallback.',
+      'For AI agents, install the ESM-only scripts and register apts-mcp.js as the primary MCP surface; treat apts-cli.js as the universal fallback.',
+      'If the runtime cannot register an MCP server, drive the integration through the official CLI as the fallback.',
       'When consuming manifest artifacts, filter by runtime first (runtime query param or client-side equivalent), then apply recommended entries from that compatible subset.',
       'Use runtime-specific adapter paths only when needed for discovery (.github/skills/apts, .agents/skills/apts, or .claude/skills/apts), and avoid user-global skill installation.',
-      'If the runtime is opencode.ai, expose SKILL.md and apts_skills.json under .agents/skills/apts and create one thin Custom Tool that shells the official CLI with --output structured.',
-      'If using VS Code custom agents, install the published agent runtime adapters into .github/agents and reload the window so those agents become discoverable.',
+      'If the runtime is opencode.ai, register apts-mcp.js in opencode.json (or, without MCP, create one thin Custom Tool that shells the official CLI with --output structured) and expose SKILL.md and apts_skills.json under .agents/skills/apts.',
+      'If using VS Code custom agents, generate the runtime adapters locally with scripts/generate-adapters.js, copy runtime-adapters/vscode/agents/*.agent.md into .github/agents, and reload the window so those agents become discoverable.',
       'Maintain the local resilience log described in the bootstrap section; it is append-only and must not replace APTS as the source of truth.',
       'Download and install the skills contract first.',
       'Read the base agent guidelines before the first APTS API call.',
@@ -3004,15 +2961,15 @@ const buildIntegrationManifest = (req) => {
       'Only after that explicit confirmation should the issue be represented in APTS backlog as a bug item before registering execution work or starting implementation.',
       'If the current chat asks to report a solved bug, update the tracked bug backlog item and add resolution details with verification evidence.',
       'If the runtime is VS Code on Windows, route tests through WSL terminals/tasks and route non-test operations through PowerShell terminals/tasks.',
-      'Choose the reference client that matches the client project module system: apts-client.js for CommonJS or apts-client.mjs for ESM.',
-      'Keep the matching CLI beside the matching client file, and add the matching helper only when shell execution is unavailable.',
-      'Do not run manual identity pre-flight commands by default; let official CLI/helper auto-fill protocol fields and inspect execution context only when a call reports missing required data.',
-      'Official APTS CLI/helper auto-fills missing identity fields from environment variables first, local managed execution context second, and local Git as fallback; provide explicit identity fields only when raw API calls are used.',
-      'Official CLI/helper persist managed execution context in .apts/execution-context.json by default (override with APTS_CONTEXT_FILE) so repeated execution calls can omit task_id and identity fields.',
+      'The package is ESM-only and single-source: install apts-client.js (the single ESM client), apts-cli.js, apts-mcp.js, contract-check.js, and package.json together so Node treats them as ES modules.',
+      'Keep the CLI and MCP server beside apts-client.js and contract-check.js; prefer the MCP server and use the CLI as the fallback.',
+      'Do not run manual identity pre-flight commands by default; let the official MCP/CLI auto-fill protocol fields and inspect execution context only when a call reports missing required data.',
+      'The official MCP/CLI auto-fills missing identity fields from environment variables first, local managed execution context second, and local Git as fallback; provide explicit identity fields only when raw API calls are used.',
+      'The official MCP/CLI persist managed execution context in .apts/execution-context.json by default (override with APTS_CONTEXT_FILE) so repeated execution calls can omit task_id and identity fields.',
       'Use register_task with backlog_item_id to resume interrupted work for that backlog item before creating additional execution tasks.',
       'Do not force task status done for interrupted executions: pass through review first and ensure recent heartbeat or progress logs exist before closing as done.',
       'For base APTS operations, use only official scripts published by this manifest and never merge legacy wrapper code into downloaded managed scripts.',
-      'After installing the official client or CLI, remove older local APTS wrapper scripts for base operations to avoid drift. Keep only thin runtime-specific discovery adapters when required.',
+      'After installing the official MCP server or CLI, remove older local APTS wrapper scripts and the retired CommonJS/helper artifacts (apts-client.mjs, apts-cli.mjs, apts-helper.js, apts-helper.mjs) to avoid drift. Keep only thin runtime-specific discovery adapters when required.',
       'Download the optional agent templates only if your runtime supports custom agents.',
       'Use APTS_BASE_URL with the published /api base path.'
     ],
@@ -3092,15 +3049,13 @@ app.get(`${publicIntegrationBasePath}/agent-guidelines.md`, async (req, res) => 
 app.get(`${publicIntegrationBasePath}/agentes/intake-bugfix-apts.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'intake_bugfix_agent'));
 app.get(`${publicIntegrationBasePath}/agentes/ejecutor-item-backlog-dev-test-commit.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'executor_agent'));
 app.get(`${publicIntegrationBasePath}/agentes/orquestador-backlog-apts.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'orchestrator_agent'));
-app.get(`${publicIntegrationBasePath}/agentes/vscode/intake-bugfix-apts.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'vscode_bugfix_intake_agent_adapter'));
-app.get(`${publicIntegrationBasePath}/agentes/vscode/apts-backlog-orchestrator.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'vscode_orchestrator_agent_adapter'));
-app.get(`${publicIntegrationBasePath}/agentes/vscode/backlog-item-executor-dev-test-commit.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'vscode_executor_agent_adapter'));
-app.get(`${publicIntegrationBasePath}/apts-client.js`, async (req, res) => sendIntegrationArtifact(req, res, 'js_client_commonjs'));
-app.get(`${publicIntegrationBasePath}/apts-client.mjs`, async (req, res) => sendIntegrationArtifact(req, res, 'js_client_esm'));
-app.get(`${publicIntegrationBasePath}/apts-helper.js`, async (req, res) => sendIntegrationArtifact(req, res, 'js_helper_commonjs'));
-app.get(`${publicIntegrationBasePath}/apts-helper.mjs`, async (req, res) => sendIntegrationArtifact(req, res, 'js_helper_esm'));
-app.get(`${publicIntegrationBasePath}/apts-cli.js`, async (req, res) => sendIntegrationArtifact(req, res, 'js_cli_commonjs'));
-app.get(`${publicIntegrationBasePath}/apts-cli.mjs`, async (req, res) => sendIntegrationArtifact(req, res, 'js_cli_esm'));
+app.get(`${publicIntegrationBasePath}/apts-mcp.js`, async (req, res) => sendIntegrationArtifact(req, res, 'mcp_server'));
+app.get(`${publicIntegrationBasePath}/apts-cli.js`, async (req, res) => sendIntegrationArtifact(req, res, 'js_cli'));
+app.get(`${publicIntegrationBasePath}/apts-client.js`, async (req, res) => sendIntegrationArtifact(req, res, 'js_client'));
+app.get(`${publicIntegrationBasePath}/contract-check.js`, async (req, res) => sendIntegrationArtifact(req, res, 'contract_check'));
+app.get(`${publicIntegrationBasePath}/package.json`, async (req, res) => sendIntegrationArtifact(req, res, 'package_manifest'));
+app.get(`${publicIntegrationBasePath}/runtime-adapters/spec/apts-surface.json`, async (req, res) => sendIntegrationArtifact(req, res, 'surface_spec'));
+app.get(`${publicIntegrationBasePath}/scripts/generate-adapters.js`, async (req, res) => sendIntegrationArtifact(req, res, 'adapter_generator'));
 
 // --- AGENT API (SKILLS) ---
 

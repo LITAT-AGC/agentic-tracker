@@ -1,207 +1,30 @@
 # Base Guide for Projects Integrated with APTS
 
-Use this content as a baseline for `AGENTS.md` or `.github/copilot-instructions.md` in the client project.
+This guide explains how to install the APTS-managed instructions into a client project's canonical `AGENTS.md`. Both Claude Code and opencode read `AGENTS.md`. In Claude Code, keep `CLAUDE.md` minimal with a single line `@AGENTS.md` so there is one source of truth.
+
+The APTS-managed section (the operational rules an integrated agent must follow) is **not authored here**: it is defined once in `runtime-adapters/spec/apts-surface.json` (`instructions.body`) and generated verbatim into each runtime's instruction file. On upgrades, replace only that managed block and preserve project-specific rules outside it. Keep exactly one managed section per instruction file.
 
 ## AGENTS.md bootstrap policy (create or update)
 
-Apply this policy before the first protected APTS API call:
+1. If neither `AGENTS.md` nor `.github/copilot-instructions.md` exists, create `AGENTS.md` with the managed block below.
+2. If `AGENTS.md` already exists, keep project-specific rules and only merge or refresh the APTS-managed section.
+3. If `AGENTS.md` does not exist but `.github/copilot-instructions.md` exists, merge or refresh the same managed section there.
+4. On repeated installs or updates, do not duplicate instructions. Update the existing managed section in place.
+5. In Claude Code, `CLAUDE.md` only contains `@AGENTS.md`; never duplicate guidance into `CLAUDE.md`.
 
-1. If neither `AGENTS.md` nor `.github/copilot-instructions.md` exists, create `AGENTS.md` and add the APTS baseline block from this guide.
-2. If `AGENTS.md` already exists, keep project-specific rules and only merge or refresh an APTS-managed section.
-3. If `AGENTS.md` does not exist but `.github/copilot-instructions.md` exists, merge or refresh the same APTS-managed section there.
-4. On repeated installs or updates, do not duplicate instructions. Update the existing APTS-managed section in place.
+Treat downloaded official APTS scripts and generated adapter files as managed: replace them entirely on version updates and do not merge legacy wrapper snippets into them. The only hand-editable surface source is `runtime-adapters/spec/apts-surface.json`.
 
-Recommended managed section markers:
+## APTS-managed section (canonical source)
 
-```md
-<!-- APTS:START -->
-...APTS managed guidance...
-<!-- APTS:END -->
-```
+The APTS-managed instruction block — the operational rules an integrated agent must follow at runtime (MCP-first surface + CLI fallback, identity autofill, backlog as source of truth, shell routing by runtime, resilience journal, and the mandatory/anti-loop rules) — is defined **once** in `runtime-adapters/spec/apts-surface.json` under `instructions.body`, and generated verbatim into each runtime's instruction file:
 
-Managed section rules:
+- **Claude Code:** `runtime-adapters/claude/CLAUDE.md` (which also imports `@AGENTS.md`)
+- **opencode:** `runtime-adapters/opencode/AGENTS.md`
+- **VS Code:** `runtime-adapters/vscode/copilot-instructions.md`
 
-- Never delete project-specific guidance outside the managed markers.
-- On upgrades, replace only the text between `<!-- APTS:START -->` and `<!-- APTS:END -->`.
-- If markers are missing in an existing instruction file, append one managed section once and reuse it on future updates.
-- Treat downloaded official APTS scripts as managed files. Replace them entirely on version updates and do not merge legacy wrapper snippets into those files.
+Each generated file wraps the body with the `<!-- APTS:START -->` / `<!-- APTS:END -->` markers. To install or upgrade a client, copy that managed block from the generated file for the target runtime into the client's instruction file, replacing only the existing managed section and preserving project-specific rules outside it.
 
-## Skill installation scope (workspace-local)
-
-Use a workspace-local installation strategy for APTS integration artifacts:
-
-- Keep the canonical contract and HTTP client under `.ia/apts/`.
-- Keep the canonical contract and the matching HTTP client under `.ia/apts/`.
-- Place the official CLI beside the matching client in that same folder as the primary interface for AI agents (`apts-cli.js` with `apts-client.js`, or `apts-cli.mjs` with `apts-client.mjs`).
-- If the runtime cannot shell the CLI reliably but can import modules, place `apts-helper.js` beside `apts-client.js` or `apts-helper.mjs` beside `apts-client.mjs` as the only supported direct-import surface for agents.
-- When migrating from older ad-hoc APTS wrappers, remove those local scripts once the official client or CLI is installed. Keep only thin discovery adapters when the runtime still requires them.
-- If a runtime needs its own discovery path, add a thin adapter at `.github/skills/apts/`, `.agents/skills/apts/`, or `.claude/skills/apts/` that delegates to `.ia/apts/`.
-- Avoid user-global skill installation for project integrations to prevent cross-project config leakage and version drift.
-
-## Uso recomendado para Agentes de IA
-
-Priority order:
-
-1. Official CLI over shell.
-2. Official helper only when shell execution is not viable.
-3. Raw client only inside predefined helpers or thin wrappers already owned by the project.
-
-Mandatory rules:
-
-- Prefer `apts-cli.js` or `apts-cli.mjs` for all normal agent interactions with APTS.
-- Use `apts-helper.js` or `apts-helper.mjs` only when the runtime cannot invoke shell commands reliably or only allows imported tools.
-- Never generate fresh code during a chat turn that imports or bootstraps `apts-client.js` or `apts-client.mjs` from scratch.
-- Never hand-assemble raw JSON strings when object payloads, `--stdin`, or `--json @payload.json` are available.
-- Let the official CLI/helper resolve identity and managed execution context before falling back to manual field filling.
-
-## Runtime role separation (skills vs custom agents)
-
-To avoid ambiguous discovery in heterogeneous runtimes (for example VS Code, OpenCode, and Claude-style runners), keep skills and custom agents in separate discovery scopes:
-
-- Never place `SKILL.md` and `.agent.md` files in the same runtime discovery folder.
-- Skills define tool contracts and integration workflow entrypoints; custom agents define role-specialized behavior and subagent delegation.
-- In OpenCode-style setups, keep skill assets under `.agents/skills/apts/` and keep custom agents in the runtime path dedicated to agents.
-- Treat `APTS Backlog Orchestrator` as an entrypoint agent and `Backlog Item Executor Dev Test Commit` as subagent-only when the runtime supports invocability controls.
-- If a runtime does not reliably enforce subagent-only flags, enforce the same rule in prompt instructions: do not invoke the executor directly from end-user chat.
-
-## Runtime-aware process management (recommended)
-
-When validations require local servers (API, Playwright web server, Vite dev server, or similar), choose process controls based on the active runtime instead of assuming one shell behavior works everywhere.
-
-Baseline rules:
-
-- Use runtime-native non-blocking process primitives for long-running servers.
-- Track process handles or terminal IDs so you can verify liveness and stop processes after tests.
-- Do not rely on raw shell detachment (`&` or `nohup`) as the only control mechanism unless the runtime explicitly guarantees detached lifecycle management.
-
-Runtime-specific guidance:
-
-- VS Code/Copilot runtime: use non-blocking terminal/task primitives (`run_in_terminal` async mode or background tasks), verify readiness, and stop the terminal/task after validation.
-- OpenCode runtime with synchronous `bash` execution (common on Windows + Git Bash): install and use official process plugins.
-- Other runtimes (for example Claude-style agent runners): use the runtime's native background process or PTY primitives; if unavailable, avoid server-dependent validation and report blocker.
-
-## VS Code on Windows shell policy (recommended)
-
-When the active runtime is VS Code on Windows:
-
-- Route test execution through WSL terminals/tasks.
-- Route APTS calls (official client/CLI commands) through WSL terminals/tasks.
-- Route non-test operations not related to APTS through PowerShell terminals/tasks.
-- Keep shell routing explicit in VS Code tasks so shell selection is deterministic and reproducible.
-- If a task runner is available, prefer labels such as `tests:wsl` and `ops:powershell` instead of ad-hoc shell switching.
-
-OpenCode plugin recommendation:
-
-- `@zenobius/opencode-background` (tested with `v0.1.0-alpha.2`)
-- `opencode-pty` (tested with `v0.3.4`)
-
-Recommended `opencode.json` snippet:
-
-```json
-{
-	"$schema": "https://opencode.ai/config.json",
-	"plugin": [
-		"@zenobius/opencode-background",
-		"opencode-pty"
-	]
-}
-```
-
-## opencode.ai Custom Tools and Skills
-
-- Keep `apts-cli.*`, `apts-helper.*`, and the matching `apts-client.*` in `.ia/apts/`.
-- Publish discovery assets under `.agents/skills/apts/` so the runtime can discover `SKILL.md` and `apts_skills.json` without duplicating the base scripts.
-- In opencode.ai, create one thin Custom Tool that forwards a command name and JSON payload to the official CLI, for example `node .ia/apts/apts-cli.mjs <command> --json @payload.json --output structured`.
-- If a given opencode.ai environment cannot shell the CLI reliably, implement that Custom Tool on top of `apts-helper.mjs` or `apts-helper.js` instead of importing the raw client directly.
-- Keep Custom Tools thin: no manual identity discovery, no handwritten HTTP calls, and no ad-hoc wrappers per interaction.
-
-## Runtime validation checklist (copy-ready)
-
-Use this sequence whenever validations depend on local servers:
-
-1. Detect the active runtime before launching any server process.
-2. Select process control strategy by runtime:
-	- VS Code/Copilot: non-blocking terminal/task execution and tracked terminal/task id.
-	- OpenCode synchronous bash: `createBackgroundProcess` or `pty_spawn`.
-	- Other runtimes: native background/PTY primitives; if unavailable, report blocker.
-3. Start server processes with non-blocking controls only (never rely only on `&` or `nohup`).
-4. Verify readiness before tests (for example, poll `/health` with bounded retries).
-5. Run the required validation commands.
-6. Stop all validation servers and confirm cleanup (no orphan process or terminal/task left).
-7. Record validation start, outcome, and teardown status in APTS progress logs and the local resilience journal.
-8. If readiness or teardown fails, do not commit; report `BLOCKED` with runtime-specific evidence.
-
-```md
-You are a development agent integrated with APTS.
-
-If `APTS_API_KEY` is not available in the project environment, you must request it from the human operator before using any protected APTS endpoint.
-
-You must store `APTS_API_KEY` as an environment variable or in the client project's secret system. Never hardcode it in source code, versioned prompts, JSON files, or backlog documents.
-
-Define `APTS_BASE_URL` and `APTS_API_KEY` in a `.env` file at the root of the client project.
-
-Minimum `.env` example for the client project:
-
-```env
-APTS_BASE_URL=https://apts.informaticos.ar/api
-APTS_API_KEY=place-your-api-key-here
-```
-
-If the project uses a secret manager instead of `.env`, it must expose the same runtime variable names (`APTS_BASE_URL` and `APTS_API_KEY`).
-
-Keep APTS integration artifacts in a workspace-local folder such as `.ia/apts/`.
-If your runtime prefers shell execution over importing modules directly, keep the matching CLI beside the matching client in that folder.
-If your runtime requires a specific discovery path, add a thin adapter in `.github/skills/apts/`, `.agents/skills/apts/`, or `.claude/skills/apts/` that delegates to `.ia/apts/`.
-Do not rely on user-global skill installation for project integrations.
-
-Besides reporting in APTS, you must maintain a local append-only resilience journal, for example at `.apts/agent-resilience-log.jsonl`.
-
-This local journal is not a source of truth and does not replace APTS. It is only an operational fallback if APTS becomes unavailable or loses history.
-
-Record at least: execution start, important milestones, blockers, APTS synchronization failures, and task completion. Never store `APTS_API_KEY` or any other secret in this journal.
-
-For the official APTS client/CLI, identity fields are auto-resolved from environment variables first, then managed local execution context, and then local Git when omitted in payloads:
-- project_url/url: `APTS_PROJECT_URL` or `git remote get-url origin`
-- agent_name: `APTS_AGENT_NAME` or `git config user.name`
-- agent_email: `APTS_AGENT_EMAIL` or `git config user.email`
-- branch: `APTS_BRANCH` or `git branch --show-current`
-- task_id for active execution calls: `APTS_TASK_ID` (optional but recommended to avoid repeating it in every payload)
-- local context file fallback: `.apts/execution-context.json` (or the path in `APTS_CONTEXT_FILE`)
-
-Operational expectation: do not spend turns resolving identity manually when using the official client/CLI. Use minimal payloads first and let the CLI resolve protocol fields.
-
-If you call the raw HTTP API directly (without the official client/CLI), you must still send all required identity fields explicitly.
-
-Mandatory rules:
-0. If the user asks for "next task", "continue backlog", "run backlog", or equivalent requests, you must invoke `APTS Backlog Orchestrator` first and not run direct implementation from the general agent.
-0.1. Use the official APTS CLI as the primary integration layer (`apts-cli.js` or `apts-cli.mjs`). If the runtime cannot shell the CLI reliably, use the official helper (`apts-helper.js` or `apts-helper.mjs`). Direct `apts-client.*` usage is reserved for predefined helpers/wrappers only; do not generate new base wrappers during a run.
-0.1.1. With the official CLI/helper, prefer minimum payloads and avoid pre-flight Git identity commands. Only inspect identity sources (for example with `show-execution-context`) when an APTS call fails due to missing required fields.
-0.1.2. In VS Code on Windows, route tests and APTS calls through WSL terminals/tasks, and route non-APTS non-test operations through PowerShell terminals/tasks.
-0.2. Invoke APTS operations using contract-first JSON object payloads (for example `{"task_id":"...","status":"review",...}`), even when a legacy positional signature is still supported for backward compatibility.
-0.4. If the current chat asks to fix a bug, investigate an error, or resolve a regression or broken behavior, run read-only triage first: inspect APTS backlog for an existing matching non-deleted bug item and verify that the symptom is likely a real defect.
-0.4.1. Prefer `search_similar_bug_reports` with the symptom summary before deciding whether a new `bug` item is needed.
-0.4.2. If the user intent is ambiguous and the chat may only be asking a question, clarification, or diagnosis, stop at read-only triage and ask whether they want the issue registered as a bug in APTS.
-0.5. If no matching bug item exists, create it with `create_backlog_item` using `item_type` = `bug` only after the user explicitly confirms they want it tracked as a bug in APTS, and capture symptom, expected behavior, observed behavior, and reproduction evidence from chat.
-0.6. When the runtime exposes a stable conversation or thread identifier, store `source_kind` = `chat_request` and persist that identifier in `source_ref` for the tracked bug backlog item.
-0.7. For requests such as "report this as a resolved bug in APTS", update the tracked bug item with `update_backlog_item`, set status to `review` or `done`, and include concise resolution plus validation evidence.
-0.8. Do not start direct implementation or register execution work for a new defect request until the work is represented in APTS backlog and the task can reference that `backlog_item_id`.
-1. Read the project backlog with `list_backlog_items` and select an item suitable for execution.
-2. Call `register_task` with `backlog_item_id` for execution work and always use the returned `task_id`; this may resume interrupted work instead of creating a duplicate task.
-3. Before modifying code, use `read_project_context`.
-4. While working, send `heartbeat` periodically.
-5. Each important milestone must be recorded with `log_agent_progress`.
-6. If you cannot continue, use `report_blocker` and stop work.
-7. If you are refining scope or planning, use `create_backlog_item` or `update_backlog_item` only when the operator already confirmed registration for that work item; otherwise keep intake read-only and request confirmation.
-8. At completion, set `review` first; use `done` only from review and only when recent execution activity exists.
-9. Never invent `project_url`, `agent_name`, or `branch`; let the official CLI/helper auto-resolve them from env/local context/Git or provide them explicitly with real values.
-10. If `APTS_API_KEY` is missing, stop operational integration, request it from the operator, and continue only after it is stored as an environment secret.
-11. Keep a local append-only resilience journal, but never use it to replace APTS as official tracking.
-12. If `APTS Backlog Orchestrator` is not installed or cannot be invoked, stop task execution and ask the operator to install/fix it; do not proceed with an alternative flow without the orchestrator.
-13. Apply anti-loop retry policy for APTS calls:
-	- Do not retry on `400`, `401`, `403`, or `404`. Treat as contract/auth/existence errors, record context, and request operator clarification.
-	- Retry only on network errors, `429`, and `5xx`, with at most 2 retries and short backoff.
-	- If still failing after retries, report blocker and stop instead of attempting unbounded payload variations.
-```
+Never hand-edit the managed rules — not here, and not in the generated files. The only editable source is `instructions.body` in the spec; after editing it, regenerate with `node scripts/generate-adapters.js`.
 
 ## Operational Quick Reference
 
@@ -209,7 +32,7 @@ Use `integracion/paquete-apts/apts_skills.json` as the formal contract and `inte
 
 ### Common Required Fields
 
-When you use the official client/CLI, missing identity fields are auto-filled from env/local context/Git. The table below still lists server-required fields for raw API calls.
+When using the official MCP/CLI, missing identity fields are auto-filled from env/local context/Git. The table lists server-required fields for raw API calls.
 
 | Field | Required by |
 | --- | --- |
@@ -221,19 +44,12 @@ When you use the official client/CLI, missing identity fields are auto-filled fr
 | `task_id` | `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` |
 | `backlog_item_id` | `register_task` when executing tracked work, `update_backlog_item`, `delete_backlog_item` |
 
-### Reuse Or Create Backlog Item
-
-- Reuse an item only when an active backlog item already describes exactly the same scope.
-- If no active item matches exactly, create a new backlog item before execution.
-- For new bug, error, or regression requests from chat, look for an existing non-deleted `bug` item first, then create or update only after explicit user confirmation to register or treat the issue as a bug in APTS.
-- For small chores such as documentation adjustments, follow the same exact-scope rule instead of guessing based on size alone.
-
 ### Happy Path
 
-1. Ensure credentials are available (`APTS_BASE_URL` and `APTS_API_KEY`) and rely on official client/CLI auto-resolution for identity/task context.
-2. Call `list_backlog_items`, preferably with `view = compact`, and choose to reuse or create an item.
-3. Call `register_task`; official client/CLI persists the returned `task_id` in local managed context for subsequent calls.
-4. Call `read_project_context`, preferably with `view = compact`, before editing.
+1. Ensure `APTS_BASE_URL` and `APTS_API_KEY` are available and rely on autofill for identity/task context.
+2. Call `list_backlog_items` (prefer `view = compact`) and choose to reuse or create an item.
+3. Call `register_task`; the official client persists the returned `task_id` in local managed context.
+4. Call `read_project_context` (prefer `view = compact`) before editing.
 5. Call `heartbeat` while the task is active.
 6. Call `log_agent_progress` on meaningful milestones.
 7. If blocked, call `report_blocker` and stop.
@@ -241,74 +57,20 @@ When you use the official client/CLI, missing identity fields are auto-filled fr
 
 ### Compact Response Mode
 
-- `list_backlog_items` and `read_project_context` now default to compact summaries in official agent flows.
-- Re-read with `view = full` only for the selected backlog item or when you specifically need raw descriptions, acceptance criteria, full task context, or full log `technical_details`.
+- `list_backlog_items` and `read_project_context` default to compact summaries. Re-read with `view = full` only for the selected item or when raw detail is needed.
 
-### Minimum Payloads
-
-```json
-{
-	"list_backlog_items": {
-		"status": "ready"
-	},
-	"create_backlog_item": {
-		"title": "Document APTS command payloads"
-	},
-	"register_task": {
-		"title": "Document APTS command payloads"
-	},
-	"read_project_context": {
-		"limit": 5
-	},
-	"heartbeat": {
-	},
-	"set_execution_context": {
-		"task_id": "22222222-2222-2222-2222-222222222222"
-	},
-	"log_agent_progress": {
-		"message": "Updated APTS docs with explicit payload examples."
-	},
-	"update_task_status": {
-		"status": "review"
-	}
-}
-```
-
-For `heartbeat`, `log_agent_progress`, `report_blocker`, and `update_task_status`, minimum payloads above assume `task_id` is already available through `APTS_TASK_ID` or managed execution context.
-
-### CLI-First Examples
-
-Use these examples as the default agent path. Replace `.mjs` with `.js` when the client project runs CommonJS.
+### CLI fallback examples
 
 ```bash
-node .ia/apts/apts-cli.mjs register-task --json '{"title":"Document APTS command payloads"}' --output structured
-node .ia/apts/apts-cli.mjs read-project-context --json '{}' --output structured
-node .ia/apts/apts-cli.mjs heartbeat --json '{}' --output structured
-node .ia/apts/apts-cli.mjs log-agent-progress --json '{"message":"Updated APTS integration guidance."}' --output structured
-node .ia/apts/apts-cli.mjs update-task-status --json '{"status":"review"}' --output structured
-node .ia/apts/apts-cli.mjs report-blocker --json '{"error_message":"Missing APTS_API_KEY"}' --output structured
+node .ia/apts/apts-cli.js register-task --json '{"title":"Document APTS command payloads"}' --output structured
+node .ia/apts/apts-cli.js read-project-context --json '{}' --output structured
+node .ia/apts/apts-cli.js heartbeat --json '{}' --output structured
+node .ia/apts/apts-cli.js log-agent-progress --json '{"message":"Updated APTS integration guidance."}' --output structured
+node .ia/apts/apts-cli.js update-task-status --json '{"status":"review"}' --output structured
+node .ia/apts/apts-cli.js report-blocker --json '{"error_message":"Missing APTS_API_KEY"}' --output structured
 ```
 
-Helper fallback when shell execution is unavailable:
-
-```js
-import apts from './.ia/apts/apts-helper.mjs';
-
-await apts.run('register-task', { title: 'Document APTS command payloads' });
-await apts.run('log-agent-progress', { message: 'Updated APTS integration guidance.' });
-```
-
-### PowerShell Examples
-
-```powershell
-$heartbeat = @'
-{
-	"task_id": "22222222-2222-2222-2222-222222222222"
-}
-'@
-
-$heartbeat | node .ia/apts/apts-cli.mjs set-execution-context --stdin --pretty
-```
+### PowerShell examples (Windows, CLI fallback)
 
 ```powershell
 @'
@@ -316,40 +78,18 @@ $heartbeat | node .ia/apts/apts-cli.mjs set-execution-context --stdin --pretty
 }
 '@ | Set-Content -Path heartbeat.json
 
-Get-Content .\heartbeat.json | node .ia/apts/apts-cli.mjs heartbeat --stdin --pretty
+Get-Content .\heartbeat.json | node .ia/apts/apts-cli.js heartbeat --stdin --pretty
 ```
 
-### PowerShell Reliability Checklist
-
-1. For `update-backlog-item` and `delete-backlog-item`, always use `backlog_item_id` (never `id`).
-2. If inline `--json` starts failing with parsing or unexpected extra arguments, reduce to a minimal payload and retry first.
-3. Do not write here-strings in a single line after `@'`; keep the JSON body on following lines and close with `'@` on its own line.
-4. If `--stdin` appears stuck, verify the command with a short `--json` payload, then return to file-piped stdin.
-5. For long texts (`acceptance_criteria`, multiline notes), use staged updates: minimal field first, full text second.
-6. After every mutating call, read the item again and verify persisted fields.
-
-### Staged PowerShell Update Example (Backlog)
-
-```powershell
-node .ia/apts/apts-cli.mjs update-backlog-item --json '{"backlog_item_id":"11111111-1111-1111-1111-111111111111","status":"review"}' --pretty
-
-@'
-{
-	"backlog_item_id": "11111111-1111-1111-1111-111111111111",
-	"acceptance_criteria": "FE: shows retry state and validation hints. BE: persists normalized payload and status transitions."
-}
-'@ | Set-Content -Path backlog-update.json
-
-Get-Content .\backlog-update.json | node .ia/apts/apts-cli.mjs update-backlog-item --stdin --pretty
-```
+PowerShell reliability: for `update-backlog-item`/`delete-backlog-item` always use `backlog_item_id` (never `id`); keep here-string JSON on its own lines and close `'@` on its own line; for long texts use staged updates (minimal field first, full text via file + `--stdin`); re-read after every mutating call.
 
 ## Anti-Patterns
 
-- Writing one-off code snippets that import or bootstrap `apts-client.*` directly during a chat turn.
-- Building JSON manually with string concatenation when `--stdin`, `--json @payload.json`, or object payloads are available.
-- Running `git remote get-url origin`, `git config user.name`, and `git branch --show-current` before every APTS call instead of letting the official CLI/helper auto-resolve identity.
-- Calling the raw HTTP API for base APTS operations when the official CLI/helper already covers the workflow.
-- Creating a new wrapper script for each runtime interaction instead of reusing the official CLI or helper.
+- Writing one-off code that imports or bootstraps `apts-client.js` directly during a chat turn.
+- Building JSON manually with string concatenation when object payloads, `--stdin`, or `--json @payload.json` are available.
+- Running `git remote get-url origin`, `git config user.name`, and `git branch --show-current` before every APTS call instead of relying on autofill.
+- Calling the raw HTTP API for base operations when MCP/CLI already covers the workflow.
+- Creating a new wrapper script per runtime interaction instead of reusing MCP/CLI.
 
 ### Frequent Errors
 

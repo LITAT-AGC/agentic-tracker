@@ -4,61 +4,41 @@ Esta carpeta agrupa todo el material destinado a proyectos cliente que quieran i
 
 Se mantiene fuera de `.github/` para evitar que VS Code/Copilot lo trate como customizacion activa del propio repositorio APTS.
 
+## Modelo de superficie
+
+- **MCP primario.** `apts-mcp.js` expone una tool nativa por operacion del contrato y funciona igual en Claude Code (`.mcp.json`) y opencode (`opencode.json`), apuntando al mismo binario.
+- **CLI como fallback universal.** `apts-cli.js` cubre runtimes sin MCP y uso manual/automatizado. Mismas operaciones, mismo autofill de identidad.
+- **ESM-only.** Un unico set de archivos `.js` corre como ESM gracias a `package.json` `{ "type": "module" }`. Los binarios se ejecutan como subprocesos (`node .ia/apts/apts-cli.js`, `node .ia/apts/apts-mcp.js`); nunca se importan desde el proyecto host. No hay gemelo CJS ni helper standalone.
+- **Contrato como unica fuente de verdad.** `apts_skills.json` define las operaciones; el cliente, la tabla del CLI y la lista de tools MCP se derivan/validan desde el contrato con `contract-check.js`.
+
 ## Estructura
 
-- `plantillas-agentes/`: plantillas de agentes para intake, orquestacion y ejecucion contra APTS, incluyendo `intake-bugfix-apts.agent.md`, `orquestador-backlog-apts.agent.md` y `ejecutor-item-backlog-dev-test-commit.agent.md`.
-- `paquete-apts/`: paquete exportable con contrato JSON, helper oficial para CommonJS y ESM, clientes HTTP para CommonJS y ESM, CLI oficial para CommonJS y ESM, guia operativa y referencia de API.
+- `plantillas-agentes/`: plantillas de agentes para intake, orquestacion y ejecucion contra APTS (`intake-bugfix-apts.agent.md`, `orquestador-backlog-apts.agent.md`, `ejecutor-item-backlog-dev-test-commit.agent.md`).
+- `paquete-apts/`: paquete exportable con contrato JSON, cliente HTTP ESM, CLI oficial, servidor MCP, self-check del contrato, guia operativa y referencia de API.
+- `paquete-apts/runtime-adapters/`: artefactos por runtime generados desde `spec/apts-surface.json` (`claude/`, `opencode/`, `vscode/`).
+- `paquete-apts/scripts/generate-adapters.js`: generador unico spec → adaptadores.
 
 ## Uso recomendado
 
-1. Toma desde `paquete-apts/` el contrato JSON, el cliente HTTP adecuado para CommonJS o ESM y la CLI oficial del mismo modulo como interfaz principal para agentes.
-2. Si tu runtime no puede invocar shell de forma fiable, agrega el helper oficial como fallback seguro; no expongas el cliente crudo directamente al agente.
-3. Copia desde `plantillas-agentes/` las plantillas de agentes si quieres un flujo de intake/orquestador/ejecutor apoyado en backlog de APTS.
-4. Para opencode.ai, instala `SKILL.md` y `apts_skills.json` bajo `.agents/skills/apts/` y crea un Custom Tool fino que shell-e el CLI oficial.
-5. Instala esos archivos en el proyecto cliente dentro de las ubicaciones que su runtime de agentes soporte.
-
-## Separacion obligatoria entre skills y agentes
-
-Para evitar conflictos de discovery en runtimes mixtos:
-
-1. No mezcles artefactos de skill (`SKILL.md`, contrato JSON y cliente/CLI) con plantillas `.agent.md` en la misma carpeta de discovery.
-2. Usa rutas separadas por tipo:
-	- Skills: `.github/skills/apts/`, `.agents/skills/apts/` o `.claude/skills/apts/` segun runtime.
-	- Agentes custom: ruta de agentes del runtime (por ejemplo `.github/agents/` en VS Code).
-3. En flujo orquestador/ejecutor, toma el orquestador como entrypoint y deja el ejecutor como subagente (no como entrypoint de usuario) cuando el runtime soporte ese control.
+1. Copia desde `paquete-apts/` el contrato JSON, el cliente HTTP, el CLI, el servidor MCP, `contract-check.js` y un `package.json` con `{ "type": "module" }` a `.ia/apts/` del proyecto cliente.
+2. Registra el servidor MCP en el runtime: `.mcp.json` (Claude Code) u `opencode.json` `mcp` (opencode), apuntando a `node .ia/apts/apts-mcp.js`. Usa el CLI solo como fallback cuando el runtime no soporte MCP.
+3. Copia desde `plantillas-agentes/` (o desde `runtime-adapters/`) las plantillas de agentes si quieres un flujo intake/orquestador/ejecutor apoyado en backlog de APTS.
+4. Crea `AGENTS.md` (canonico) y, en Claude Code, `CLAUDE.md` con `@AGENTS.md`.
 
 ## Regla de cobertura del cliente exportable
 
-- El cliente HTTP oficial que APTS distribuye (`apts-client.js` y `apts-client.mjs`) debe cubrir todas las funcionalidades de integracion publicadas en `apts_skills.json`.
-- El helper oficial (`apts-helper.js` y `apts-helper.mjs`) debe permanecer como wrapper fino y seguro sobre ese cliente, sin introducir un contrato paralelo.
-- La CLI oficial (`apts-cli.js` y `apts-cli.mjs`) es una entrada de ejecucion estable sobre ese cliente; no reemplaza al cliente y debe vivir junto a su variante correspondiente.
-- El proyecto cliente no deberia tener que desarrollar scripts extra para completar operaciones base de integracion (por ejemplo listado, alta, actualizacion y soft-delete de backlog).
-- Al migrar al cliente o CLI oficial, elimina wrappers o scripts locales viejos de APTS que solo deleguen operaciones base. Conserva unicamente adapters finos de discovery si el runtime los necesita.
-- Si aparece una brecha funcional, se corrige primero en el paquete oficial de APTS y luego se consume la version actualizada desde el proyecto cliente.
+- El cliente HTTP oficial (`apts-client.js`) debe exportar exactamente las operaciones publicadas en `apts_skills.json`.
+- El CLI (`apts-cli.js`) y el MCP (`apts-mcp.js`) exponen exactamente esas operaciones; sus tablas se derivan del contrato, no se mantienen a mano.
+- `contract-check.js` aborta el arranque si cliente ↔ contrato ↔ CLI ↔ MCP se desalinean.
+- El proyecto cliente no deberia desarrollar scripts extra para operaciones base. Si aparece una brecha funcional, se corrige primero en `apts_skills.json` y el cliente, y luego se regeneran los adaptadores.
 
-## Troubleshooting rapido de agentes (VS Code)
+## Artefactos generados
 
-Si una plantilla de agente no aparece en VS Code/Copilot, valida este checklist:
+- Los archivos bajo `runtime-adapters/{claude,opencode,vscode}/` se tratan como **gestionados**: se regeneran enteros desde el spec con `node paquete-apts/scripts/generate-adapters.js` y llevan banner "GENERADO — no editar". El unico editable es `spec/apts-surface.json`.
 
-1. Nombre de archivo: debe terminar en `.agent.md` (por ejemplo `orquestador-backlog-apts.agent.md`).
-2. Ubicacion: instala el archivo dentro del proyecto cliente abierto en VS Code, en `.github/agents/`.
-3. Frontmatter YAML: verifica que el bloque `---` inicial sea valido y que incluya al menos `name` y `description`.
-4. Tipo de artefacto: `apts_skills.json` define tools/skills HTTP, no crea agentes por si solo.
-5. Recarga del editor: tras copiar agentes nuevos, ejecuta `Developer: Reload Window`.
+## Manifiesto publico
 
-Recomendacion: manten `Orquestador Backlog APTS` y `Ejecutor Item Backlog Dev Test Commit` en la misma carpeta `.github/agents/` para asegurar discovery consistente cuando el runtime soporte agentes custom.
-
-Si modificas el cliente HTTP exportable, replica el cambio tanto en `paquete-apts/apts-client.js` como en `paquete-apts/apts-client.mjs` para mantener alineadas las variantes CommonJS y ESM.
-
-Si modificas el helper oficial, replica el cambio tanto en `paquete-apts/apts-helper.js` como en `paquete-apts/apts-helper.mjs` para mantener alineadas las variantes CommonJS y ESM.
-
-Si modificas la CLI oficial, replica el cambio tanto en `paquete-apts/apts-cli.js` como en `paquete-apts/apts-cli.mjs` y confirma que siga delegando a la variante de cliente que le corresponde.
-
-Si modificas el manifiesto publico de integracion expuesto por APTS en `/api/public/integrar`, tambien debes subir `schema_version` y registrar una nota nueva en `bootstrap.manifest_updates.notes` para que los proyectos cliente puedan entender el cambio y reaccionar a tiempo. El historial es append-only: no se deben borrar ni reemplazar notas previas al agregar una version nueva.
-
-El manifiesto expone metadatos de sincronizacion por artefacto (`artifact_version`, `updated_in_schema_version`, `sync_action`, `deprecated_filenames`) y una politica global (`bootstrap.artifact_sync_policy`). Los actualizadores locales deben usar esos campos para decidir que sobreescribir y que archivos legacy eliminar durante la actualizacion.
-
-Importante: esa limpieza automatica solo aplica a nombres legacy publicados por APTS. Si el proyecto cliente tenia wrappers propios viejos para operaciones base, deben retirarse manualmente al migrar al cliente o CLI oficial.
+Si modificas el manifiesto publico de integracion expuesto por APTS en `/api/public/integrar`, sube `schema_version` y registra una nota nueva (append-only, prepended) en `bootstrap.manifest_updates.notes`. El manifiesto expone metadatos de sincronizacion por artefacto (`artifact_version`, `updated_in_schema_version`, `sync_action`, `deprecated_filenames`) y una politica global (`bootstrap.artifact_sync_policy`) que los actualizadores locales usan para sobreescribir y limpiar archivos legacy (incluidos los gemelos CJS y el helper retirados).
 
 ## Nota
 

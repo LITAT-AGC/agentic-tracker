@@ -1,0 +1,279 @@
+#!/usr/bin/env node
+
+// Adapter generator: spec/apts-surface.json -> runtime-adapters/{claude,opencode,vscode}/
+//
+// Single source of truth for the AGENT SURFACE is runtime-adapters/spec/apts-surface.json
+// (apts_skills.json remains the source of truth for the CONTRACT). This script translates the
+// neutral spec into each runtime's native layout, resolving the per-runtime divergences
+// (MCP registry, agents, commands, permissions, instructions, hooks).
+//
+// The three runtime directories are treated as MANAGED output: they are wiped and rewritten
+// wholesale on every run, never hand-edited. Edit the spec and regenerate.
+//
+// Acceptance: running this twice does not change the tree (idempotent). No timestamps or other
+// nondeterministic content is emitted.
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { operationNames } from '../contract-check.js';
+
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const adaptersRoot = path.join(scriptDir, '..', 'runtime-adapters');
+const SPEC_PATH = path.join(adaptersRoot, 'spec', 'apts-surface.json');
+
+const BANNER = 'GENERADO — no editar; fuente: spec/apts-surface.json';
+const BANNER_MD = `<!-- ${BANNER} -->`;
+
+// Neutral capability -> concrete tool identifiers per runtime.
+const CLAUDE_TOOLS = { read: ['Read'], search: ['Glob', 'Grep'], edit: ['Edit', 'Write'], execute: ['Bash'], agent: ['Task'] };
+const OPENCODE_TOOLS = { read: ['read'], search: ['grep', 'glob', 'list'], edit: ['edit', 'write'], execute: ['bash'], agent: ['task'] };
+
+function loadSpec() {
+  let spec;
+  try {
+    spec = JSON.parse(fs.readFileSync(SPEC_PATH, 'utf8'));
+  } catch (error) {
+    fail(`Unable to read or parse spec at ${SPEC_PATH}: ${error.message}`);
+  }
+  validateSpec(spec);
+  return spec;
+}
+
+function validateSpec(spec) {
+  if (!spec || typeof spec !== 'object') fail('Spec must be an object');
+  for (const key of ['mcp', 'instructions', 'agents', 'commands', 'permissions', 'hooks']) {
+    if (!(key in spec)) fail(`Spec is missing required key "${key}"`);
+  }
+  const agentIds = new Set(spec.agents.map((a) => a.id));
+  for (const agent of spec.agents) {
+    for (const sub of agent.subagents || []) {
+      if (!agentIds.has(sub)) fail(`Agent "${agent.id}" references unknown subagent "${sub}"`);
+    }
+  }
+  for (const command of spec.commands) {
+    if (command.agent && !agentIds.has(command.agent)) {
+      fail(`Command "${command.id}" references unknown agent "${command.agent}"`);
+    }
+  }
+}
+
+function fail(message) {
+  process.stderr.write(`generate-adapters: ${message}\n`);
+  process.exit(1);
+}
+
+function mapTools(neutralTools, table) {
+  const out = [];
+  for (const tool of neutralTools) {
+    for (const mapped of table[tool] || []) {
+      if (!out.includes(mapped)) out.push(mapped);
+    }
+  }
+  return out;
+}
+
+function agentById(spec, id) {
+  return spec.agents.find((a) => a.id === id);
+}
+
+function mcpArgs(spec) {
+  // POSIX-joined path to the MCP binary as runtimes will invoke it.
+  return spec.mcp.argsRelative.map((arg) => `${spec.binDir}/${arg}`);
+}
+
+// ---- serialization helpers -------------------------------------------------
+
+// JSON with the banner as the first key (JSON has no comments).
+function jsonText(payload) {
+  return `${JSON.stringify({ _generated: BANNER, ...payload }, null, 2)}\n`;
+}
+
+function quoteYaml(value) {
+  return `"${String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
+// Build a markdown file: optional YAML frontmatter, then the banner comment, then body.
+function markdownText(frontmatterLines, bodyLines) {
+  const parts = [];
+  if (frontmatterLines && frontmatterLines.length) {
+    parts.push('---', ...frontmatterLines, '---');
+  }
+  parts.push(BANNER_MD, '');
+  parts.push(...bodyLines);
+  return `${parts.join('\n').replace(/\n+$/, '')}\n`;
+}
+
+function writeFileTracked(written, absPath, content) {
+  fs.mkdirSync(path.dirname(absPath), { recursive: true });
+  fs.writeFileSync(absPath, content);
+  written.push(path.relative(adaptersRoot, absPath).split(path.sep).join('/'));
+}
+
+// ---- per-runtime emitters --------------------------------------------------
+
+function emitClaude(spec, root, written) {
+  // MCP registry
+  writeFileTracked(written, path.join(root, '.mcp.json'), jsonText({
+    mcpServers: { [spec.mcp.server]: { command: spec.mcp.command, args: mcpArgs(spec) } },
+  }));
+
+  // Instructions: CLAUDE.md imports the canonical AGENTS.md and carries the managed section.
+  writeFileTracked(written, path.join(root, 'CLAUDE.md'), markdownText(null, [
+    `@${spec.instructions.canonicalFile}`,
+    '',
+    spec.instructions.markers.start,
+    spec.instructions.body,
+    spec.instructions.markers.end,
+  ]));
+
+  // Permissions -> .claude/settings.json
+  const allow = [];
+  for (const perm of spec.permissions) {
+    if (perm.capability === 'execute') allow.push(`Bash(${perm.pattern})`);
+    else if (perm.capability === 'mcp') {
+      for (const tool of operationNames()) allow.push(`mcp__${perm.server}__${tool}`);
+    }
+  }
+  writeFileTracked(written, path.join(root, '.claude', 'settings.json'), jsonText({
+    permissions: { allow },
+    hooks: hooksToClaude(spec.hooks),
+  }));
+
+  // Agents
+  for (const agent of spec.agents) {
+    const fm = [
+      `name: ${quoteYaml(agent.name)}`,
+      `description: ${quoteYaml(agent.description)}`,
+      `tools: ${mapTools(agent.tools, CLAUDE_TOOLS).join(', ')}`,
+    ];
+    if (agent.userInvocable === false) fm.push('disable-model-invocation: false');
+    writeFileTracked(written, path.join(root, '.claude', 'agents', `${agent.id}.md`),
+      markdownText(fm, agentBody(agent)));
+  }
+
+  // Commands
+  for (const command of spec.commands) {
+    const fm = [`description: ${quoteYaml(command.description)}`];
+    if (command.argumentHint) fm.push(`argument-hint: ${quoteYaml(command.argumentHint)}`);
+    writeFileTracked(written, path.join(root, '.claude', 'commands', `${command.id}.md`),
+      markdownText(fm, commandBody(spec, command)));
+  }
+}
+
+function emitOpencode(spec, root, written) {
+  // MCP registry + permissions in opencode.json
+  const bash = {};
+  for (const perm of spec.permissions) {
+    if (perm.capability === 'execute') bash[perm.pattern] = perm.action;
+  }
+  bash['*'] = 'ask';
+  writeFileTracked(written, path.join(root, 'opencode.json'), jsonText({
+    $schema: 'https://opencode.ai/config.json',
+    mcp: { [spec.mcp.server]: { type: 'local', command: [spec.mcp.command, ...mcpArgs(spec)], enabled: true } },
+    permission: { edit: 'allow', bash },
+  }));
+
+  // Instructions: opencode reads AGENTS.md directly.
+  writeFileTracked(written, path.join(root, 'AGENTS.md'), markdownText(null, [
+    spec.instructions.markers.start,
+    spec.instructions.body,
+    spec.instructions.markers.end,
+  ]));
+
+  // Agents
+  for (const agent of spec.agents) {
+    const fm = [
+      `description: ${quoteYaml(agent.description)}`,
+      `mode: ${agent.role === 'primary' ? 'primary' : 'subagent'}`,
+      'tools:',
+      ...mapTools(agent.tools, OPENCODE_TOOLS).map((tool) => `  ${tool}: true`),
+    ];
+    writeFileTracked(written, path.join(root, '.opencode', 'agent', `${agent.id}.md`),
+      markdownText(fm, agentBody(agent)));
+  }
+
+  // Commands
+  for (const command of spec.commands) {
+    const fm = [`description: ${quoteYaml(command.description)}`];
+    if (command.agent) fm.push(`agent: ${command.agent}`);
+    writeFileTracked(written, path.join(root, '.opencode', 'command', `${command.id}.md`),
+      markdownText(fm, commandBody(spec, command)));
+  }
+}
+
+function emitVscode(spec, root, written) {
+  // VS Code: agents as .agent.md plus copilot-instructions.md. No MCP/commands/permissions (n/a).
+  for (const agent of spec.agents) {
+    const fm = [
+      `name: ${quoteYaml(agent.name)}`,
+      `description: ${quoteYaml(agent.description)}`,
+      `tools: [${agent.tools.map((tool) => `'${tool}'`).join(', ')}]`,
+    ];
+    if (agent.subagents && agent.subagents.length) {
+      const names = agent.subagents.map((id) => `'${agentById(spec, id).name}'`).join(', ');
+      fm.push(`agents: [${names}]`);
+    }
+    if (agent.argumentHint) fm.push(`argument-hint: ${quoteYaml(agent.argumentHint)}`);
+    fm.push(`user-invocable: ${agent.userInvocable !== false}`);
+    if (agent.userInvocable === false) fm.push('disable-model-invocation: false');
+    writeFileTracked(written, path.join(root, 'agents', `${agent.id}.agent.md`),
+      markdownText(fm, agentBody(agent)));
+  }
+
+  writeFileTracked(written, path.join(root, 'copilot-instructions.md'), markdownText(null, [
+    spec.instructions.markers.start,
+    spec.instructions.body,
+    spec.instructions.markers.end,
+  ]));
+}
+
+// ---- shared body builders --------------------------------------------------
+
+function agentBody(agent) {
+  return [agent.body];
+}
+
+function commandBody(spec, command) {
+  const lines = [command.body];
+  if (command.agent) {
+    lines.push('', `_Runs via agent: ${agentById(spec, command.agent).name}._`);
+  }
+  return lines;
+}
+
+// opencode hooks live in .opencode/plugin/*.ts (WS opcional tardío); Claude hooks live in
+// settings.json. Both are empty for now; kept as explicit no-ops so the shape is stable.
+function hooksToClaude(hooks) {
+  void hooks;
+  return {};
+}
+
+// ---- main ------------------------------------------------------------------
+
+function resetDir(dir) {
+  fs.rmSync(dir, { recursive: true, force: true });
+}
+
+function main() {
+  const spec = loadSpec();
+  const targets = {
+    claude: path.join(adaptersRoot, 'claude'),
+    opencode: path.join(adaptersRoot, 'opencode'),
+    vscode: path.join(adaptersRoot, 'vscode'),
+  };
+
+  // Wipe managed output dirs (never spec/) so removals are idempotent.
+  for (const dir of Object.values(targets)) resetDir(dir);
+
+  const written = [];
+  emitClaude(spec, targets.claude, written);
+  emitOpencode(spec, targets.opencode, written);
+  emitVscode(spec, targets.vscode, written);
+
+  written.sort();
+  process.stdout.write(`generate-adapters OK: ${written.length} files from ${spec.agents.length} agents, ${spec.commands.length} commands.\n`);
+  for (const file of written) process.stdout.write(`  ${file}\n`);
+}
+
+main();

@@ -1,0 +1,11 @@
+{
+  "_generated": "GENERADO — no editar; fuente: spec/apts-surface.json",
+  "mcpServers": {
+    "apts": {
+      "command": "node",
+      "args": [
+        ".ia/apts/apts-mcp.js"
+      ]
+    }
+  }
+}

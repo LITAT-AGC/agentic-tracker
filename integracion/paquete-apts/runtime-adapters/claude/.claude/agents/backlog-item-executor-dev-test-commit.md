@@ -1,9 +1,7 @@
 ---
 name: "Backlog Item Executor Dev Test Commit"
 description: "Use when: implement one backlog item end-to-end with APTS tracking, run validations, and create a single atomic commit if and only if validation passes."
-tools: ['read', 'search', 'edit', 'execute']
-argument-hint: "backlog_item_id, task_id, title, description, acceptance criteria and repository constraints"
-user-invocable: false
+tools: Read, Glob, Grep, Edit, Write, Bash
 disable-model-invocation: false
 ---
 <!-- GENERADO — no editar; fuente: spec/apts-surface.json -->
