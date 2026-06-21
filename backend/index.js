@@ -27,6 +27,7 @@ const {
   setMethodStatus,
   STORY_METHOD_STATUSES
 } = require('./scripts/lib/method_resolver');
+const { createInitiative, setAgentRole } = require('./scripts/lib/method_bootstrap');
 const rootPackage = require('../package.json');
 const db = createKnex(knexConfig[process.env.NODE_ENV || 'development']);
 
@@ -1959,7 +1960,12 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '3.0.0';
+// Schema version of the public integration manifest. Append-only history (do not rewrite past notes):
+// - 3.0.0: reset baseline (MCP-only surface; no prior release-notes history kept).
+// - 3.1.0: additive — publishes the `method_orchestrator_agent` template (BMAD method engine driven
+//   from a client spec via create_initiative/set_agent_role + apts_next conduction). No artifact was
+//   removed or changed shape; only a new optional agent template was added.
+const integrationManifestSchemaVersion = '3.1.0';
 const publicIntegrationBasePath = '/api/public/integrar';
 
 const integrationArtifacts = {
@@ -2051,6 +2057,20 @@ const integrationArtifacts = {
       'orquestador-agent.md'
     ],
     description: 'Orchestrator agent template that pulls ready backlog items from APTS.'
+  },
+  method_orchestrator_agent: {
+    route: `${publicIntegrationBasePath}/agentes/apts-method-orchestrator.agent.md`,
+    filePath: path.join(integrationRoot, 'plantillas-agentes', 'apts-method-orchestrator.agent.md'),
+    fileName: 'apts-method-orchestrator.agent.md',
+    contentType: 'text/markdown; charset=utf-8',
+    artifactVersion: '3.1.0',
+    updatedInSchemaVersion: '3.1.0',
+    kind: 'agent_template',
+    recommended: false,
+    usagePriority: 'entrypoint',
+    syncAction: 'overwrite',
+    deprecatedFilenames: [],
+    description: 'Method orchestrator agent template that bootstraps a BMAD initiative and conducts the analysis→…→done lifecycle from a client spec.'
   },
   mcp_server: {
     route: `${publicIntegrationBasePath}/apts-mcp.js`,
@@ -2585,6 +2605,7 @@ app.get(`${publicIntegrationBasePath}/agent-guidelines.md`, async (req, res) => 
 app.get(`${publicIntegrationBasePath}/agentes/intake-bugfix-apts.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'intake_bugfix_agent'));
 app.get(`${publicIntegrationBasePath}/agentes/ejecutor-item-backlog-dev-test-commit.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'executor_agent'));
 app.get(`${publicIntegrationBasePath}/agentes/orquestador-backlog-apts.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'orchestrator_agent'));
+app.get(`${publicIntegrationBasePath}/agentes/apts-method-orchestrator.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'method_orchestrator_agent'));
 app.get(`${publicIntegrationBasePath}/apts-mcp.js`, async (req, res) => sendIntegrationArtifact(req, res, 'mcp_server'));
 app.get(`${publicIntegrationBasePath}/apts-client.js`, async (req, res) => sendIntegrationArtifact(req, res, 'js_client'));
 app.get(`${publicIntegrationBasePath}/contract-check.js`, async (req, res) => sendIntegrationArtifact(req, res, 'contract_check'));
@@ -3449,6 +3470,82 @@ app.delete('/api/backlog', apiLimiter, authenticateAgent, async (req, res) => {
       strict: useStrictBatchMode,
       fallbackMessage: 'Failed to delete backlog items',
       logMessage: 'batch_delete_backlog failed'
+    });
+  }
+});
+
+// F5-1 — create_initiative: operación de bootstrap del método conducible desde el
+// cliente. Forward fino hacia scripts/lib/method_bootstrap.js. Crea —idempotente
+// por (project_url, status='active')— la iniciativa en 'analysis' + 1 epic vacío
+// plegado + (opcional) la spec del cliente como semantic_documents tipado. Tras el
+// bootstrap, apts_next deja de devolver 'blocked' y entrega el primer step real.
+app.post('/api/projects/initiatives', apiLimiter, authenticateAgent, async (req, res) => {
+  const projectUrl = typeof req.body?.project_url === 'string' ? req.body.project_url.trim() : '';
+  const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
+  if (!projectUrl) {
+    return res.status(400).json({ error: 'project_url is required' });
+  }
+  if (!title) {
+    return res.status(400).json({ error: 'title is required' });
+  }
+  const specArtifact = req.body?.spec_artifact;
+  if (specArtifact !== undefined && specArtifact !== null
+      && (typeof specArtifact !== 'object' || Array.isArray(specArtifact))) {
+    return res.status(400).json({ error: 'spec_artifact must be an object' });
+  }
+
+  try {
+    const payload = await createInitiative(db, {
+      project_url: projectUrl,
+      title,
+      track: req.body?.track,
+      source_ref: req.body?.source_ref,
+      phase: req.body?.phase,
+      description: req.body?.description,
+      spec_artifact: specArtifact,
+    });
+    return res.status(payload.created ? 201 : 200).json(payload);
+  } catch (routeError) {
+    return sendApiError(res, routeError, {
+      fallbackMessage: 'Failed to create initiative',
+      logMessage: 'create_initiative failed',
+      logContext: { project_url: projectUrl }
+    });
+  }
+});
+
+// F5-1-T2 — set_agent_role: registra/actualiza el puntero de un rol del roster en
+// project_state para la iniciativa activa. Forward fino hacia method_bootstrap.js.
+// Upsert idempotente sobre unique(initiative_id, agent_name); resuelve
+// entity_key→entity_id contra la librería de la iniciativa y lo persiste no-null
+// (entity_id=null = wait eterno en el resolver). Tras asignar el roster, apts_next
+// entrega run_step al rol requerido en vez de wait.
+app.post('/api/projects/agent-roles', apiLimiter, authenticateAgent, async (req, res) => {
+  const projectUrl = typeof req.body?.project_url === 'string' ? req.body.project_url.trim() : '';
+  const agentName = typeof req.body?.agent_name === 'string' ? req.body.agent_name.trim() : '';
+  const entityKey = typeof req.body?.entity_key === 'string' ? req.body.entity_key.trim() : '';
+  if (!projectUrl) {
+    return res.status(400).json({ error: 'project_url is required' });
+  }
+  if (!agentName) {
+    return res.status(400).json({ error: 'agent_name is required' });
+  }
+  if (!entityKey) {
+    return res.status(400).json({ error: 'entity_key is required' });
+  }
+
+  try {
+    const payload = await setAgentRole(db, {
+      project_url: projectUrl,
+      agent_name: agentName,
+      entity_key: entityKey,
+    });
+    return res.status(payload.created ? 201 : 200).json(payload);
+  } catch (routeError) {
+    return sendApiError(res, routeError, {
+      fallbackMessage: 'Failed to set agent role',
+      logMessage: 'set_agent_role failed',
+      logContext: { project_url: projectUrl, agent_name: agentName }
     });
   }
 });

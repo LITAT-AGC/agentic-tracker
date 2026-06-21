@@ -7,6 +7,11 @@ const TASK_STATUSES = ['todo', 'in_progress', 'review', 'done', 'stalled'];
 const BACKLOG_STATUSES = ['draft', 'needs_details', 'ready', 'in_progress', 'review', 'blocked', 'done', 'archived'];
 const BACKLOG_ITEM_TYPES = ['feature', 'bug', 'chore', 'research'];
 const STORY_METHOD_STATUSES = ['ready_for_dev', 'in_progress', 'review', 'done'];
+const INITIATIVE_TRACKS = ['quick', 'method', 'enterprise'];
+const INITIATIVE_PHASES = ['analysis', 'planning', 'solutioning', 'implementation', 'done'];
+const DEFAULT_INITIATIVE_TRACK = 'method';
+const DEFAULT_INITIATIVE_SOURCE_REF = 'bmad:v6.8.0';
+const DEFAULT_INITIATIVE_PHASE = 'analysis';
 const RESPONSE_VIEWS = ['full', 'compact'];
 const PROJECT_CONTEXT_INCLUDE_SECTIONS = ['tasks', 'backlog', 'logs'];
 const DEFAULT_RESPONSE_VIEW = 'compact';
@@ -35,6 +40,8 @@ const AUTO_FILL_FIELDS_BY_OPERATION = {
   apts_status: ['project_url'],
   apts_workflow_step: ['project_url', 'agent_name'],
   apts_submit_step: ['project_url', 'agent_name'],
+  create_initiative: ['project_url'],
+  set_agent_role: ['project_url'],
 };
 const IDENTITY_FIELD_HINTS = {
   project_url: { env: 'APTS_PROJECT_URL', git: 'git remote get-url origin' },
@@ -1724,6 +1731,71 @@ async function aptsSubmitStep(payload) {
   });
 }
 
+function validateCreateInitiativeInput(payload) {
+  const operation = 'create_initiative';
+  const preparedPayload = prepareOperationPayload(payload, operation, ['project_url']);
+  assertPayloadObject(preparedPayload, operation);
+
+  const normalized = {
+    project_url: requiredString(preparedPayload, 'project_url', operation, { unwrapQuotes: true }),
+    title: requiredString(preparedPayload, 'title', operation),
+    track: optionalEnum(preparedPayload, 'track', INITIATIVE_TRACKS, operation) ?? DEFAULT_INITIATIVE_TRACK,
+    source_ref: optionalString(preparedPayload, 'source_ref', operation) ?? DEFAULT_INITIATIVE_SOURCE_REF,
+    phase: optionalEnum(preparedPayload, 'phase', INITIATIVE_PHASES, operation) ?? DEFAULT_INITIATIVE_PHASE,
+    description: optionalString(preparedPayload, 'description', operation, { nullable: true }),
+  };
+
+  // spec_artifact? { title?, content } — la spec del cliente como artefacto inicial
+  // (ledger #3): el server la persiste como semantic_documents tipado ligado a la
+  // iniciativa. `content` requerido cuando se pasa el objeto; `title` opcional.
+  if (preparedPayload.spec_artifact !== undefined && preparedPayload.spec_artifact !== null) {
+    const spec = preparedPayload.spec_artifact;
+    if (!isPlainObject(spec)) {
+      throw invalidArgument(`${operation} 'spec_artifact' must be an object`, {
+        operation, field: 'spec_artifact', received: spec,
+      });
+    }
+    normalized.spec_artifact = {
+      title: optionalString(spec, 'title', operation),
+      content: requiredString(spec, 'content', operation),
+    };
+  }
+
+  return normalized;
+}
+
+async function createInitiative(payload) {
+  const normalizedPayload = validateCreateInitiativeInput(payload);
+  persistExecutionContextFromPayload({ project_url: normalizedPayload.project_url });
+
+  return request('/projects/initiatives', {
+    method: 'POST',
+    body: JSON.stringify(normalizedPayload),
+  });
+}
+
+function validateSetAgentRoleInput(payload) {
+  const operation = 'set_agent_role';
+  const preparedPayload = prepareOperationPayload(payload, operation, ['project_url']);
+  assertPayloadObject(preparedPayload, operation);
+
+  return {
+    project_url: requiredString(preparedPayload, 'project_url', operation, { unwrapQuotes: true }),
+    agent_name: requiredString(preparedPayload, 'agent_name', operation),
+    entity_key: requiredString(preparedPayload, 'entity_key', operation),
+  };
+}
+
+async function setAgentRole(payload) {
+  const normalizedPayload = validateSetAgentRoleInput(payload);
+  persistExecutionContextFromPayload({ project_url: normalizedPayload.project_url });
+
+  return request('/projects/agent-roles', {
+    method: 'POST',
+    body: JSON.stringify(normalizedPayload),
+  });
+}
+
 export {
   AptsClientError,
   aptsNext,
@@ -1733,6 +1805,7 @@ export {
   aptsWorkflowStep,
   clearStoredExecutionContext,
   createBacklogItem,
+  createInitiative,
   deleteBacklogItem,
   getBacklogItem,
   getExecutionContext,
@@ -1748,6 +1821,7 @@ export {
   resolveExecutionIdentity,
   resolveGitIdentity,
   searchSimilarBugReports,
+  setAgentRole,
   setExecutionContext,
   updateBacklogItem,
   updateTaskStatus,

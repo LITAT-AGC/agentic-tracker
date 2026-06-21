@@ -928,6 +928,87 @@
         },
         "required": []
       }
+    },
+    {
+      "name": "create_initiative",
+      "description": "Bootstrap a conducible BMAD method initiative for a project (server-authoritative method engine). Creates - idempotently by (project_url, active status) - an initiative in the 'analysis' phase scoped to the seeded BMAD library (source_ref 'bmad:v6.8.0'), folds in one empty epic (the engine needs an epic in implementation and there is no epic tool), and optionally stores the client's spec as a typed semantic_documents artifact linked to the initiative (the server has no access to the client repo filesystem). Returns { initiative_id, epic_id, phase, created|resumed }. After bootstrap, apts_next stops returning 'blocked' and delivers the first real step. Minimum payload via the official MCP server: title (project_url auto-resolves from env/local managed context/Git when omitted).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project_url": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "track": {
+            "type": "string",
+            "enum": [
+              "quick",
+              "method",
+              "enterprise"
+            ],
+            "default": "method"
+          },
+          "source_ref": {
+            "type": "string",
+            "default": "bmad:v6.8.0"
+          },
+          "phase": {
+            "type": "string",
+            "enum": [
+              "analysis",
+              "planning",
+              "solutioning",
+              "implementation",
+              "done"
+            ],
+            "default": "analysis"
+          },
+          "description": {
+            "type": "string"
+          },
+          "spec_artifact": {
+            "type": "object",
+            "properties": {
+              "title": {
+                "type": "string"
+              },
+              "content": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "content"
+            ]
+          }
+        },
+        "required": [
+          "title"
+        ]
+      }
+    },
+    {
+      "name": "set_agent_role",
+      "description": "Register or update a roster role pointer for the active BMAD method initiative (server-authoritative method engine). Upserts - idempotently by (active initiative, agent_name) - a project_state pointer that binds an agent_name to a method entity (role). Resolves entity_key to an entity in the initiative's library (scoped by its source_ref) and persists entity_id non-null; an unset entity_id makes apts_next wait forever. After the roster is set, apts_next delivers run_step to the required role instead of wait. Roster model A: one agent_name per role; the orchestrator switches identity using the `role` apts_next returns. Requires an active initiative (run create_initiative first). Minimum payload via the official MCP server: agent_name and entity_key (project_url auto-resolves from env/local managed context/Git when omitted).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project_url": {
+            "type": "string"
+          },
+          "agent_name": {
+            "type": "string"
+          },
+          "entity_key": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_name",
+          "entity_key"
+        ]
+      }
     }
   ]
 }
