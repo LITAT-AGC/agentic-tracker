@@ -19,6 +19,12 @@ const {
   syncBacklogCoverageDocuments,
   syncProjectBacklogCoverageDocuments
 } = require('./scripts/lib/semantic_documents');
+const {
+  aptsNext,
+  methodStatus,
+  setMethodStatus,
+  STORY_METHOD_STATUSES
+} = require('./scripts/lib/method_resolver');
 const rootPackage = require('../package.json');
 const db = createKnex(knexConfig[process.env.NODE_ENV || 'development']);
 
@@ -1951,10 +1957,19 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.1.0';
+const integrationManifestSchemaVersion = '2.2.0';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.2.0',
+    date: '2026-06-20',
+    changes: [
+      'Added the server-authoritative method engine to the integration contract: apts_next resolves the next deterministic step for an agent (role-aware, multi-agent claim without collision) so clients stop reading and reasoning over project state in-context.',
+      'Added apts_status (data-mode: backlog counts by status, lifecycle phase, progress, and a read-only recommendation line) and apts_set_status (validated story state machine ready_for_dev -> in_progress -> review -> done, distinct from the free-form update_backlog_item).',
+      'The contract now exposes 17 operations; the self-checked client/CLI/MCP surfaces and the generated per-runtime adapters were regenerated from apts_skills.json (no hand edits).'
+    ]
+  },
   {
     version: '2.1.0',
     date: '2026-06-20',
@@ -2393,8 +2408,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts_skills.json'),
     fileName: 'apts_skills.json',
     contentType: 'application/json; charset=utf-8',
-    artifactVersion: '2.0.39',
-    updatedInSchemaVersion: '2.0.39',
+    artifactVersion: '2.2.0',
+    updatedInSchemaVersion: '2.2.0',
     kind: 'skills_contract',
     recommended: true,
     usagePriority: 'discovery',
@@ -2482,8 +2497,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-mcp.js'),
     fileName: 'apts-mcp.js',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.1.0',
-    updatedInSchemaVersion: '2.1.0',
+    artifactVersion: '2.2.0',
+    updatedInSchemaVersion: '2.2.0',
     kind: 'reference_mcp_server',
     recommended: true,
     usagePriority: 'primary',
@@ -2500,8 +2515,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-cli.js'),
     fileName: 'apts-cli.js',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.1.0',
-    updatedInSchemaVersion: '2.1.0',
+    artifactVersion: '2.2.0',
+    updatedInSchemaVersion: '2.2.0',
     kind: 'reference_cli',
     recommended: true,
     usagePriority: 'fallback',
@@ -2518,8 +2533,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-client.js'),
     fileName: 'apts-client.js',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.1.0',
-    updatedInSchemaVersion: '2.1.0',
+    artifactVersion: '2.2.0',
+    updatedInSchemaVersion: '2.2.0',
     kind: 'reference_client',
     recommended: false,
     usagePriority: 'internal_dependency',
@@ -2544,7 +2559,7 @@ const integrationArtifacts = {
     syncAction: 'overwrite',
     deprecatedFilenames: [],
     module_system: 'esm',
-    selection_rule: 'Startup self-check used by the CLI and MCP server to verify that client, CLI, and MCP stay aligned with apts_skills.json (14 operations). Install it beside apts-cli.js and apts-mcp.js.',
+    selection_rule: 'Startup self-check used by the CLI and MCP server to verify that client, CLI, and MCP stay aligned with apts_skills.json (17 operations). Install it beside apts-cli.js and apts-mcp.js.',
     description: 'Contract self-check that validates client/CLI/MCP alignment with apts_skills.json.'
   },
   package_manifest: {
@@ -3914,6 +3929,78 @@ app.delete('/api/backlog', apiLimiter, authenticateAgent, async (req, res) => {
       strict: useStrictBatchMode,
       fallbackMessage: 'Failed to delete backlog items',
       logMessage: 'batch_delete_backlog failed'
+    });
+  }
+});
+
+// F1-T4: motor de método (servidor-autoritativo). Forwards finos hacia el
+// resolver/máquina de estados en scripts/lib/method_resolver.js.
+// apts_next: resuelve la próxima directiva determinista para el agente.
+app.post('/api/projects/next', apiLimiter, authenticateAgent, async (req, res) => {
+  const projectUrl = typeof req.body?.project_url === 'string' ? req.body.project_url.trim() : '';
+  const agentName = typeof req.body?.agent_name === 'string' ? req.body.agent_name.trim() : '';
+  if (!projectUrl) {
+    return res.status(400).json({ error: 'project_url is required' });
+  }
+  if (!agentName) {
+    return res.status(400).json({ error: 'agent_name is required' });
+  }
+
+  try {
+    const payload = await aptsNext(db, { project_url: projectUrl, agent_name: agentName });
+    return res.json(payload);
+  } catch (routeError) {
+    return sendApiError(res, routeError, {
+      fallbackMessage: 'Failed to resolve next method step',
+      logMessage: 'apts_next failed',
+      logContext: { project_url: projectUrl, agent_name: agentName }
+    });
+  }
+});
+
+// apts_status (data-mode): conteos + recomendación read-only. Solo lectura.
+app.get('/api/projects/method-status', apiLimiter, authenticateAgent, async (req, res) => {
+  const projectUrl = typeof req.query.url === 'string' ? req.query.url.trim() : '';
+  const agentName = typeof req.query.agent_name === 'string' ? req.query.agent_name.trim() : '';
+  if (!projectUrl) {
+    return res.status(400).json({ error: 'url is required' });
+  }
+
+  try {
+    const payload = await methodStatus(db, { project_url: projectUrl, agent_name: agentName || null });
+    return res.json(payload);
+  } catch (routeError) {
+    return sendApiError(res, routeError, {
+      fallbackMessage: 'Failed to read method status',
+      logMessage: 'apts_status failed',
+      logContext: { project_url: projectUrl }
+    });
+  }
+});
+
+// apts_set_status: transición de método validada para una story (máquina de
+// estados, distinta de PATCH /backlog/:id que es edición libre).
+app.patch('/api/backlog/:id/method-status', apiLimiter, authenticateAgent, async (req, res) => {
+  const id = req.params.id;
+  if (!UUID_REGEX.test(id || '')) {
+    return res.status(400).json({ error: 'Invalid backlog item id' });
+  }
+  const status = req.body?.status;
+  if (!STORY_METHOD_STATUSES.includes(status)) {
+    return res.status(400).json({ error: `status must be one of: ${STORY_METHOD_STATUSES.join(', ')}` });
+  }
+
+  try {
+    const result = await setMethodStatus(db, { backlog_item_id: id, status });
+    return res.json(result);
+  } catch (routeError) {
+    if (routeError && typeof routeError.statusCode === 'number') {
+      return res.status(routeError.statusCode).json({ error: routeError.message, error_code: routeError.code });
+    }
+    return sendApiError(res, routeError, {
+      fallbackMessage: 'Failed to set method status',
+      logMessage: 'apts_set_status failed',
+      logContext: { backlog_item_id: id }
     });
   }
 });

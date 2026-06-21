@@ -6,6 +6,7 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-
 const TASK_STATUSES = ['todo', 'in_progress', 'review', 'done', 'stalled'];
 const BACKLOG_STATUSES = ['draft', 'needs_details', 'ready', 'in_progress', 'review', 'blocked', 'done', 'archived'];
 const BACKLOG_ITEM_TYPES = ['feature', 'bug', 'chore', 'research'];
+const STORY_METHOD_STATUSES = ['ready_for_dev', 'in_progress', 'review', 'done'];
 const RESPONSE_VIEWS = ['full', 'compact'];
 const PROJECT_CONTEXT_INCLUDE_SECTIONS = ['tasks', 'backlog', 'logs'];
 const DEFAULT_RESPONSE_VIEW = 'compact';
@@ -30,6 +31,8 @@ const AUTO_FILL_FIELDS_BY_OPERATION = {
   log_agent_progress: ['task_id', 'project_url', 'agent_name', 'branch'],
   report_blocker: ['task_id', 'project_url', 'agent_name'],
   heartbeat: ['task_id', 'project_url', 'agent_name'],
+  apts_next: ['project_url', 'agent_name'],
+  apts_status: ['project_url'],
 };
 const IDENTITY_FIELD_HINTS = {
   project_url: { env: 'APTS_PROJECT_URL', git: 'git remote get-url origin' },
@@ -1578,8 +1581,84 @@ async function heartbeat(inputOrTaskId, payload, options) {
   });
 }
 
+function validateAptsNextInput(payload) {
+  const operation = 'apts_next';
+  const preparedPayload = prepareOperationPayload(payload, operation, ['project_url', 'agent_name']);
+  assertPayloadObject(preparedPayload, operation);
+
+  return {
+    project_url: requiredString(preparedPayload, 'project_url', operation, { unwrapQuotes: true }),
+    agent_name: requiredString(preparedPayload, 'agent_name', operation),
+  };
+}
+
+async function aptsNext(payload) {
+  const normalizedPayload = validateAptsNextInput(payload);
+  persistExecutionContextFromPayload(normalizedPayload);
+
+  return request('/projects/next', {
+    method: 'POST',
+    body: JSON.stringify(normalizedPayload),
+  });
+}
+
+function validateAptsStatusInput(payload) {
+  const operation = 'apts_status';
+  const preparedPayload = prepareOperationPayload(payload, operation, ['project_url']);
+  assertPayloadObject(preparedPayload, operation);
+
+  return {
+    project_url: requiredString(preparedPayload, 'project_url', operation, { unwrapQuotes: true }),
+    agent_name: optionalString(preparedPayload, 'agent_name', operation),
+  };
+}
+
+async function aptsStatus(payload) {
+  const options = validateAptsStatusInput(payload);
+  persistExecutionContextFromPayload({ project_url: options.project_url });
+
+  const params = new URLSearchParams({ url: options.project_url });
+  if (options.agent_name) {
+    params.set('agent_name', options.agent_name);
+  }
+
+  return request(`/projects/method-status?${params.toString()}`, {
+    method: 'GET',
+  });
+}
+
+function validateAptsSetStatusInput(payload) {
+  const operation = 'apts_set_status';
+  assertPayloadObject(payload, operation);
+
+  const backlog_item_id = requiredUuid(payload, 'backlog_item_id', operation);
+  const status = optionalEnum(payload, 'status', STORY_METHOD_STATUSES, operation);
+  if (!status) {
+    throw invalidArgument(`${operation} requires 'status'`, {
+      operation,
+      field: 'status',
+      expected: STORY_METHOD_STATUSES,
+      received: payload.status,
+    });
+  }
+
+  return { backlog_item_id, status };
+}
+
+async function aptsSetStatus(payload) {
+  const { backlog_item_id, status } = validateAptsSetStatusInput(payload);
+
+  return request(`/backlog/${backlog_item_id}/method-status`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status }),
+  });
+}
+
 export {
   AptsClientError,
+  aptsNext,
+  aptsSetStatus,
+  aptsStatus,
   clearStoredExecutionContext,
   createBacklogItem,
   deleteBacklogItem,

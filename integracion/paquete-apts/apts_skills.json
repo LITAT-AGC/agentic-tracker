@@ -833,6 +833,63 @@
           }
         ]
       }
+    },
+    {
+      "name": "apts_next",
+      "description": "Resolve the next deterministic method step for an agent in a project (server-authoritative method engine). Minimum payload in official CLI/helper: none (project_url and agent_name auto-resolve from env/local managed context/Git when omitted). Returns a single directive { next: run_step|wait|done|blocked, target_id, role, why, args } for the calling agent's required role, advancing the lifecycle phase and claiming iterable work without collision across agents. Use this instead of reading and reasoning over project state in-context.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project_url": {
+            "type": "string"
+          },
+          "agent_name": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "apts_status",
+      "description": "Read the method state of a project in data-mode: backlog item counts by status for the active epic, current lifecycle phase, progress, and a single read-only recommendation line (computed via apts_next without mutating state). Minimum payload in official CLI/helper: none (project_url auto-resolves from env/local managed context/Git when omitted; pass agent_name for an agent-specific recommendation).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project_url": {
+            "type": "string"
+          },
+          "agent_name": {
+            "type": "string"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "apts_set_status",
+      "description": "Advance a story (backlog item) through the method state machine (ready_for_dev -> in_progress -> review -> done). The server validates the transition and rejects invalid ones with 409. This is the method's state machine, distinct from update_backlog_item (free-form edit). Story-only in this version (epic/initiative phase advance is handled by apts_next).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "backlog_item_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ready_for_dev",
+              "in_progress",
+              "review",
+              "done"
+            ]
+          }
+        },
+        "required": [
+          "backlog_item_id",
+          "status"
+        ]
+      }
     }
   ]
 }
