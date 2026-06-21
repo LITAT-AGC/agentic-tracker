@@ -28,8 +28,12 @@
 
 const fs = require('fs');
 const path = require('path');
-const knex = require('knex')(require('../knexfile').test);
+const { methodSeedKnex } = require('../scripts/lib/seed_db');
 const { deriveWiring } = require('../scripts/importer/wiring');
+
+// Seed del MÉTODO: entorno por arg explícito o NODE_ENV (production/test/development).
+// Producción:  node seeds/bmad_seed.js production    |    Test:  node seeds/bmad_seed.js test
+const knex = methodSeedKnex('bmad_seed', process.argv[2]);
 
 const j = (v) => (v === undefined || v === null ? null : JSON.stringify(v));
 

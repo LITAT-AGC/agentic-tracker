@@ -22,7 +22,10 @@
 // Idempotente: re-run borra la instancia por project_url y reinserta.
 // Ejecutar contra APTS_test:  cd backend && node seeds/f4_url_shortener.js
 
-const knex = require('knex')(require('./../knexfile').test);
+const { fixtureSeedKnex } = require('./../scripts/lib/seed_db');
+
+// Demo de PRUEBA: bloqueada en producción; siempre contra la DB de test.
+const knex = fixtureSeedKnex('f4_url_shortener');
 
 const PROJECT_URL = 'apts://f4/url-shortener';
 const SOURCE_REF = 'bmad:v6.8.0';

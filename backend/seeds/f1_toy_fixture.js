@@ -14,8 +14,11 @@
 //                 gate       -> { on_pass:{goto}, on_fail:{goto} }  ("__phase_done__" = fin de fase)
 //   metadata.primitive_params: valores del gate (F0 no tiene columna dedicada; metadata es el flex field)
 
-const knex = require('knex')(require('../knexfile').test);
+const { fixtureSeedKnex } = require('../scripts/lib/seed_db');
 const { reconcilePrimitiveRegistry } = require('../scripts/lib/method_primitives');
+
+// Fixture de PRUEBA: bloqueada en producción; siempre contra la DB de test.
+const knex = fixtureSeedKnex('f1_toy_fixture');
 
 // pg/knex no serializa arrays JS a jsonb automáticamente; stringify explícito.
 const j = (v) => (v === undefined || v === null ? null : JSON.stringify(v));
