@@ -21,7 +21,9 @@
       "mcp__apts__apts_status",
       "mcp__apts__apts_set_status",
       "mcp__apts__apts_workflow_step",
-      "mcp__apts__apts_submit_step"
+      "mcp__apts__apts_submit_step",
+      "mcp__apts__create_initiative",
+      "mcp__apts__set_agent_role"
     ]
   },
   "hooks": {}
