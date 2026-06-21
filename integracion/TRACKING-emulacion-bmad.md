@@ -26,20 +26,21 @@ una decisión del ledger estaba mal, **se detiene y se replantea**, no se improv
 |---|---|---|---|
 | F0 Modelo de datos y fundaciones | 🛑 En gate | esquema soporta jerarquía+flujos+goteo+multi-agente; migra limpio en `APTS_test` | T1–T3 hechos; migra/rollback/re-latest limpios en `APTS_test`; espera aprobación |
 | F1 Motor determinista + `apts_next` (costo A) | ✅ Hecho | **GATE APROBADO 2026-06-20** | T1–T5 hechos. T4: 3 tools por contrato (17 ops), adaptadores idempotentes, ejercitadas vía CLI real. T5: reducción de contexto **6.8×–18.7×** (números reales). Gate aprobado por el operador |
-| F2 Importador seed (BMAD v6.8 → datos) | 🛑 En gate | cobertura revisada; corpus valida; `apts_next` sobre flujos reales | **T1–T5 hechos 2026-06-20.** Cobertura balde 1–2 100%; catálogo balde 3 (104 checks→3 primitivas nuevas); 31 IR válidas; `apts_next` sobre 4 flujos reales role-aware; re-cableado 100%; idempotente. **Espera aprobación del gate.** Hallazgo: resolver multi-skill-por-fase = F3 |
-| F3 Driver de goteo (costo B) | ⬜ Pendiente | `create-prd` por goteo end-to-end; contexto por paso ~constante | — |
+| F2 Importador seed (BMAD v6.8 → datos) | ✅ Hecho | **GATE APROBADO 2026-06-21** | T1–T5 hechos. Cobertura balde 1–2 100%; catálogo balde 3 (104 checks→3 primitivas nuevas); 31 IR válidas; `apts_next` sobre 4 flujos reales role-aware; re-cableado 100%; idempotente. Gate aprobado por el operador. Hallazgo: resolver multi-skill-por-fase → F3-T1.5 |
+| F3 Driver de goteo (costo B) | 🟡 En curso | `create-prd` por goteo end-to-end; contexto por paso ~constante | T1 (3 primitivas, 31/31) + T1.5 (resolver DAG multi-skill role-aware, 10/10) hechos. Siguiente: T2 (goteo modelo B) |
 | F4 Validación end-to-end (proyecto real) | ⬜ Pendiente | proyecto gestionado de punta a punta; métricas A y B vs BMAD; informe | — |
 
 Leyenda: ⬜ Pendiente · 🟡 En curso · ✅ Hecho · ⛔ Bloqueado · 🛑 En gate (espera operador)
 
-**Próxima acción:** 🛑 **F2-GATE — esperar aprobación del operador.** T1–T5 completos; evidencia
-bajo "F2-GATE" abajo. NO empezar F3 sin aprobación. Para reproducir: `cd backend` →
-`node scripts/import-bmad.js` (IR) → `node scripts/catalog-bucket3.js` (catálogo) →
-`node scripts/rewire-bmad.js` (re-cableado) → `node seeds/bmad_seed.js` (carga DB). Estado de
-`APTS_test` al cerrar: fixture toy + import bmad limpios, sin instancia demo. **Decisión pendiente
-del gate:** mejora del resolver para DAG multi-skill-por-fase (hallazgo T5) → ¿F3 o replanteo aparte?
-Tras aprobación, F3-T1 = implementar las 3 primitivas nuevas (`entity-status`, `count-compare`,
-`next-sibling-exists`) del catálogo balde 3.
+**Próxima acción:** 🟡 **F3 en curso.** F2-GATE aprobado (2026-06-21). **F3-T1 + F3-T1.5 hechos.**
+T1 = 3 primitivas nuevas (31/31). T1.5 = resolver DAG multi-skill-por-fase role-aware + scoping por
+`source_ref` + rol cableado desde menús (10/10). **Siguiente: F3-T2** (goteo modelo B,
+`apts_workflow_step`): reconstruir el payload por paso desde el estado, reinyectar solo `needs[]`,
+aplicar el re-cableado (`applyRewire`/`rewire-map`) sobre el `instruction_chunk` verbatim; requiere
+cablear `needs[]`/`outputs[]`/`iterable` per-step desde la IR (diferido de F2; ahora `step.metadata`
+trae asks/template_outputs/checks como insumo). NO empezar F4 sin aprobación de 🛑 F3-GATE. Estado
+de `APTS_test`: fixture toy (con `source_ref`) + corpus bmad (26 roles cableados) prístinos, 6
+primitivas implemented. Re-seed: `cd backend` → `node seeds/f1_toy_fixture.js` + `node seeds/bmad_seed.js`.
 
 ---
 
@@ -327,7 +328,55 @@ sigue siendo la autoridad, decisión F1).
 
 ## F3 — Driver de goteo generativo (costo B)
 
-- [ ] **F3-T1** Implementar primitivas del balde 3 catalogadas en F2.
+- [x] **F3-T1** Implementar primitivas del balde 3 catalogadas en F2. **Hecho 2026-06-21.**
+  - *Hecho:* 3 primitivas nuevas en `backend/scripts/lib/method_primitives.js` (mismo patrón/firma
+    `async (db, ctx, params) => {pass, observed, detail}`, registradas en `PRIMITIVES` = fuente de
+    verdad en código): **`entity-status`** (status de UNA unidad story/epic/initiative; `{target,status}`),
+    **`count-compare`** (comparación numérica `>,>=,<,<=,==,!=` de una métrica de estado vs umbral;
+    `{metric,op,value}`; métricas: `stories_total/done/remaining`, `epics_total/done`, `completion_pct`;
+    throw ruidoso en métrica/op desconocidos), **`next-sibling-exists`** (router; hermano siguiente/
+    anterior en secuencia épica/historia; `{sequence,direction:next|prev}` reconciliado del propuesto
+    `{sequence,from}`; orden total estable `sort_order,created_at,id`). Paleta reconciliada en
+    `backend/seeds/f1_toy_fixture.js` (3 filas nuevas + `PRIMITIVE_KEYS`; `reconcilePrimitiveRegistry`
+    marca implemented=true).
+  - *Confirmación de semántica contra `needs_new` (8) antes de codear:* `next-sibling-exists` cubre
+    `first story in epic`(×2) + `prev_epic_num < 1`; `count-compare` las comparaciones numéricas;
+    `entity-status` los single-unit de `maps_existing`. **Las 3 restantes de `needs_new` NO son
+    primitivas:** `provides different epic number` / `epic_number still not determined` = elicitación
+    (await-input, F3-T3); `any status unrecognized` / `required field missing` / `development_status
+    missing` (sprint-status) = validación del file-model BMAD → **MOOT** bajo estado servidor-autoritativo
+    (enums/constraints de DB). Refina el catálogo F2-T3, no lo contradice.
+  - *Aceptación:* harness throwaway (no en repo) contra `APTS_test`+fixture toy, **31/31**: reconcile
+    (3 implemented + handler_ref), entity-status (epic/story/initiative + mutación + sin-ancla + throw),
+    count-compare (todas las métricas/ops + completion_pct 0%→100% + throws), next-sibling-exists
+    (story next/prev/primera/última + epic con 2º epic insertado + sin-ancla + throws), dispatcher.
+    Todo en trx rollbackeada → `APTS_test` prístino (3 stories ready_for_dev, 1 epic, 6 primitivas).
+- [x] **F3-T1.5** Mejora del resolver para DAG multi-skill-por-fase (hallazgo T5; acordado con el
+  operador 2026-06-21). **Hecho 2026-06-21.**
+  - *3 decisiones acordadas con el operador antes de codear:* (a) **completitud por `routing.outputs`**
+    (liviano): cada required cierra cuando su artefacto/estado declarado se cumple; (b) **scoping de
+    librería = `source_ref` en `initiatives`** (toy/bmad coexisten en la tabla global y comparten
+    phase+track); (c) la mejora se hace al inicio de F3.
+  - *Hecho:* **Migración** `20260621000014_initiative_source_ref.js` (columna nullable
+    `initiatives.source_ref`; up/down limpias en `APTS_test`). **Resolver** (`method_resolver.js`):
+    `selectPhaseWorkflow`→**`resolvePhaseSpine`** (scopea por `source_ref`; sin routing=toy→1 wf
+    gate-based; con routing=bmad→required topo-ordenados; fase sin required=analysis→fallback
+    `bmad-product-brief`), **`topoSortRequired`** (orden por `preceded_by`, filtra refs `:substep`
+    y cross-fase; ciclo→resto por key, no cuelga), **`resolveWorkflowVerdict`** (toy=cascada de gates;
+    bmad=predicado `WORKFLOW_COMPLETION` → `phase_done` si pasa, si no el step de entrada), y el walk
+    de `aptsNext` ahora **itera la espina** (primer wf no-completo = activo; todos completos→avanza
+    fase). `WORKFLOW_COMPLETION` (data editable): brief/prd/architecture/epics por `artifact-exists`;
+    readiness/sprint-planning/create-story por `count-threshold` (provisional F4); dev-story por
+    `all-children-status` (especial). **Rol por workflow** (`bmad_seed.js`): `default_entity_id`
+    cableado desde los menús de agente (`entity.menu[].skill`, derivación de datos; tie-break agente
+    alfab. → readiness=architect); resuelve el diferido de rol de F2 (per-step sigue en T2).
+  - *Aceptación:* harness throwaway (no en repo) contra `APTS_test`, **10/10**: `topoSortRequired`
+    (solutioning + implementation con substep-refs filtradas); **regresión toy** (scoping no se
+    confunde con bmad coexistente; gate-based intacto: brief→planning→pm corre draft-prd); **DAG bmad
+    real** (analyst→run_step product-brief; pm→wait; brief→avanza a planning + pm corre `bmad-prd` +
+    phase persistida; analyst→wait; prd→avanza a solutioning + architect corre `bmad-create-architecture`
+    = 1er required topo). Migración up/down limpia; `APTS_test` prístino (toy con source_ref + bmad
+    con 26 roles + 6 primitivas).
 - [ ] **F3-T2** `apts_workflow_step` modelo B: reconstrucción de payload por paso desde estado;
   reinyección solo de `needs[]` (referencia + recuperación semántica). Pasos iterables.
 - [ ] **F3-T3** Estado **espera-input** para elicitación (≠ blocker): pausa, expone pregunta, reanuda.
@@ -401,6 +450,14 @@ sigue siendo la autoridad, decisión F1).
 | 2026-06-20 | (F2-T3) 3 primitivas nuevas: `entity-status`, `count-compare`, `next-sibling-exists` | Propuesta de ingeniería desde el bucket `needs_new`; se confirman e implementan en F3-T1 (no en F2: el ledger separa catálogo de implementación) |
 | 2026-06-20 | (F2-T4) Re-cableado = mapa declarativo aplicado en serve-time (F3), NO mutación del ADN | El ledger manda importar el ADN verbatim y tocar solo el andamiaje. `rewire-map.json` (data, editable-by-design) preserva el verbatim y deja el reemplazo para el goteo |
 | 2026-06-20 | (F2-T5) Hallazgo: resolver asume 1-workflow-por-fase; corpus real = multi-skill-por-fase (DAG) | El toy tenía 1 wf/fase; el corpus tiene varios (planning=4). `selectPhaseWorkflow` necesita consumir el routing CSV (ya cargado). NO se improvisó en código committeado: se desambiguó el spine en el harness throwaway y se eleva al gate como tarea F3 |
+| 2026-06-21 | **F2-GATE aprobado** por el operador | Cobertura balde 1–2 100%, catálogo balde 3 (3 primitivas nuevas), 31 IR válidas, `apts_next` sobre flujos reales, re-cableado 100%, idempotente. Habilita F3 (driver de goteo) |
+| 2026-06-21 | (gate) Mejora del resolver DAG multi-skill-por-fase se hace **al inicio de F3** (= F3-T1.5) | Decisión del operador. El goteo modelo B (T2) y la validación end-to-end del gate necesitan encadenar workflows reales dentro de una fase consumiendo el routing ya cargado como dato; diferirla bloquearía T2 |
+| 2026-06-21 | (F3-T1) 3 primitivas nuevas con firma/registro del patrón F1; params de `next-sibling-exists` = `{sequence,direction}` (reconciliado de `{sequence,from}`) | `direction:next\|prev` modela "primer/anterior hermano" más claro que un ancla `from`; se reconcilió el `params_schema` en la paleta. `count-compare` métricas acotadas a estado-servidor (conteos/%); índices de secuencia → `next-sibling-exists`. Throw ruidoso en metric/op/target/sequence/direction desconocidos (mismo criterio que `countChildren`) |
+| 2026-06-21 | (F3-T1) Refinamiento del catálogo balde 3: solo 5/8 `needs_new` son determinismo de servidor | Confirmación a mano contra `bucket3-catalog.md`: 3 condiciones de `needs_new` NO son primitivas — 2 son elicitación (await-input, T3) y 3 (sprint-status) son validación del file-model BMAD → MOOT bajo estado servidor-autoritativo (enums/constraints de DB). No contradice F2-T3 (el catálogo ya pedía confirmación humana) |
+| 2026-06-21 | (F3-T1.5) Completitud de workflow por `routing.outputs` (Opción A, liviano), no por wiring `outputs[]` per-step | Decisión del operador. Los 137 steps bmad tienen `outputs[]` NULL (diferido F2) → ningún wf real reporta phase_done → el DAG no avanza. `routing.outputs` ya es dato y da una señal de cierre a nivel-workflow sin cablear per-step; éste queda en T2 donde el goteo lo necesita. Reglas especiales: dev-story=historias done, analysis=brief existe |
+| 2026-06-21 | (F3-T1.5) Scoping de librería = `source_ref` en `initiatives` (migración aditiva) | Decisión del operador. toy y bmad coexisten en `workflow_definitions` (global) y comparten phase+track → selección por fase ambigua. `source_ref` alinea con la convención ya usada; el resolver filtra `workflow_definitions.source_ref = initiative.source_ref`. En T5 esto se hacía solo en el harness; ahora committeado |
+| 2026-06-21 | (F3-T1.5) Rol por workflow (`default_entity_id`) derivado de los menús de agente (`entity.menu[].skill`) | El corpus mapea workflow→agente como dato; derivación determinista (tie-break agente alfab. → readiness=architect). Resuelve el diferido de rol de F2 a nivel-workflow; `entity_id` POR-STEP sigue diferido a T2. Cableado en `bmad_seed`, no hardcode en el resolver |
+| 2026-06-21 | (F3-T1.5) Completitud provisional de readiness/sprint-planning/create-story = `count-threshold epic>=1` | "readiness report"/"sprint status"/"story" no mapean a un `doc_type` del enum; se gatean por estado-servidor. Marcado `provisional` en `WORKFLOW_COMPLETION`; se afina en F4 (el gate F3 sólo recorre analysis→planning, con specs limpias brief/prd) |
 
 ## Log de cambios (archivos tocados)
 
@@ -421,6 +478,8 @@ sigue siendo la autoridad, decisión F1).
 | 2026-06-20 | F2-T3 | `backend/scripts/importer/bucket3.js` (clasificador) + `backend/scripts/catalog-bucket3.js` (entry) → `backend/importer/bucket3-catalog.md` (104 checks, 3 primitivas nuevas). Sin DB |
 | 2026-06-20 | F2-T4 | `backend/scripts/importer/rewire.js` (mapa + classifyRef + applyRewire) + `backend/scripts/rewire-bmad.js` (entry) → `backend/importer/rewire-map.json` (79 refs, 100%). `NOTICE` ya de T1. Sin DB |
 | 2026-06-20 | F2-T5 | Harness throwaway (no en repo): `apts_next` sobre instancia real del corpus en `APTS_test`, 4 fases role-aware + mismatch→wait. Sin cambios de código committeado. `APTS_test` restaurado |
+| 2026-06-21 | F3-T1 | `backend/scripts/lib/method_primitives.js` (+3 primitivas: `entity-status`/`count-compare`/`next-sibling-exists` + helpers `resolveEntityRow`/`METRICS`/`COMPARATORS`/`siblingsInOrder`, registradas en `PRIMITIVES` + exports); `backend/seeds/f1_toy_fixture.js` (+3 filas de paleta + `PRIMITIVE_KEYS`). Harness throwaway 31/31 contra `APTS_test` (no en repo, trx rollbackeada). `APTS_test` prístino |
+| 2026-06-21 | F3-T1.5 | `backend/migrations/20260621000014_initiative_source_ref.js` (nueva, `initiatives.source_ref`); `backend/scripts/lib/method_resolver.js` (`resolvePhaseSpine`/`topoSortRequired`/`resolveWorkflowVerdict`/`WORKFLOW_COMPLETION`/`PHASE_FALLBACK_WORKFLOW`; walk de `aptsNext` itera la espina; import de `evaluatePrimitive`; quitado `selectPhaseWorkflow`); `backend/seeds/f1_toy_fixture.js` (toy initiative `source_ref`); `backend/seeds/bmad_seed.js` (`default_entity_id` desde menús de agente). Harness throwaway 10/10. Migración up/down limpia; `APTS_test` prístino |
 
 ## Mapa de archivos clave (se irá llenando)
 
@@ -428,8 +487,13 @@ sigue siendo la autoridad, decisión F1).
 - Tracking: este archivo
 - Backend (migraciones): `backend/migrations/` (F0 + 013 de F1)
 - Fixture toy (F1-T1): `backend/seeds/f1_toy_fixture.js` (idempotente, contra `APTS_test`)
-- Motor — primitivas + cascada (F1-T2): `backend/scripts/lib/method_primitives.js`
-- Resolver `apts_next` (F1-T3): `backend/scripts/lib/method_resolver.js` (`aptsNext`, encima de `resolvePhaseStep`)
+- Motor — primitivas + cascada (F1-T2; +3 primitivas balde 3 en F3-T1): `backend/scripts/lib/method_primitives.js`
+  (`entity-status`, `count-compare`, `next-sibling-exists`)
+- Resolver `apts_next` (F1-T3; +DAG multi-skill en F3-T1.5): `backend/scripts/lib/method_resolver.js`
+  (`aptsNext` itera la espina vía `resolvePhaseSpine`/`topoSortRequired`/`resolveWorkflowVerdict`,
+  scopeado por `initiatives.source_ref`; `WORKFLOW_COMPLETION` = completitud por `routing.outputs`)
+- Scoping de librería (F3-T1.5): `backend/migrations/20260621000014_initiative_source_ref.js`;
+  rol por workflow cableado en `backend/seeds/bmad_seed.js` (desde menús de agente)
 - Importador (F2 T1–T5, HECHO): parser puro `backend/scripts/importer/` (`toml_min.js`, `classify.js`,
   `dialect_structured.js`, `dialect_prose.js`, `agent.js`, `routing_csv.js`, `parse_skill.js`,
   `bucket3.js`, `rewire.js`) + entries `backend/scripts/{import-bmad.js, catalog-bucket3.js,

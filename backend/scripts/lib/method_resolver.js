@@ -26,10 +26,64 @@
 //   why      : razón legible (verdict.why de T2 + observed)
 //   args     : identificadores mínimos para el goteo F3 { phase, workflow_key, step_key }
 
-const { resolvePhaseStep } = require('./method_primitives');
+const { resolvePhaseStep, evaluatePrimitive } = require('./method_primitives');
 
 const LIFECYCLE = ['analysis', 'planning', 'solutioning', 'implementation', 'done'];
 const TERMINAL_STATUSES = ['done', 'archived'];
+
+// ---- F3-T1.5 — Navegación DAG multi-skill-por-fase ----
+// El corpus real tiene varios workflows por fase (DAG inter-workflow). El routing
+// ya es dato (workflow_definitions.metadata.routing, de module-help.csv). Modelo de
+// completitud aprobado (Opción A): cada required de una fase cierra cuando su
+// artefacto/estado declarado (routing.outputs) se cumple; la fase cierra cuando
+// TODOS sus required cierran, recorridos en orden topológico (preceded_by).
+//
+// Mapa de completitud a nivel-workflow (derivado de routing.outputs → doc_type/
+// estado-servidor). Editable-by-design (data del método). Los que no mapean a un
+// doc_type del enum usan el mejor predicado de estado y quedan marcados provisionales
+// (se validan/afinan en F4, fuera del gate F3 que sólo recorre analysis→planning).
+const WORKFLOW_COMPLETION = {
+  'bmad-product-brief': { primitive: 'artifact-exists', params: { doc_type: 'brief' } },
+  'bmad-prd': { primitive: 'artifact-exists', params: { doc_type: 'prd' } },
+  'bmad-create-architecture': { primitive: 'artifact-exists', params: { doc_type: 'architecture' } },
+  'bmad-create-epics-and-stories': { primitive: 'artifact-exists', params: { doc_type: 'epics' } },
+  // provisional (F4): "readiness report"/"sprint status"/"story" no mapean a doc_type;
+  // se gatean por estado-servidor (hay historias bajo el epic).
+  'bmad-check-implementation-readiness': { primitive: 'count-threshold', params: { parent: 'epic', min: 1 }, provisional: true },
+  'bmad-sprint-planning': { primitive: 'count-threshold', params: { parent: 'epic', min: 1 }, provisional: true },
+  'bmad-create-story': { primitive: 'count-threshold', params: { parent: 'epic', min: 1 }, provisional: true },
+  // especial: dev-story (routing.outputs vacío) cierra cuando todas las historias están done.
+  'bmad-dev-story': { primitive: 'all-children-status', params: { parent: 'epic', status: 'done' } },
+};
+
+// Fases sin ningún required en el CSV (analysis): workflow deliverable de facto.
+const PHASE_FALLBACK_WORKFLOW = { analysis: 'bmad-product-brief' };
+
+// Orden topológico determinista de los required por preceded_by (filtrando refs
+// a sub-pasos `key:substep` y a otras fases). Ciclo/insatisfacible → resto en
+// orden de key (determinista, no cuelga).
+const topoSortRequired = (required) => {
+  const keys = new Set(required.map((r) => r.key));
+  const baseKey = (ref) => String(ref).split(':')[0];
+  const prereqsOf = (r) => {
+    const pb = (r.metadata && r.metadata.routing && r.metadata.routing.preceded_by) || [];
+    return (Array.isArray(pb) ? pb : [pb]).map(baseKey).filter((k) => keys.has(k) && k !== r.key);
+  };
+  const remaining = [...required].sort((a, b) => (a.key < b.key ? -1 : 1));
+  const placed = [];
+  const placedSet = new Set();
+  while (remaining.length) {
+    const idx = remaining.findIndex((r) => prereqsOf(r).every((k) => placedSet.has(k)));
+    if (idx === -1) {
+      placed.push(...remaining);
+      break;
+    }
+    const [r] = remaining.splice(idx, 1);
+    placed.push(r);
+    placedSet.add(r.key);
+  }
+  return placed;
+};
 
 // Máquina de estados de método para STORIES (backlog_items). Lineal hacia adelante;
 // es la transición del método, distinta de la edición libre de update_backlog_item.
@@ -69,15 +123,56 @@ const loadCallerPointer = (db, initiativeId, agentName) =>
 const loadEpic = (db, initiativeId) =>
   db('epics').where({ initiative_id: initiativeId }).orderBy('sort_order', 'asc').first();
 
-// Workflow de la fase activa: prefiere el que matchea el track; si no, el primero activo.
-const selectPhaseWorkflow = async (db, phase, track) => {
-  const rows = await db('workflow_definitions').where({ phase, status: 'active' });
-  if (rows.length === 0) return null;
-  return rows.find((w) => Array.isArray(w.tracks) && w.tracks.includes(track)) || rows[0];
+// Espina de la fase activa, scopeada a la librería de la iniciativa (source_ref):
+// devuelve la lista ORDENADA de workflows que gatean la fase.
+//   · librería sin routing (toy): 1 workflow (track-match o primero) → completitud
+//     por gates de resolvePhaseStep (comportamiento F1).
+//   · con routing (bmad): required topológicamente ordenados → completitud por
+//     WORKFLOW_COMPLETION. Fase sin required (analysis) → workflow fallback.
+const resolvePhaseSpine = async (db, phase, track, sourceRef) => {
+  let q = db('workflow_definitions').where({ phase, status: 'active' });
+  if (sourceRef) q = q.where({ source_ref: sourceRef });
+  const rows = await q;
+  if (rows.length === 0) return [];
+
+  const withRouting = rows.filter((r) => r.metadata && r.metadata.routing);
+  if (withRouting.length === 0) {
+    const wf = rows.find((w) => Array.isArray(w.tracks) && w.tracks.includes(track)) || rows[0];
+    return [wf];
+  }
+
+  const required = withRouting.filter((r) => r.metadata.routing.required);
+  if (required.length === 0) {
+    const fbKey = PHASE_FALLBACK_WORKFLOW[phase];
+    const wf = fbKey ? rows.find((r) => r.key === fbKey) : null;
+    return wf ? [wf] : [];
+  }
+  return topoSortRequired(required);
 };
 
 const loadSteps = (db, workflowId) =>
   db('workflow_steps').where({ workflow_id: workflowId }).orderBy('step_order', 'asc');
+
+// Verdicto de UN workflow. Despacha por modelo de completitud:
+//   · sin routing (toy): cascada de gates (resolvePhaseStep) → phase_done|actionable|blocked.
+//   · con routing (bmad): si su predicado de completitud (WORKFLOW_COMPLETION) pasa →
+//     'phase_done' (workflow cerrado); si no, resolvePhaseStep da el step de entrada accionable.
+const resolveWorkflowVerdict = async (db, ctx, workflow, steps) => {
+  const routing = workflow.metadata && workflow.metadata.routing;
+  if (!routing) {
+    return resolvePhaseStep(db, ctx, workflow, steps);
+  }
+  const spec = WORKFLOW_COMPLETION[workflow.key];
+  if (spec) {
+    const v = await evaluatePrimitive(db, spec.primitive, ctx, spec.params);
+    if (v.pass) {
+      return { kind: 'phase_done', why: `workflow '${workflow.key}' completo: ${v.detail}`, observed: v.observed };
+    }
+  }
+  // No completo (o sin spec): el step de entrada accionable. Para workflows reales
+  // (sin gates/outputs por step cableados) resolvePhaseStep devuelve el 1er generative.
+  return resolvePhaseStep(db, ctx, workflow, steps);
+};
 
 const entityKey = async (db, entityId) => {
   if (!entityId) return null;
@@ -165,14 +260,26 @@ const aptsNext = (db, { project_url, agent_name }) =>
       }
       visitedPhases.add(phase);
 
-      const workflow = await selectPhaseWorkflow(trx, phase, initiative.track);
-      if (!workflow) {
+      const spine = await resolvePhaseSpine(trx, phase, initiative.track, initiative.source_ref);
+      if (spine.length === 0) {
         return { next: 'blocked', target_id: null, role: null, why: `sin workflow activo para la fase '${phase}'` };
       }
-      const steps = await loadSteps(trx, workflow.id);
-      const verdict = await resolvePhaseStep(trx, ctx, workflow, steps);
 
-      if (verdict.kind === 'phase_done') {
+      // Recorre la espina: el primer workflow NO-completo es el activo. Si todos
+      // cierran, la fase está completa.
+      let workflow = null;
+      let verdict = null;
+      for (const wf of spine) {
+        const steps = await loadSteps(trx, wf.id);
+        const v = await resolveWorkflowVerdict(trx, ctx, wf, steps);
+        if (v.kind === 'phase_done') continue; // workflow cerrado → siguiente en la espina
+        workflow = wf;
+        verdict = v;
+        break;
+      }
+
+      if (!workflow) {
+        // Todos los workflows de la espina cerraron → avanzar de fase.
         const adv = nextPhase(phase);
         await trx('initiatives').where({ id: initiative.id }).update({ phase: adv, updated_at: trx.fn.now() });
         phase = adv;
@@ -314,5 +421,10 @@ module.exports = {
   LIFECYCLE,
   nextPhase,
   claimDevStory,
-  selectPhaseWorkflow,
+  // F3-T1.5 — navegación DAG (exportadas para tests/harness)
+  resolvePhaseSpine,
+  resolveWorkflowVerdict,
+  topoSortRequired,
+  WORKFLOW_COMPLETION,
+  PHASE_FALLBACK_WORKFLOW,
 };

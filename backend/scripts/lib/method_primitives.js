@@ -96,10 +96,155 @@ const allChildrenStatus = async (db, ctx, params = {}) => {
   };
 };
 
+// ---- F3-T1: primitivas nuevas del catálogo balde 3 (needs_new) ----
+// Confirmadas a mano contra bucket3-catalog.md §needs_new antes de implementar.
+// Generalizan más allá de needs_new para absorber single-entity/secuencia de
+// maps_existing. Operan SOLO sobre estado servidor (DB), no sobre el file-model
+// BMAD: las condiciones tipo "sprint-status field missing" son MOOT (los enums/
+// constraints de la DB las garantizan) y "epic number not determined" es
+// elicitación (await-input, F3-T3), no gates deterministas.
+
+// Resolución de UNA entidad por target (extensible). Devuelve la fila o null.
+const resolveEntityRow = async (db, ctx, target) => {
+  if (target === 'epic') {
+    if (!ctx.epic_id) return null;
+    return db('epics').where({ id: ctx.epic_id }).first('id', 'status');
+  }
+  if (target === 'story') {
+    if (!ctx.story_id) return null;
+    return db('backlog_items').where({ id: ctx.story_id }).first('id', 'status');
+  }
+  if (target === 'initiative') {
+    if (!ctx.initiative_id) return null;
+    return db('initiatives').where({ id: ctx.initiative_id }).first('id', 'status');
+  }
+  throw new Error(`entity-status/target no soportado: ${target}`);
+};
+
+// Verdadero si UNA entidad concreta (story/epic/initiative) está en el status dado.
+// Complementa all-children-status (agregado) con el chequeo de una sola unidad.
+// Cubre: "epic status is 'done'", "story status == review", "current_status == ready-for-dev".
+const entityStatus = async (db, ctx, params = {}) => {
+  const { target, status } = params;
+  const row = await resolveEntityRow(db, ctx, target);
+  const pass = Boolean(row) && row.status === status;
+  return {
+    pass,
+    observed: { target, id: row ? row.id : null, actual: row ? row.status : null, expected: status },
+    detail: row
+      ? `${target} en '${row.status}' (esperado '${status}')`
+      : `${target} inexistente en contexto`,
+  };
+};
+
+// ---- Métricas resolubles desde el estado APTS (para count-compare) ----
+// Solo conteos/porcentajes de estado-servidor; las condiciones de índice de
+// secuencia (story_num, prev_epic_num) se modelan con next-sibling-exists.
+const METRICS = {
+  stories_total: (db, ctx) => countChildren(db, ctx, 'epic'),
+  stories_done: (db, ctx) => countChildrenWithStatus(db, ctx, 'epic', 'done'),
+  stories_remaining: async (db, ctx) => {
+    if (!ctx.epic_id) return 0;
+    const [{ c }] = await db('backlog_items')
+      .where({ epic_id: ctx.epic_id })
+      .whereNotIn('status', TERMINAL_STATUSES)
+      .count('* as c');
+    return Number(c);
+  },
+  epics_total: (db, ctx) => countChildren(db, ctx, 'initiative'),
+  epics_done: (db, ctx) => countChildrenWithStatus(db, ctx, 'initiative', 'done'),
+  completion_pct: async (db, ctx) => {
+    const total = await countChildren(db, ctx, 'epic');
+    if (total === 0) return 0;
+    const done = await countChildrenWithStatus(db, ctx, 'epic', 'done');
+    return Math.round((100 * done) / total);
+  },
+};
+
+const COMPARATORS = {
+  '>': (a, b) => a > b,
+  '>=': (a, b) => a >= b,
+  '<': (a, b) => a < b,
+  '<=': (a, b) => a <= b,
+  '==': (a, b) => a === b,
+  '!=': (a, b) => a !== b,
+};
+
+// Comparación numérica general (>, >=, <, <=, ==, !=) de una métrica de estado
+// contra un umbral. Generaliza count-threshold (que solo hace >= min).
+// Cubre: "completion_percentage >= 90", "debt_count > 10", "story_num > 1".
+const countCompare = async (db, ctx, params = {}) => {
+  const { metric, op, value } = params;
+  const resolver = METRICS[metric];
+  if (!resolver) throw new Error(`count-compare/metric no soportada: ${metric}`);
+  const cmp = COMPARATORS[op];
+  if (!cmp) throw new Error(`count-compare/op no soportado: ${op}`);
+  const actual = await resolver(db, ctx);
+  const pass = cmp(actual, value);
+  return {
+    pass,
+    observed: { metric, actual, op, value },
+    detail: `${metric}=${actual} ${op} ${value}`,
+  };
+};
+
+// ---- Secuencia de hermanos (para next-sibling-exists) ----
+// Orden total estable por (sort_order, created_at, id). A escala de épicas/
+// historias el list-and-index es determinista y suficiente.
+const siblingsInOrder = async (db, ctx, sequence) => {
+  if (sequence === 'epic') {
+    if (!ctx.initiative_id) return { rows: [], anchorId: ctx.epic_id || null };
+    const rows = await db('epics')
+      .where({ initiative_id: ctx.initiative_id })
+      .orderBy([{ column: 'sort_order' }, { column: 'created_at' }, { column: 'id' }])
+      .select('id');
+    return { rows, anchorId: ctx.epic_id || null };
+  }
+  if (sequence === 'story') {
+    if (!ctx.epic_id) return { rows: [], anchorId: ctx.story_id || null };
+    const rows = await db('backlog_items')
+      .where({ epic_id: ctx.epic_id })
+      .orderBy([{ column: 'sort_order' }, { column: 'created_at' }, { column: 'id' }])
+      .select('id');
+    return { rows, anchorId: ctx.story_id || null };
+  }
+  throw new Error(`next-sibling-exists/sequence no soportada: ${sequence}`);
+};
+
+// Verdadero si existe el hermano siguiente (o anterior) del ancla en la secuencia.
+// Enruta cierre de ciclo épica/sprint. direction ∈ {next|prev} (default next).
+// Cubre: "next epic found/NOT found", "first story in epic" (prev → pass=false),
+// "previous story exists".
+const nextSiblingExists = async (db, ctx, params = {}) => {
+  const { sequence } = params;
+  const direction = params.direction || 'next';
+  if (direction !== 'next' && direction !== 'prev') {
+    throw new Error(`next-sibling-exists/direction no soportada: ${direction}`);
+  }
+  const { rows, anchorId } = await siblingsInOrder(db, ctx, sequence);
+  const idx = anchorId ? rows.findIndex((r) => r.id === anchorId) : -1;
+  let sibling = null;
+  if (idx !== -1) {
+    const neighbor = direction === 'next' ? rows[idx + 1] : rows[idx - 1];
+    sibling = neighbor ? neighbor.id : null;
+  }
+  const pass = Boolean(sibling);
+  return {
+    pass,
+    observed: { sequence, direction, anchor_id: anchorId, sibling_id: sibling, total: rows.length },
+    detail: anchorId
+      ? `${sequence} ${direction}: ${pass ? `hermano ${sibling}` : 'sin hermano'}`
+      : `${sequence}: sin ancla en contexto`,
+  };
+};
+
 const PRIMITIVES = {
   'artifact-exists': artifactExists,
   'count-threshold': countThreshold,
   'all-children-status': allChildrenStatus,
+  'entity-status': entityStatus,
+  'count-compare': countCompare,
+  'next-sibling-exists': nextSiblingExists,
 };
 
 const IMPLEMENTED_KEYS = Object.keys(PRIMITIVES);
@@ -223,5 +368,8 @@ module.exports = {
   artifactExists,
   countThreshold,
   allChildrenStatus,
+  entityStatus,
+  countCompare,
+  nextSiblingExists,
   outputsSatisfied,
 };

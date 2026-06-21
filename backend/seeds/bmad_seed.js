@@ -12,8 +12,9 @@
 // Alcance (T2 = baldes 1–2): solo ADN generativo. Lo que queda explícitamente
 // para fases posteriores (anotado en coverage/tracking):
 //   - balde 3 (checks/routing → primitivas + next_rules deterministas) = T3
-//   - needs[]/outputs[] por step y `iterable` (p.ej. dev-story) = T3 / F3-wiring
-//   - asignación de rol (entity_id por step / default_entity_id) = T3
+//   - needs[]/outputs[] por step y `iterable` (p.ej. dev-story) = F3-T2 (goteo)
+//   - default_entity_id por workflow (rol) = CABLEADO en F3-T1.5 (desde menús de agente);
+//     entity_id POR-STEP sigue diferido a F3-T2
 // Por eso acá: next_rules=null, needs/outputs=null, iterable=false; el routing
 // y los puntos de elicitación/checks se preservan en metadata para no perder nada.
 //
@@ -84,6 +85,20 @@ async function run() {
       entityIdByKey[ir.key] = row.id;
     }
 
+    // ---- 2b. F3-T1.5 — rol por workflow (default_entity_id) desde los menús de agente ----
+    // El corpus mapea workflow→agente como dato: entity.menu[].skill lista los
+    // workflows que cada agente posee. Derivación determinista; tie-break por agente
+    // alfabéticamente menor (p.ej. check-implementation-readiness → architect, no pm).
+    const ownerAgentKeyByWf = {};
+    for (const ir of agents) {
+      const menu = (ir.entity && ir.entity.menu) || [];
+      for (const m of menu) {
+        if (!m.skill) continue;
+        const cur = ownerAgentKeyByWf[m.skill];
+        if (!cur || ir.key < cur) ownerAgentKeyByWf[m.skill] = ir.key;
+      }
+    }
+
     // ---- 3. workflow_definitions + BALDE 2 workflow_steps (todas las skills) ----
     // Los agentes también se cargan como workflow_definition (su SKILL.md tiene el
     // Overview como step generativo) para no perder el ADN; su persona ya está en entities.
@@ -96,7 +111,11 @@ async function run() {
           description: ir.frontmatter.description || null,
           phase: defPhase(ir.phase),
           tracks: j(['method']),
-          default_entity_id: ir.kind === 'agent' ? entityIdByKey[ir.key] : null, // rol por-step = T3
+          // F3-T1.5: rol del workflow. Agente = su propia entity; workflow = el agente
+          // dueño (menú). entity_id POR-STEP sigue diferido; este default basta al resolver.
+          default_entity_id: ir.kind === 'agent'
+            ? entityIdByKey[ir.key]
+            : (entityIdByKey[ownerAgentKeyByWf[ir.key]] || null),
           status: 'active',
           metadata: j({
             kind: ir.kind,

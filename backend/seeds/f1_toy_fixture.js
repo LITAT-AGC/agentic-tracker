@@ -23,7 +23,8 @@ const j = (v) => (v === undefined || v === null ? null : JSON.stringify(v));
 const FIXTURE_PROJECT_URL = 'apts://fixture/toy';
 const WORKFLOW_KEYS = ['toy-analysis', 'toy-planning', 'toy-solutioning', 'toy-implementation'];
 const ENTITY_KEYS = ['analyst', 'pm', 'architect', 'sm', 'dev'];
-const PRIMITIVE_KEYS = ['artifact-exists', 'count-threshold', 'all-children-status'];
+const PRIMITIVE_KEYS = ['artifact-exists', 'count-threshold', 'all-children-status',
+  'entity-status', 'count-compare', 'next-sibling-exists'];
 
 const ENTITIES = [
   { key: 'analyst', name: 'Analyst', kind: 'role',
@@ -58,6 +59,17 @@ const PRIMITIVES = [
   { key: 'all-children-status', name: 'All children status', category: 'aggregate',
     description: 'Verdadero si TODOS los hijos del parent están en el status dado.',
     params_schema: { parent: 'string', status: 'string' }, implemented: false },
+  // F3-T1: primitivas nuevas del catálogo balde 3 (needs_new). implemented lo
+  // resuelve reconcilePrimitiveRegistry desde el registro en código.
+  { key: 'entity-status', name: 'Entity status equals', category: 'gate',
+    description: 'Verdadero si UNA entidad (story/epic/initiative) está en el status dado.',
+    params_schema: { target: 'string', status: 'string' }, implemented: false },
+  { key: 'count-compare', name: 'Count comparison', category: 'gate',
+    description: 'Comparación numérica (>, >=, <, <=, ==, !=) de una métrica de estado contra un umbral.',
+    params_schema: { metric: 'string', op: 'string', value: 'number' }, implemented: false },
+  { key: 'next-sibling-exists', name: 'Next sibling exists', category: 'router',
+    description: 'Verdadero si existe el hermano siguiente/anterior en la secuencia (épica/historia).',
+    params_schema: { sequence: 'string', direction: 'string' }, implemented: false },
 ];
 
 // Pasos por workflow. entity = key de entidad; primitive = key de primitiva.
@@ -194,6 +206,7 @@ async function run() {
       project_url: FIXTURE_PROJECT_URL, title: 'Toy Initiative',
       description: 'Iniciativa de juguete para de-riesgar apts_next.',
       track: 'method', phase: 'analysis', status: 'active',
+      source_ref: 'fixture:f1-toy', // F3-T1.5: scopea el resolver a la librería toy
     }).returning('id');
     const initiativeId = initRow.id;
 
