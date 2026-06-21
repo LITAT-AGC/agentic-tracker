@@ -1,5 +1,7 @@
 # Informe de cierre v1 — Emulación de BMAD dentro de APTS (motor de método servidor-autoritativo)
 
+> **Nota histórica (v3.0.0):** este informe describe una etapa en la que el paquete de integración publicaba un CLI (`apts-cli.js`) como superficie de fallback. A partir de la **v3.0.0**, el servidor MCP (`apts-mcp.js`) es la **única** superficie soportada y toda referencia funcional al CLI fue retirada. Las menciones al CLI más abajo se conservan solo como registro histórico.
+
 > Entregable del 🛑 **F4-GATE**. Compañero de [`PLAN-emulacion-bmad.md`](./PLAN-emulacion-bmad.md) y
 > [`TRACKING-emulacion-bmad.md`](./TRACKING-emulacion-bmad.md). Fecha: 2026-06-21. Rama: `feat/emulacion-bmad`.
 > **Estado: APROBADO por el operador (2026-06-21) — v1 CERRADO.** Las 5 fases (F0–F4) están hechas y

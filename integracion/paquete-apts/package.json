@@ -3,9 +3,8 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "APTS integration core (ESM-only): contract, HTTP client, CLI fallback, and MCP server.",
+  "description": "APTS integration core (ESM-only): contract, HTTP client, and MCP server.",
   "bin": {
-    "apts-cli": "./apts-cli.js",
     "apts-mcp": "./apts-mcp.js"
   }
 }

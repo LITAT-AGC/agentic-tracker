@@ -80,7 +80,7 @@ Authorization: Bearer <APTS_API_KEY>
 
 ## Flujo esperado de un agente
 
-1. Verificar contexto de identidad (el cliente/CLI oficial lo autocompleta desde env, contexto local gestionado y luego Git local).
+1. Verificar contexto de identidad (el cliente MCP oficial lo autocompleta desde env, contexto local gestionado y luego Git local).
 2. Consultar backlog (`list_backlog_items`) y seleccionar un item pendiente o crear uno nuevo si corresponde.
 3. Crear la tarea de ejecucion con `register_task` y asociarla al `backlog_item_id`.
 4. Leer el contexto del proyecto antes de trabajar (`read_project_context`).
@@ -88,7 +88,7 @@ Authorization: Bearer <APTS_API_KEY>
 6. Reportar blocker si no puede continuar.
 7. Marcar la tarea como `done` o `review` cuando termina; APTS sincroniza el estado del backlog vinculado.
 
-Fuentes de identidad usadas por el cliente/CLI oficial cuando faltan campos en payload:
+Fuentes de identidad usadas por el cliente MCP oficial cuando faltan campos en payload:
 
 ```env
 APTS_PROJECT_URL=https://github.com/org/repo
@@ -99,9 +99,9 @@ APTS_TASK_ID=22222222-2222-2222-2222-222222222222
 APTS_CONTEXT_FILE=.apts/execution-context.json
 ```
 
-Con `APTS_TASK_ID` configurado, las llamadas repetitivas (`heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status`) pueden omitir `task_id` en el payload cuando se usa el cliente/CLI oficial.
-Ademas, el cliente/CLI oficial persiste contexto de ejecucion en `.apts/execution-context.json` por defecto (o la ruta definida en `APTS_CONTEXT_FILE`), por lo que luego de `register_task` las llamadas repetitivas pueden omitir `task_id` incluso sin reexportar variables.
-La CLI oficial tambien incluye `show-execution-context`, `set-execution-context` y `clear-execution-context` para inspeccionar o controlar ese estado local.
+Con `APTS_TASK_ID` configurado, las llamadas repetitivas (`heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status`) pueden omitir `task_id` en el payload cuando se usa el cliente MCP oficial.
+Ademas, el cliente MCP oficial persiste contexto de ejecucion en `.apts/execution-context.json` por defecto (o la ruta definida en `APTS_CONTEXT_FILE`), por lo que luego de `register_task` las llamadas repetitivas pueden omitir `task_id` incluso sin reexportar variables.
+Ese archivo `.apts/execution-context.json` puede inspeccionarse o editarse directamente para revisar o reiniciar el estado de identidad gestionado.
 
 Fallback en Git local:
 
@@ -327,10 +327,9 @@ Nota: en este repositorio `.vscode/` esta ignorado por git, por eso la plantilla
 
 Para el cliente HTTP exportable:
 
-- usa `apts-client.js` si el proyecto cliente corre en CommonJS,
-- usa `apts-client.mjs` si el proyecto cliente corre en ESM.
+- usa `apts-client.js`, el cliente unico ESM-only (el proyecto cliente debe tratar la carpeta como ESM via `package.json` con `{ "type": "module" }`).
 
-Importante: ambos scripts deben mantenerse sincronizados. Si APTS cambia endpoints, payloads, helpers o manejo de errores del cliente, el ajuste debe replicarse en `integracion/paquete-apts/apts-client.js` y en `integracion/paquete-apts/apts-client.mjs`.
+Importante: si APTS cambia endpoints, payloads, helpers o manejo de errores del cliente, el ajuste debe replicarse en `integracion/paquete-apts/apts-client.js`.
 
 ### Contrato operativo minimo
 
@@ -357,7 +356,7 @@ Regla de backlog:
 
 Happy path operativo:
 
-1. Configurar `APTS_BASE_URL` y `APTS_API_KEY`; luego usar el CLI/cliente oficial con autofill (sin resolver identidad manualmente en cada llamada).
+1. Configurar `APTS_BASE_URL` y `APTS_API_KEY`; luego usar el servidor MCP oficial con autofill (sin resolver identidad manualmente en cada llamada).
 2. Llamar `list_backlog_items` y decidir si reutilizas o creas item.
 3. Llamar `register_task` y conservar `task_id`.
 4. Llamar `read_project_context` antes de editar.
@@ -390,32 +389,11 @@ Payloads minimos listos para copiar:
 }
 ```
 
-Ejemplos PowerShell seguros:
+Seguridad en mutaciones:
 
-```powershell
-$payload = @'
-{
-  "task_id": "22222222-2222-2222-2222-222222222222",
-  "agent_name": "Copilot",
-  "project_url": "https://github.com/org/repo"
-}
-'@
-
-$payload | node .ia/apts/apts-cli.mjs heartbeat --stdin --pretty
-```
-
-```powershell
-@'
-{
-  "project_url": "https://github.com/org/repo",
-  "title": "Documentar payloads minimos de APTS",
-  "agent_name": "Copilot",
-  "agent_email": "copilot@example.com"
-}
-'@ | Set-Content -Path register-task.json
-
-Get-Content .\register-task.json | node .ia/apts/apts-cli.mjs register-task --stdin --pretty
-```
+- En `update_backlog_item` / `delete_backlog_item` usar siempre `backlog_item_id` (nunca `id`).
+- Para texto largo o de alto riesgo, aplicar updates por etapas: primero un campo minimo (por ejemplo `status`), luego el contenido completo tras confirmar la primera llamada.
+- Volver a leer el backlog item o la tarea tras cada llamada mutante y verificar que los campos persistidos coinciden con lo esperado.
 
 Errores frecuentes:
 
@@ -522,7 +500,6 @@ mi-proyecto/
     apts_skills.json
   scripts/
     apts-client.js
-    apts-client.mjs
   .env
 ```
 
@@ -538,7 +515,6 @@ mi-proyecto/
       apts/
         SKILL.md
         apts-client.js
-        apts-client.mjs
 ```
 
 En ese caso, el `SKILL.md` del proyecto cliente debe describir cuando usar la skill y delegar la operacion al cliente HTTP o al bridge que habla con APTS.

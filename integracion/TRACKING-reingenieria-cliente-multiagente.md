@@ -1,5 +1,7 @@
 # Tracking: reingeniería cliente APTS multi-runtime
 
+> **Nota histórica (v3.0.0):** este documento describe una etapa en la que el paquete de integración publicaba un CLI (`apts-cli.js`) como superficie de fallback. A partir de la **v3.0.0**, el servidor MCP (`apts-mcp.js`) es la **única** superficie soportada y toda referencia funcional al CLI fue retirada. Las menciones al CLI más abajo se conservan solo como registro histórico.
+
 > Compañero de [`PLAN-reingenieria-cliente-multiagente.md`](./PLAN-reingenieria-cliente-multiagente.md).
 > Este doc es **autosuficiente**: una sesión de chat nueva puede retomar leyendo solo esto + el plan.
 > Marca `[x]` al completar cada tarea y actualiza "Estado global" y "Próxima acción".

@@ -52,7 +52,7 @@ Pick the shell by the active agent runtime, not by VS Code task:
 - For any functional change in APTS that affects behavior exposed to integrators (API routes, payloads, statuses, auth flow, downloadable artifacts, or integration guidance), you must bump the public integration manifest `schema_version` and add a matching entry to `bootstrap.manifest_updates.notes`.
 - `bootstrap.manifest_updates.notes` is append-only version history: never replace it with only the latest change, never delete previous entries, and always prepend the new version entry.
 - If any downloadable integration artifact changes (clients, skills contract, guidelines, or agent templates), you must also version that specific artifact explicitly in the public manifest metadata (for example `artifact_version` / `updated_in_schema_version`) so local updaters can detect, overwrite, and clean legacy files deterministically.
-- Any new capability added to the APTS service must be reflected in the single official downloadable integration client (`integracion/paquete-apts/apts-client.js`, ESM-only), in the MCP server (`integracion/paquete-apts/apts-mcp.js`), and in `integracion/paquete-apts/apts_skills.json` (the single source of truth). The CLI command table and the MCP tool list are derived/validated from the contract by `contract-check.js`, so a contract change propagates without hand-editing N files. Client integrators must not need to build ad-hoc scripts to cover base APTS integration features.
+- Any new capability added to the APTS service must be reflected in the single official downloadable integration client (`integracion/paquete-apts/apts-client.js`, ESM-only), in the MCP server (`integracion/paquete-apts/apts-mcp.js`), and in `integracion/paquete-apts/apts_skills.json` (the single source of truth). The MCP tool list is derived/validated from the contract by `contract-check.js`, so a contract change propagates without hand-editing N files. Client integrators must not need to build ad-hoc scripts to cover base APTS integration features.
 
 ## APTS Operational Contract Quick Reference
 
@@ -82,7 +82,7 @@ If there is no active backlog item that describes exactly the change you are abo
 
 ### Happy Path
 
-1. Ensure `APTS_BASE_URL` and `APTS_API_KEY` are available, then use official client/CLI with minimum payloads and auto-resolved identity/context (no manual identity pre-flight by default).
+1. Ensure `APTS_BASE_URL` and `APTS_API_KEY` are available, then use the official MCP server with minimum payloads and auto-resolved identity/context (no manual identity pre-flight by default).
 2. List backlog and decide whether to reuse an existing item or create a new one.
 3. Call `register_task` and keep the returned `task_id`.
 4. Call `read_project_context` before editing.
@@ -92,7 +92,7 @@ If there is no active backlog item that describes exactly the change you are abo
 
 ### Copy-Ready Payloads
 
-These examples use the public contract shape exposed to clients and the official CLI.
+These examples use the public contract shape exposed to clients via the official MCP server tools.
 
 #### create_backlog_item
 
@@ -144,7 +144,7 @@ These examples use the public contract shape exposed to clients and the official
 			"AGENTS.md"
 		],
 		"commands_run": [
-			"node .ia/apts/apts-cli.js heartbeat --stdin"
+			"npm test"
 		],
 		"outcome": "success"
 	}
@@ -159,34 +159,11 @@ These examples use the public contract shape exposed to clients and the official
 }
 ```
 
-### PowerShell-Safe CLI Examples
+### Mutation Safety
 
-Prefer file payloads or here-strings on Windows instead of inline escaped JSON.
-
-```powershell
-@'
-{
-	"task_id": "22222222-2222-2222-2222-222222222222",
-	"agent_name": "Copilot",
-	"project_url": "https://github.com/org/repo"
-}
-'@ | Set-Content -Path heartbeat.json
-
-Get-Content .\heartbeat.json | node .ia/apts/apts-cli.js heartbeat --stdin --pretty
-```
-
-```powershell
-$payload = @'
-{
-	"project_url": "https://github.com/org/repo",
-	"title": "Document APTS minimum command payloads",
-	"agent_name": "Copilot",
-	"agent_email": "copilot@example.com"
-}
-'@
-
-$payload | node .ia/apts/apts-cli.js register-task --stdin --pretty
-```
+- For `update_backlog_item` / `delete_backlog_item`, always pass `backlog_item_id` (never `id`).
+- For high-risk text, use staged updates: a minimal field update first, then the full content update after the first call succeeds.
+- Re-read backlog/task state after every mutating call and confirm persisted fields match expectations.
 
 ### Frequent Errors
 

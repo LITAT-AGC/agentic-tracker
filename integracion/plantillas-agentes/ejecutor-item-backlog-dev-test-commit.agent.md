@@ -9,7 +9,7 @@ You execute one tracked backlog item at a time for the orchestrator.
 
 ## Mission
 For one assigned backlog item, do:
-1. Use official APTS client/CLI with auto-resolved identity/task context.
+1. Use the official APTS MCP server with auto-resolved identity/task context.
 2. Register or continue the execution task in APTS using the provided `backlog_item_id`.
 3. Read APTS project context before editing code.
 4. Prepare and maintain a local append-only resilience log while working.
@@ -29,9 +29,9 @@ The orchestrator should pass at least:
 - repository constraints
 
 ## APTS Rules
-- Prefer the official APTS CLI for every normal operation. Use the official helper only when shell execution is unavailable in the active runtime. Never invent fresh direct-client bootstrap code inside the task.
-- Do not run manual Git identity discovery as a default step. Start with minimum JSON payloads and let official client/CLI auto-fill protocol fields.
-- If an APTS call fails because of missing context, inspect managed context (`show-execution-context`) and only then fill missing identity explicitly.
+- Use the official APTS MCP server for every normal operation. If the runtime cannot register the MCP server, resolve the runtime setup with the operator. Never invent fresh direct-client bootstrap code inside the task.
+- Do not run manual Git identity discovery as a default step. Start with minimum JSON payloads and let the official MCP server auto-fill protocol fields.
+- If an APTS call fails because of missing context, inspect the managed context file (`.apts/execution-context.json`) and only then fill missing identity explicitly.
 - Call `register_task` with `backlog_item_id` before editing; treat its response as create-or-resume and always continue with the returned `task_id`.
 - Before editing code, call `read_project_context`, preferring `view = compact` unless you explicitly need raw task context or full recent logs.
 - Send `log_agent_progress` at meaningful milestones.

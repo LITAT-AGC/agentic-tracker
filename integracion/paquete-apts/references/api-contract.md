@@ -15,24 +15,25 @@ Authorization: Bearer <APTS_API_KEY>
 
 ## Uso recomendado para Agentes de IA
 
-Orden de preferencia:
+Superficie unica:
 
-1. MCP oficial (`apts-mcp.js`): superficie primaria con una tool nativa por operacion (Claude Code y opencode).
-2. CLI oficial (`apts-cli.js`): fallback universal para runtimes sin MCP y uso manual/automatizado.
-3. Cliente crudo (`apts-client.js`) solo dentro de los entrypoints MCP/CLI empaquetados.
+1. MCP oficial (`apts-mcp.js`): unica superficie soportada, con una tool nativa por operacion (Claude Code y opencode).
+2. Cliente crudo (`apts-client.js`) solo dentro del entrypoint MCP empaquetado.
+
+Si el runtime no puede registrar un servidor MCP, es un problema de configuracion del runtime que se resuelve con el operador; APTS ya no publica un CLI ni ninguna superficie de script alternativa.
 
 Reglas obligatorias:
 
-- Preferir las tools MCP cuando el runtime soporte MCP; usar el CLI como fallback.
+- Usar las tools MCP en cualquier runtime soportado.
 - Nunca generar codigo nuevo por interaccion que importe o bootstrapee el cliente crudo desde cero.
-- Nunca construir JSON a mano con concatenacion cuando puedes pasar objetos, `--stdin`, o `--json @archivo.json`.
-- Dejar que el MCP/CLI oficial resuelva identidad y contexto local antes de intentar rellenar campos manualmente.
+- Nunca construir JSON a mano con concatenacion cuando puedes pasar objetos.
+- Dejar que el servidor MCP oficial resuelva identidad y contexto local antes de intentar rellenar campos manualmente.
 
 ## Resolucion de identidad
 
-Regla anti-friccion: cuando uses el CLI/helper oficial, no hagas pre-pasos manuales para obtener identidad Git en cada llamada. Envia payload minimo y deja que la capa oficial autocomplemente.
+Regla anti-friccion: cuando uses el servidor MCP oficial, no hagas pre-pasos manuales para obtener identidad Git en cada llamada. Envia payload minimo y deja que la capa oficial autocomplemente.
 
-En CLI/helper oficial APTS, los campos de identidad se autocompletan cuando faltan en el payload usando este orden: variables de entorno -> contexto local gestionado -> Git local.
+En el servidor MCP oficial APTS, los campos de identidad se autocompletan cuando faltan en el payload usando este orden: variables de entorno -> contexto local gestionado -> Git local.
 
 ```env
 APTS_PROJECT_URL=https://github.com/org/repo
@@ -43,16 +44,11 @@ APTS_TASK_ID=22222222-2222-2222-2222-222222222222
 APTS_CONTEXT_FILE=.apts/execution-context.json
 ```
 
-`APTS_TASK_ID` lets the official client/CLI omit `task_id` in repeated execution calls such as `heartbeat`, `log_agent_progress`, `report_blocker`, and `update_task_status`.
-`APTS_CONTEXT_FILE` can override where official client/CLI store managed execution context used for automatic field resolution.
-`APTS_ENV_FILE` can point the official CLI to a specific env file when the runtime does not execute from the project root.
+`APTS_TASK_ID` lets the official client omit `task_id` in repeated execution calls such as `heartbeat`, `log_agent_progress`, `report_blocker`, and `update_task_status`.
+`APTS_CONTEXT_FILE` can override where the official client stores managed execution context used for automatic field resolution.
+`APTS_ENV_FILE` can point the official client to a specific env file when the runtime does not execute from the project root.
 
-By default, official client/CLI persist execution context in `.apts/execution-context.json` and use it as an additional fallback source after env variables.
-
-CLI helpers for managed context:
-- `show-execution-context` to inspect resolved context and file path.
-- `set-execution-context` to persist `task_id` or identity fields once.
-- `clear-execution-context` to reset local managed context.
+By default, the official client persists execution context in `.apts/execution-context.json` and uses it as an additional fallback source after env variables. Inspect or edit that file directly to review or reset the managed identity state.
 
 Fallback Git cuando no existen esas variables:
 
@@ -63,11 +59,11 @@ agent_email=$(git config user.email)
 branch=$(git branch --show-current)
 ```
 
-Si llamas la API HTTP sin pasar por el CLI/helper oficial, debes enviar explicitamente todos los campos requeridos por endpoint.
+Si llamas la API HTTP sin pasar por el servidor MCP oficial, debes enviar explicitamente todos los campos requeridos por endpoint.
 
 ## Campos comunes obligatorios
 
-La tabla refleja campos obligatorios a nivel de API. El CLI/helper oficial puede completar los campos de identidad automaticamente.
+La tabla refleja campos obligatorios a nivel de API. El servidor MCP oficial puede completar los campos de identidad automaticamente.
 
 | Campo | Operaciones |
 | --- | --- |
@@ -106,7 +102,7 @@ La tabla refleja campos obligatorios a nivel de API. El CLI/helper oficial puede
 - Comportamiento de reanudacion: cuando se envia `backlog_item_id` y ese backlog item ya tiene una `active_task_id` en estado `todo`, `in_progress` o `stalled`, APTS reanuda esa tarea en lugar de crear una duplicada.
 - Respuesta incluye: `task_id`, `status`, `resumed`, `previous_task_id`, `previous_status`, `backlog_item_id`.
 - Payload obligatorio: `project_url`, `title`, `agent_name`, `agent_email`
-- Payload minimo recomendado con cliente/CLI oficial: solo `title` (los campos de identidad se autocompletan).
+- Payload minimo recomendado con cliente/MCP oficial: solo `title` (los campos de identidad se autocompletan).
 - Body minimo:
 
 ```json
@@ -120,7 +116,7 @@ La tabla refleja campos obligatorios a nivel de API. El CLI/helper oficial puede
 - Metodo: `GET`
 - Ruta: `/projects/context?url=<project_url>&limit=5`
 - Query minima: `url`
-- Query minima recomendada con cliente/CLI oficial: `{}` (url autocompletada).
+- Query minima recomendada con cliente/MCP oficial: `{}` (url autocompletada).
 - Query params opcionales:
   - `backlog_status=<draft|needs_details|ready|in_progress|review|blocked|done|archived>`
   - `include=<tasks|backlog|logs>` o lista separada por comas (`include=tasks,backlog`) para devolver solo secciones necesarias
@@ -207,7 +203,7 @@ Ejemplo:
 
 - Metodo: `GET`
 - Ruta: `/projects/:url/constraints`
-- Payload minimo en cliente/CLI oficial: `{}` (url auto-resuelta) o `{ "url": "https://github.com/org/repo" }`
+- Payload minimo en cliente/MCP oficial: `{}` (url auto-resuelta) o `{ "url": "https://github.com/org/repo" }`
 - Respuesta sugerida:
 
 ```json
@@ -335,7 +331,7 @@ Ejemplo:
       "README.md"
     ],
     "commands_run": [
-      "node .ia/apts/apts-cli.js help heartbeat"
+      "npm test"
     ],
     "outcome": "success"
   }
@@ -379,9 +375,9 @@ Ejemplo:
 
 ## Flujo operativo recomendado
 
-1. Registrar el servidor MCP (`apts-mcp.js`) en el runtime y usar sus tools nativas como via principal.
-2. Si el runtime no soporta MCP, instalar el CLI oficial en `.ia/apts/` y usarlo como fallback.
-3. Empezar con payload minimo y dejar que el MCP/CLI resuelva identidad automaticamente.
+1. Registrar el servidor MCP (`apts-mcp.js`) en el runtime y usar sus tools nativas como unica via.
+2. Si el runtime no puede registrar un servidor MCP, resolver la configuracion del runtime con el operador; no hay superficie alternativa.
+3. Empezar con payload minimo y dejar que el MCP resuelva identidad automaticamente.
 4. Listar backlog y decidir si reutilizar item existente o crear uno nuevo usando la regla de alcance exacto.
 5. Si la solicitud actual es un bugfix, error o regresion reportada por chat, verificar si ya existe un backlog item `bug` equivalente y reutilizarlo cuando corresponda; si no existe, crearlo.
 6. Si la solicitud es reportar un bug ya solucionado, actualizar ese item `bug` a `review` o `done` con evidencia de resolucion y validacion.
@@ -392,122 +388,28 @@ Ejemplo:
 11. Reportar blocker si el agente queda detenido.
 12. Cerrar primero en `review`; pasar a `done` solo desde `review` y con actividad reciente de ejecucion.
 
-## Ejemplos CLI-first
+## Ejemplos via MCP
 
-Usa `--output structured` cuando quieras una envoltura estable para Custom Tools o parsers de agentes.
+Las operaciones se invocan como tools nativas del servidor MCP (`register_task`, `read_project_context`, `heartbeat`, `log_agent_progress`, `update_task_status`, `report_blocker`, ...), tomando el `inputSchema` del contrato. Llama cada tool con un objeto JSON minimo y deja que el cliente autocomplete identidad y contexto:
 
-```bash
-node .ia/apts/apts-cli.js register-task --json '{"title":"Documentar payloads minimos de APTS"}' --output structured
-node .ia/apts/apts-cli.js read-project-context --json '{}' --output structured
-node .ia/apts/apts-cli.js heartbeat --json '{}' --output structured
-node .ia/apts/apts-cli.js log-agent-progress --json '{"message":"Se actualizaron las guias de integracion."}' --output structured
-node .ia/apts/apts-cli.js update-task-status --json '{"status":"review"}' --output structured
-node .ia/apts/apts-cli.js report-blocker --json '{"error_message":"Falta APTS_API_KEY"}' --output structured
-```
+- `register_task` -> `{"title":"Documentar payloads minimos de APTS"}`
+- `read_project_context` -> `{}`
+- `heartbeat` -> `{}`
+- `log_agent_progress` -> `{"message":"Se actualizaron las guias de integracion."}`
+- `update_task_status` -> `{"status":"review"}`
+- `report_blocker` -> `{"error_message":"Falta APTS_API_KEY"}`
 
-Via MCP (superficie primaria): las mismas operaciones se invocan como tools nativas (`register_task`, `heartbeat`, ...) tomando el `inputSchema` del contrato. El CLI anterior es el fallback cuando el runtime no soporta MCP.
+## opencode.ai: MCP y Skills
 
-## Ejemplos PowerShell
+- Registra el servidor MCP en `opencode.json` (`mcp`) apuntando a `node .ia/apts/apts-mcp.js`; es la unica superficie soportada.
+- opencode soporta MCP, asi que esta es la via correcta; si no puede registrarse, resuelve la configuracion del runtime con el operador.
+- Expon `SKILL.md` y `apts_skills.json` bajo `.agents/skills/apts` para discovery.
 
-Usar here-strings o archivos temporales evita friccion por quoting inline en Windows.
+## Seguridad en mutaciones
 
-```powershell
-$heartbeat = @'
-{
-  "task_id": "22222222-2222-2222-2222-222222222222",
-  "agent_name": "Copilot",
-  "project_url": "https://github.com/org/repo"
-}
-'@
-
-$heartbeat | node .ia/apts/apts-cli.js heartbeat --stdin --pretty
-```
-
-```powershell
-@'
-{
-  "project_url": "https://github.com/org/repo",
-  "title": "Documentar payloads minimos de APTS",
-  "agent_name": "Copilot",
-  "agent_email": "copilot@example.com"
-}
-'@ | Set-Content -Path register-task.json
-
-Get-Content .\register-task.json | node .ia/apts/apts-cli.js register-task --stdin --pretty
-```
-
-`--json` robusto en PowerShell:
-
-- Soporta payload inline corto.
-- Soporta `--json @archivo.json` para evitar problemas de quoting en PS 5.1.
-- Para payloads largos o multilinea, mantener `--stdin` como metodo principal.
-
-Ejemplo `@archivo`:
-
-```powershell
-node .ia/apts/apts-cli.js get-task --json @task-query.json --pretty
-```
-
-Wrapper recomendado:
-
-```powershell
-function Invoke-AptsCli {
-  param(
-    [Parameter(Mandatory=$true)][string]$Command,
-    [Parameter(Mandatory=$true)][string]$JsonFile,
-    [switch]$Pretty
-  )
-
-  $args = @($Command, '--json', "@$JsonFile")
-  if ($Pretty.IsPresent) {
-    $args += '--pretty'
-  }
-
-  node .ia/apts/apts-cli.js @args
-}
-```
-
-CLI con env file explicito:
-
-```powershell
-node .ia/apts/apts-cli.js show-execution-context --env-file .env --output structured
-```
-
-## opencode.ai: Custom Tools y Skills
-
-- Registra el servidor MCP en `opencode.json` (`mcp`) apuntando a `node .ia/apts/apts-mcp.js`; es la superficie primaria.
-- Como fallback, crea un Custom Tool fino que reenvie `<command>` y el payload JSON al CLI oficial, por ejemplo `node .ia/apts/apts-cli.js <command> --json @payload.json --output structured`.
-- Mantener la logica en el MCP/CLI oficial reduce errores de quoting, identidad y formato.
-
-## Troubleshooting PowerShell (sin sorpresas)
-
-Problemas mas comunes y regla de resolucion:
-
-1. Campo incorrecto en update/delete de backlog: usar siempre `backlog_item_id` y no `id`.
-2. Parseo roto con `--json`: empezar por payload minimo y luego escalar.
-3. Here-string invalido: no usar `@' ... '@` en la misma linea con otros comandos.
-4. Flujo `--stdin` colgado: validar primero con `--json` corto y luego volver a `--stdin` con archivo.
-5. Texto largo con caracteres especiales: aplicar update por etapas (primero estado, luego texto completo).
-
-Secuencia recomendada para `update-backlog-item`:
-
-```powershell
-node .ia/apts/apts-cli.js update-backlog-item --json '{"backlog_item_id":"11111111-1111-1111-1111-111111111111","status":"review"}' --pretty
-
-@'
-{
-  "backlog_item_id": "11111111-1111-1111-1111-111111111111",
-  "acceptance_criteria": "FE: estado visible y mensajes claros. BE: persistencia y validacion consistente."
-}
-'@ | Set-Content -Path backlog-update.json
-
-Get-Content .\backlog-update.json | node .ia/apts/apts-cli.js update-backlog-item --stdin --pretty
-```
-
-Validacion final obligatoria:
-
-- Confirmar que el comando respondio con exito.
-- Volver a leer el backlog item y verificar que los campos persistidos coinciden con lo esperado.
+1. Campo correcto en update/delete de backlog: usar siempre `backlog_item_id` y nunca `id`.
+2. Para texto largo o de alto riesgo, aplicar update por etapas: primero un campo minimo (por ejemplo `status`), luego el contenido completo tras confirmar la primera llamada.
+3. Validacion final obligatoria: volver a leer el backlog item o la tarea y verificar que los campos persistidos coinciden con lo esperado, en lugar de confiar solo en que la llamada devolvio exito.
 
 ## Politica anti-loop de reintentos
 
@@ -530,22 +432,22 @@ Validacion final obligatoria:
 
 - Usar payload JSON con forma de contrato para cada operacion (contract-first).
 - Para compatibilidad hacia atras, el cliente oficial puede aceptar firmas posicionales legadas en algunas funciones, pero la forma recomendada y estable es siempre objeto JSON.
-- Para agentes, la superficie primaria es el servidor MCP (`apts-mcp.js`); el CLI oficial (`apts-cli.js`) es el fallback. Ambos viven en `.ia/apts/` junto al cliente unico (`apts-client.js`, ESM).
-- El cliente crudo solo debe quedar dentro de los entrypoints MCP/CLI empaquetados; nunca generar codigo nuevo que lo bootstrapee en cada interaccion.
-- Al migrar al MCP/CLI oficial, retirar wrappers o scripts propios viejos que solo proxyeen operaciones base de APTS.
+- Para agentes, la unica superficie es el servidor MCP (`apts-mcp.js`), que vive en `.ia/apts/` junto al cliente unico (`apts-client.js`, ESM).
+- El cliente crudo solo debe quedar dentro del entrypoint MCP empaquetado; nunca generar codigo nuevo que lo bootstrapee en cada interaccion.
+- Al migrar al servidor MCP oficial, retirar wrappers o scripts propios viejos (incluido cualquier `apts-cli.js` previo) que solo proxyeen operaciones base de APTS.
 
 ## Cobertura esperada del cliente oficial
 
 - El cliente oficial de APTS (`apts-client.js`, ESM-only) debe exportar exactamente las operaciones publicadas en este contrato y en `apts_skills.json`.
-- El servidor MCP (`apts-mcp.js`) y el CLI (`apts-cli.js`) exponen esas mismas operaciones; sus tablas se derivan del contrato y `contract-check.js` aborta si hay desalineacion.
+- El servidor MCP (`apts-mcp.js`) expone esas mismas operaciones; su tabla de tools se deriva del contrato y `contract-check.js` aborta si hay desalineacion.
 - Un proyecto cliente integrado no deberia necesitar desarrollar scripts adicionales para cubrir operaciones base de APTS.
 
 ## Anti-patrones
 
 - Instanciar o bootstrapear `apts-client.*` manualmente desde snippets generados por el agente en cada conversacion.
 - Armar JSON a mano con concatenacion de strings cuando puedes pasar objetos o archivos.
-- Hacer pre-flight de identidad Git antes de cada llamada en lugar de dejar que el CLI/helper oficial resuelva el contexto.
-- Llamar al HTTP raw para operaciones base cuando la CLI/helper ya cubre el contrato.
+- Hacer pre-flight de identidad Git antes de cada llamada en lugar de dejar que el servidor MCP oficial resuelva el contexto.
+- Llamar al HTTP raw para operaciones base cuando el servidor MCP ya cubre el contrato.
 
 ## Validacion minima
 

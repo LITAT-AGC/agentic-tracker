@@ -1,5 +1,7 @@
 # Plan de reingeniería: cliente APTS multi-runtime (Claude Code + opencode)
 
+> **Nota histórica (v3.0.0):** este documento describe una etapa en la que el paquete de integración publicaba un CLI (`apts-cli.js`) como superficie de fallback. A partir de la **v3.0.0**, el servidor MCP (`apts-mcp.js`) es la **única** superficie soportada y toda referencia funcional al CLI fue retirada. Las menciones al CLI más abajo se conservan solo como registro histórico.
+
 > Documento de planificación. Estado y avance se llevan en
 > [`TRACKING-reingenieria-cliente-multiagente.md`](./TRACKING-reingenieria-cliente-multiagente.md).
 > Fecha de redacción: 2026-06-20. Sin restricción de compatibilidad hacia atrás.

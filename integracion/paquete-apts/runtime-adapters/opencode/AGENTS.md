@@ -7,9 +7,8 @@ You are a development agent integrated with APTS (Agentic Project Tracking Servi
 
 ### Surface
 
-- **MCP-first.** The APTS MCP server (`apts-mcp`) is the primary surface and exposes one native tool per operation: `register_task`, `read_project_context`, `list_backlog_items`, `get_backlog_item`, `get_task`, `get_project_constraints`, `search_similar_bug_reports`, `create_backlog_item`, `update_backlog_item`, `delete_backlog_item`, `update_task_status`, `log_agent_progress`, `report_blocker`, `heartbeat`. Prefer these tools.
-- **CLI fallback.** When MCP is not available in the active runtime, use `node .ia/apts/apts-cli.js <command> --json @payload.json --output structured`. Same operations, same identity autofill.
-- Never generate fresh code that imports or bootstraps `apts-client.js` from scratch during a chat turn. Direct client usage lives only inside the bundled CLI/MCP entrypoints.
+- **MCP-only.** The APTS MCP server (`apts-mcp`) is the only supported surface and exposes one native tool per operation: `register_task`, `read_project_context`, `list_backlog_items`, `get_backlog_item`, `get_task`, `get_project_constraints`, `search_similar_bug_reports`, `create_backlog_item`, `update_backlog_item`, `delete_backlog_item`, `update_task_status`, `log_agent_progress`, `report_blocker`, `heartbeat`. Use these tools. If the active runtime cannot register an MCP server, that is a runtime setup issue to resolve with the operator, not a reason to fall back to another surface.
+- Never generate fresh code that imports or bootstraps `apts-client.js` from scratch during a chat turn. Direct client usage lives only inside the bundled MCP server entrypoint.
 
 ### Backlog is the source of truth
 
@@ -38,7 +37,7 @@ Identity fields are resolved from environment variables first, then the managed 
 - `branch`: `APTS_BRANCH` or `git branch --show-current`
 - `task_id` for execution calls: `APTS_TASK_ID` or managed context
 
-Do not spend turns resolving identity manually. Use minimal payloads first and let the MCP server / CLI resolve protocol fields. Inspect identity sources only when a call reports missing required fields. If you call the raw HTTP API directly (without the official MCP/CLI), you must send all required identity fields explicitly.
+Do not spend turns resolving identity manually. Use minimal payloads first and let the MCP server resolve protocol fields. Inspect identity sources only when a call reports missing required fields. If you call the raw HTTP API directly (without the official MCP server), you must send all required identity fields explicitly.
 
 ### Shell routing by runtime
 
@@ -53,7 +52,7 @@ Maintain a local append-only resilience journal (e.g. `.apts/agent-resilience-lo
 ### Mandatory rules
 
 0. For "next task", "continue backlog", "run backlog", or equivalent, invoke the APTS backlog orchestrator agent first; do not run direct implementation from the general agent. If the orchestrator is not installed/invocable, stop and ask the operator to install/fix it.
-1. Use MCP tools as the primary integration layer; use the CLI fallback only when MCP is unavailable. Prefer minimum payloads and avoid pre-flight Git identity commands.
+1. Use the APTS MCP tools as the integration layer. Prefer minimum payloads and avoid pre-flight Git identity commands.
 2. Invoke operations with contract-first JSON object payloads (e.g. `{"status":"review"}`).
 3. For bug/error/regression requests from chat, run read-only triage first: search the backlog for a matching non-deleted `bug` item (prefer `search_similar_bug_reports`) and verify the symptom is a real defect.
    - If intent is ambiguous (question, clarification, diagnosis), stop at read-only triage and ask whether to register it as a bug in APTS.

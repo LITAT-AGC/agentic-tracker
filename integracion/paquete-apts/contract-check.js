@@ -1,9 +1,9 @@
 // Contract self-check: apts_skills.json is the single source of truth.
 //
-// This module loads the contract and verifies that the HTTP client, the CLI
-// command table, and the MCP tool list expose exactly the contract operations.
-// The CLI and the MCP server call the strict checks at startup so a drift
-// between client <-> contract <-> CLI <-> MCP aborts with a non-zero exit code.
+// This module loads the contract and verifies that the HTTP client and the MCP
+// tool list expose exactly the contract operations. The MCP server calls the
+// strict checks at startup so a drift between client <-> contract <-> MCP aborts
+// with a non-zero exit code.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -24,15 +24,6 @@ const CLIENT_UTILITY_EXPORTS = new Set([
   'setExecutionContext',
 ]);
 
-// CLI commands that are deliberately not contract operations (local context
-// management and identity inspection).
-export const CLI_UTILITY_COMMANDS = [
-  'resolve-git-identity',
-  'show-execution-context',
-  'set-execution-context',
-  'clear-execution-context',
-];
-
 export class ContractMismatchError extends Error {
   constructor(message, details = null) {
     super(message);
@@ -45,10 +36,6 @@ export class ContractMismatchError extends Error {
 
 export function snakeToCamel(name) {
   return String(name).replace(/_([a-z0-9])/g, (_, char) => char.toUpperCase());
-}
-
-export function snakeToKebab(name) {
-  return String(name).replace(/_/g, '-');
 }
 
 export function loadContract() {
@@ -92,7 +79,6 @@ export function contractOperations() {
       objectSchema,
       requiredFields: Array.isArray(objectSchema.required) ? objectSchema.required : [],
       clientExport: snakeToCamel(skill.name),
-      cliCommand: snakeToKebab(skill.name),
       supportsBatch,
     };
   });
@@ -132,21 +118,6 @@ export function checkClientContract(clientModule) {
   }
 }
 
-// Verifies the CLI registers exactly one command per contract operation
-// (plus the allowed utility commands).
-export function checkCliContract(registeredCommandNames) {
-  const expected = contractOperations().map((op) => op.cliCommand);
-  const actualOps = registeredCommandNames.filter((name) => !CLI_UTILITY_COMMANDS.includes(name));
-
-  const { missing, extra } = diffSets(expected, actualOps);
-  if (missing.length || extra.length) {
-    throw new ContractMismatchError(
-      'apts-cli.js command table is out of sync with apts_skills.json',
-      { surface: 'cli', missing_commands: missing, unexpected_commands: extra }
-    );
-  }
-}
-
 // Verifies the MCP server exposes exactly one tool per contract operation.
 export function checkMcpContract(toolNames) {
   const expected = operationNames();
@@ -160,14 +131,13 @@ export function checkMcpContract(toolNames) {
 }
 
 // Full alignment check across every surface available to this process.
-export function runContractCheck({ clientModule, commandNames, toolNames } = {}) {
+export function runContractCheck({ clientModule, toolNames } = {}) {
   if (clientModule) checkClientContract(clientModule);
-  if (Array.isArray(commandNames)) checkCliContract(commandNames);
   if (Array.isArray(toolNames)) checkMcpContract(toolNames);
 }
 
 // When run directly, validate every surface that does not require a live
-// runtime (client today; CLI/MCP self-check at their own startup).
+// runtime (client today; the MCP server self-checks at its own startup).
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
     const clientModule = await import('./apts-client.js');

@@ -14,7 +14,6 @@
   "permission": {
     "edit": "allow",
     "bash": {
-      "node*apts-cli.js*": "allow",
       "node*apts-mcp.js*": "allow",
       "*": "ask"
     }

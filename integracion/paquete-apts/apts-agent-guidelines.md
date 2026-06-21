@@ -16,7 +16,7 @@ Treat downloaded official APTS scripts and generated adapter files as managed: r
 
 ## APTS-managed section (canonical source)
 
-The APTS-managed instruction block — the operational rules an integrated agent must follow at runtime (MCP-first surface + CLI fallback, identity autofill, backlog as source of truth, shell routing by runtime, resilience journal, and the mandatory/anti-loop rules) — is defined **once** in `runtime-adapters/spec/apts-surface.json` under `instructions.body`, and generated verbatim into each runtime's instruction file:
+The APTS-managed instruction block — the operational rules an integrated agent must follow at runtime (MCP-only surface, identity autofill, backlog as source of truth, shell routing by runtime, resilience journal, and the mandatory/anti-loop rules) — is defined **once** in `runtime-adapters/spec/apts-surface.json` under `instructions.body`, and generated verbatim into each runtime's instruction file:
 
 - **Claude Code:** `runtime-adapters/claude/CLAUDE.md` (which also imports `@AGENTS.md`)
 - **opencode:** `runtime-adapters/opencode/AGENTS.md`
@@ -32,7 +32,7 @@ Use `integracion/paquete-apts/apts_skills.json` as the formal contract and `inte
 
 ### Common Required Fields
 
-When using the official MCP/CLI, missing identity fields are auto-filled from env/local context/Git. The table lists server-required fields for raw API calls.
+When using the official MCP server, missing identity fields are auto-filled from env/local context/Git. The table lists server-required fields for raw API calls.
 
 | Field | Required by |
 | --- | --- |
@@ -59,37 +59,19 @@ When using the official MCP/CLI, missing identity fields are auto-filled from en
 
 - `list_backlog_items` and `read_project_context` default to compact summaries. Re-read with `view = full` only for the selected item or when raw detail is needed.
 
-### CLI fallback examples
+### Mutation safety
 
-```bash
-node .ia/apts/apts-cli.js register-task --json '{"title":"Document APTS command payloads"}' --output structured
-node .ia/apts/apts-cli.js read-project-context --json '{}' --output structured
-node .ia/apts/apts-cli.js heartbeat --json '{}' --output structured
-node .ia/apts/apts-cli.js log-agent-progress --json '{"message":"Updated APTS integration guidance."}' --output structured
-node .ia/apts/apts-cli.js update-task-status --json '{"status":"review"}' --output structured
-node .ia/apts/apts-cli.js report-blocker --json '{"error_message":"Missing APTS_API_KEY"}' --output structured
-```
-
-### PowerShell examples (Windows, CLI fallback)
-
-```powershell
-@'
-{
-}
-'@ | Set-Content -Path heartbeat.json
-
-Get-Content .\heartbeat.json | node .ia/apts/apts-cli.js heartbeat --stdin --pretty
-```
-
-PowerShell reliability: for `update-backlog-item`/`delete-backlog-item` always use `backlog_item_id` (never `id`); keep here-string JSON on its own lines and close `'@` on its own line; for long texts use staged updates (minimal field first, full text via file + `--stdin`); re-read after every mutating call.
+- For `update_backlog_item` / `delete_backlog_item`, always pass `backlog_item_id` (never `id`).
+- For high-risk text, use staged updates: a minimal field update first, then the full content update after the first call succeeds.
+- Re-read backlog/task state after every mutating call and confirm persisted fields match expectations.
 
 ## Anti-Patterns
 
 - Writing one-off code that imports or bootstraps `apts-client.js` directly during a chat turn.
-- Building JSON manually with string concatenation when object payloads, `--stdin`, or `--json @payload.json` are available.
+- Building JSON manually with string concatenation when an object payload is available.
 - Running `git remote get-url origin`, `git config user.name`, and `git branch --show-current` before every APTS call instead of relying on autofill.
-- Calling the raw HTTP API for base operations when MCP/CLI already covers the workflow.
-- Creating a new wrapper script per runtime interaction instead of reusing MCP/CLI.
+- Calling the raw HTTP API for base operations when the MCP server already covers the workflow.
+- Creating a new wrapper script per runtime interaction instead of reusing the MCP server.
 
 ### Frequent Errors
 
