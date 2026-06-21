@@ -1,54 +1,47 @@
 <template>
-  <div class="space-y-8 animate-fade-in pb-8 relative p-6">
+  <div class="space-y-8 animate-fade-in pb-8 relative">
     <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
       <div class="flex items-start gap-3">
-        <button
+        <Button
           @click="router.push('/dashboard/projects')"
-          class="mt-1 inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-700 bg-gray-900/60 text-gray-300 text-sm hover:bg-gray-800 transition-colors"
-        >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
-          Volver a proyectos
-        </button>
+          icon="pi pi-arrow-left"
+          label="Volver a proyectos"
+          severity="secondary"
+          outlined
+          size="small"
+          class="mt-1"
+        />
 
         <div>
-          <h2 class="text-2xl md:text-3xl font-extrabold text-white tracking-tight">
+          <h2 class="text-2xl md:text-3xl font-extrabold tracking-tight">
             {{ selectedProject?.name || 'Detalle del Proyecto' }}
           </h2>
-          <p class="mt-1 text-sm text-gray-400 break-all">{{ selectedProject?.url || 'Cargando información...' }}</p>
+          <p class="mt-1 text-sm text-surface-500 break-all">{{ selectedProject?.url || 'Cargando información...' }}</p>
         </div>
       </div>
 
-      <span
+      <Tag
         v-if="selectedProject"
-        :class="['inline-flex self-start px-3 py-1 rounded-md text-[11px] font-bold uppercase tracking-wider', getStatusClass(selectedProject.status)]"
-      >
-        {{ selectedProject.status }}
-      </span>
+        :value="selectedProject.status"
+        :severity="statusSeverity(selectedProject.status)"
+        class="self-start"
+      />
     </div>
 
     <div v-if="loadingProject" class="flex justify-center items-center py-20">
-      <div class="w-10 h-10 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin"></div>
+      <ProgressSpinner style="width: 2.5rem; height: 2.5rem" strokeWidth="4" />
     </div>
 
-    <div v-else-if="loadError" class="rounded-xl border border-rose-500/30 bg-rose-500/10 p-6 text-rose-200">
-      <p class="text-sm">{{ loadError }}</p>
-    </div>
+    <Message v-else-if="loadError" severity="error" :closable="false">{{ loadError }}</Message>
 
     <div v-else-if="selectedProject" class="space-y-8">
-      <div class="flex items-center gap-1 p-1 rounded-xl bg-gray-800/40 border border-gray-700/50 w-fit">
-        <button
-          @click="activeTab = 'execution'"
-          :class="['px-4 py-2 rounded-lg text-sm font-semibold transition-colors', activeTab === 'execution' ? 'bg-indigo-500/20 text-indigo-200 border border-indigo-500/30' : 'text-gray-400 hover:text-gray-200']"
-        >
-          Ejecución
-        </button>
-        <button
-          @click="activeTab = 'semantic'"
-          :class="['px-4 py-2 rounded-lg text-sm font-semibold transition-colors', activeTab === 'semantic' ? 'bg-cyan-500/20 text-cyan-200 border border-cyan-500/30' : 'text-gray-400 hover:text-gray-200']"
-        >
-          Semántico
-        </button>
-      </div>
+      <SelectButton
+        v-model="activeTab"
+        :options="tabOptions"
+        optionLabel="label"
+        optionValue="value"
+        :allowEmpty="false"
+      />
 
       <div v-if="activeTab === 'semantic'" class="space-y-8">
       <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,1.35fr)] gap-6">
@@ -57,87 +50,88 @@
             <div>
               <div class="flex items-center gap-2">
                 <div class="w-1 h-5 bg-cyan-400 rounded-full"></div>
-                <h3 class="text-lg font-bold text-cyan-100">Indice Semantico</h3>
+                <h3 class="text-lg font-bold text-cyan-700">Indice Semantico</h3>
               </div>
-              <p class="mt-1 text-sm text-cyan-50/70">Cobertura funcional del backlog disponible para el dashboard.</p>
+              <p class="mt-1 text-sm text-cyan-700/70">Cobertura funcional del backlog disponible para el dashboard.</p>
             </div>
             <div class="flex items-center gap-2">
-              <button
+              <Button
                 @click="refreshSemanticStatus"
                 :disabled="semanticStatusLoading || isSemanticIndexing || !selectedProject?.url"
-                class="px-3 py-1.5 border border-cyan-400/30 bg-cyan-500/10 hover:bg-cyan-500/20 disabled:opacity-50 text-cyan-100 rounded-lg text-xs font-semibold transition-colors"
-              >
-                {{ semanticStatusLoading ? 'Analizando...' : 'Recalcular analisis' }}
-              </button>
-              <button
+                :label="semanticStatusLoading ? 'Analizando...' : 'Recalcular analisis'"
+                severity="info"
+                outlined
+                size="small"
+              />
+              <Button
                 @click="runSemanticIndex"
                 :disabled="isSemanticIndexing || semanticStatusLoading || !semanticStatus || !selectedProject?.url"
-                class="px-3 py-1.5 bg-cyan-300 hover:bg-cyan-200 disabled:opacity-50 text-slate-950 rounded-lg text-xs font-bold transition-colors"
-              >
-                {{ isSemanticIndexing ? 'Indexando...' : semanticStatus?.fully_indexed ? 'Reindexar backlog' : 'Indexar backlog' }}
-              </button>
+                :label="isSemanticIndexing ? 'Indexando...' : semanticStatus?.fully_indexed ? 'Reindexar backlog' : 'Indexar backlog'"
+                severity="info"
+                size="small"
+              />
             </div>
           </div>
 
-          <div v-if="semanticStatusLoading && !semanticStatus" class="rounded-xl border border-cyan-400/10 bg-gray-950/40 p-4 text-sm text-gray-400">
+          <div v-if="semanticStatusLoading && !semanticStatus" class="rounded-xl border border-cyan-400/10 bg-surface-100 p-4 text-sm text-surface-500">
             Calculando cobertura e impacto estimado de tokens...
           </div>
 
           <div v-else-if="semanticStatus" class="space-y-4">
             <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <div class="rounded-xl border border-white/5 bg-gray-950/50 p-3">
-                <p class="text-[11px] uppercase tracking-wider text-gray-500">Documentos</p>
-                <p class="mt-2 text-xl font-bold text-white">{{ semanticStatus.total_documents }}</p>
+              <div class="rounded-xl border border-surface-200/40 bg-surface-100 p-3">
+                <p class="text-[11px] uppercase tracking-wider text-surface-500">Documentos</p>
+                <p class="mt-2 text-xl font-bold">{{ semanticStatus.total_documents }}</p>
               </div>
-              <div class="rounded-xl border border-white/5 bg-gray-950/50 p-3">
-                <p class="text-[11px] uppercase tracking-wider text-gray-500">Indexados</p>
-                <p class="mt-2 text-xl font-bold text-emerald-300">{{ semanticStatus.indexed_documents }}</p>
+              <div class="rounded-xl border border-surface-200/40 bg-surface-100 p-3">
+                <p class="text-[11px] uppercase tracking-wider text-surface-500">Indexados</p>
+                <p class="mt-2 text-xl font-bold text-emerald-600">{{ semanticStatus.indexed_documents }}</p>
               </div>
-              <div class="rounded-xl border border-white/5 bg-gray-950/50 p-3">
-                <p class="text-[11px] uppercase tracking-wider text-gray-500">Pendientes</p>
-                <p class="mt-2 text-xl font-bold text-amber-300">{{ semanticPendingDocuments }}</p>
+              <div class="rounded-xl border border-surface-200/40 bg-surface-100 p-3">
+                <p class="text-[11px] uppercase tracking-wider text-surface-500">Pendientes</p>
+                <p class="mt-2 text-xl font-bold text-amber-600">{{ semanticPendingDocuments }}</p>
               </div>
-              <div class="rounded-xl border border-white/5 bg-gray-950/50 p-3">
-                <p class="text-[11px] uppercase tracking-wider text-gray-500">Tokens estimados</p>
-                <p class="mt-2 text-xl font-bold text-cyan-100">{{ formatNumber(semanticStatus.estimated_input_tokens) }}</p>
+              <div class="rounded-xl border border-surface-200/40 bg-surface-100 p-3">
+                <p class="text-[11px] uppercase tracking-wider text-surface-500">Tokens estimados</p>
+                <p class="mt-2 text-xl font-bold text-cyan-700">{{ formatNumber(semanticStatus.estimated_input_tokens) }}</p>
               </div>
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-              <div class="rounded-xl border border-white/5 bg-gray-950/50 p-3">
-                <p class="text-[11px] uppercase tracking-wider text-gray-500">Tokens reindexado total</p>
-                <p class="mt-2 text-xl font-bold text-cyan-100">{{ formatNumber(semanticStatus.estimated_input_tokens) }}</p>
+              <div class="rounded-xl border border-surface-200/40 bg-surface-100 p-3">
+                <p class="text-[11px] uppercase tracking-wider text-surface-500">Tokens reindexado total</p>
+                <p class="mt-2 text-xl font-bold text-cyan-700">{{ formatNumber(semanticStatus.estimated_input_tokens) }}</p>
               </div>
-              <div class="rounded-xl border border-white/5 bg-gray-950/50 p-3">
-                <p class="text-[11px] uppercase tracking-wider text-gray-500">Tokens incrementales</p>
-                <p class="mt-2 text-xl font-bold text-amber-200">{{ formatNumber(semanticStatus.estimated_incremental_input_tokens) }}</p>
+              <div class="rounded-xl border border-surface-200/40 bg-surface-100 p-3">
+                <p class="text-[11px] uppercase tracking-wider text-surface-500">Tokens incrementales</p>
+                <p class="mt-2 text-xl font-bold text-amber-600">{{ formatNumber(semanticStatus.estimated_incremental_input_tokens) }}</p>
               </div>
-              <div class="rounded-xl border border-white/5 bg-gray-950/50 p-3">
-                <p class="text-[11px] uppercase tracking-wider text-gray-500">Costo total estimado</p>
-                <p class="mt-2 text-xl font-bold text-cyan-50">
+              <div class="rounded-xl border border-surface-200/40 bg-surface-100 p-3">
+                <p class="text-[11px] uppercase tracking-wider text-surface-500">Costo total estimado</p>
+                <p class="mt-2 text-xl font-bold text-cyan-700">
                   {{ formatCurrency(semanticStatus.pricing?.estimated_full_input_cost) }}
                 </p>
-                <p class="mt-1 text-xs text-gray-500">
+                <p class="mt-1 text-xs text-surface-500">
                   {{ semanticStatus.pricing?.prompt_price != null
                     ? `Precio input aprox: ${formatModelPrice(semanticStatus.pricing.prompt_price)}`
                     : 'OpenRouter no devolvio pricing para este modelo.' }}
                 </p>
               </div>
-              <div class="rounded-xl border border-white/5 bg-gray-950/50 p-3">
-                <p class="text-[11px] uppercase tracking-wider text-gray-500">Costo incremental</p>
-                <p class="mt-2 text-xl font-bold text-amber-100">{{ formatCurrency(semanticStatus.pricing?.estimated_incremental_input_cost) }}</p>
-                <p class="mt-1 text-xs text-gray-500">Solo documentos missing o stale.</p>
+              <div class="rounded-xl border border-surface-200/40 bg-surface-100 p-3">
+                <p class="text-[11px] uppercase tracking-wider text-surface-500">Costo incremental</p>
+                <p class="mt-2 text-xl font-bold text-amber-600">{{ formatCurrency(semanticStatus.pricing?.estimated_incremental_input_cost) }}</p>
+                <p class="mt-1 text-xs text-surface-500">Solo documentos missing o stale.</p>
               </div>
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div class="rounded-xl border border-white/5 bg-gray-950/50 p-3">
-                <p class="text-[11px] uppercase tracking-wider text-gray-500">Contexto maximo</p>
-                <p class="mt-2 text-xl font-bold text-cyan-100">{{ formatNumber(semanticStatus.pricing?.context_length) }}</p>
+              <div class="rounded-xl border border-surface-200/40 bg-surface-100 p-3">
+                <p class="text-[11px] uppercase tracking-wider text-surface-500">Contexto maximo</p>
+                <p class="mt-2 text-xl font-bold text-cyan-700">{{ formatNumber(semanticStatus.pricing?.context_length) }}</p>
               </div>
-              <div class="rounded-xl border border-white/5 bg-gray-950/50 p-3">
-                <p class="text-[11px] uppercase tracking-wider text-gray-500">Estrategia recomendada</p>
-                <p class="mt-2 text-sm font-medium text-gray-200">
+              <div class="rounded-xl border border-surface-200/40 bg-surface-100 p-3">
+                <p class="text-[11px] uppercase tracking-wider text-surface-500">Estrategia recomendada</p>
+                <p class="mt-2 text-sm font-medium text-surface-700">
                   {{ semanticStatus.estimated_incremental_input_tokens > 0
                     ? 'Usar indexacion incremental cuando solo haya backlog nuevo o cambiado.'
                     : 'No hay trabajo incremental pendiente; reindexar solo si cambias el modelo.' }}
@@ -145,13 +139,14 @@
               </div>
             </div>
 
-            <div class="rounded-xl border border-white/5 bg-gray-950/40 p-4 space-y-2 text-sm text-gray-300">
+            <div class="rounded-xl border border-surface-200/40 bg-surface-100 p-4 space-y-2 text-sm text-surface-600">
               <div class="flex flex-wrap items-center gap-2">
-                <span :class="['px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider', semanticStatus.fully_indexed ? 'bg-emerald-500/10 text-emerald-300' : 'bg-amber-500/10 text-amber-300']">
-                  {{ semanticStatus.fully_indexed ? 'Indice listo' : 'Indice pendiente' }}
-                </span>
-                <span class="text-xs text-gray-500">Modelo: {{ semanticStatus.embedding_model }}</span>
-                <span v-if="semanticStatus.last_indexed_at" class="text-xs text-gray-500">Ultima indexacion: {{ formatDateTime(semanticStatus.last_indexed_at) }}</span>
+                <Tag
+                  :value="semanticStatus.fully_indexed ? 'Indice listo' : 'Indice pendiente'"
+                  :severity="semanticStatus.fully_indexed ? 'success' : 'warn'"
+                />
+                <span class="text-xs text-surface-500">Modelo: {{ semanticStatus.embedding_model }}</span>
+                <span v-if="semanticStatus.last_indexed_at" class="text-xs text-surface-500">Ultima indexacion: {{ formatDateTime(semanticStatus.last_indexed_at) }}</span>
               </div>
               <p>
                 {{ semanticStatus.fully_indexed
@@ -161,36 +156,35 @@
             </div>
           </div>
 
-          <div v-if="semanticStatusError" class="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">
-            {{ semanticStatusError }}
-          </div>
+          <Message v-if="semanticStatusError" severity="error" :closable="false">{{ semanticStatusError }}</Message>
         </section>
 
-        <section class="rounded-2xl border border-indigo-500/20 bg-indigo-500/5 p-5 space-y-4">
+        <section class="rounded-2xl border border-primary/20 bg-primary/5 p-5 space-y-4">
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
               <div class="flex items-center gap-2">
-                <div class="w-1 h-5 bg-indigo-400 rounded-full"></div>
-                <h3 class="text-lg font-bold text-indigo-100">Busqueda Semantica</h3>
+                <div class="w-1 h-5 bg-primary-400 rounded-full"></div>
+                <h3 class="text-lg font-bold text-primary-700">Busqueda Semantica</h3>
               </div>
-              <p class="mt-1 text-sm text-indigo-50/70">Consulta cobertura funcional dentro del backlog del proyecto.</p>
+              <p class="mt-1 text-sm text-primary-700/70">Consulta cobertura funcional dentro del backlog del proyecto.</p>
             </div>
-            <div class="text-right text-xs text-gray-500">
+            <div class="text-right text-xs text-surface-500">
               <p>Top K: {{ semanticSearchTopK }}</p>
               <p>Threshold: {{ semanticSearchThreshold.toFixed(2) }}</p>
             </div>
           </div>
 
           <div class="space-y-3">
-            <textarea
+            <Textarea
               v-model="semanticSearchQuery"
               rows="3"
+              autoResize
               placeholder="Ejemplo: matriculacion, roles, compatibilidad Moodle, dashboard docente..."
-              class="w-full bg-gray-950/60 border border-indigo-400/20 rounded-xl px-4 py-3 text-sm text-gray-100 placeholder:text-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 resize-y"
-            ></textarea>
+              class="w-full"
+            />
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div>
-                <label class="block text-[11px] uppercase tracking-wider text-indigo-100/70 mb-1">Tipos incluidos</label>
+                <label class="block text-[11px] uppercase tracking-wider text-primary-700/70 mb-1">Tipos incluidos</label>
                 <MultiSelect
                   v-model="semanticSearchFilters.item_types"
                   :options="backlogTypeOptions"
@@ -200,7 +194,7 @@
                 />
               </div>
               <div>
-                <label class="block text-[11px] uppercase tracking-wider text-indigo-100/70 mb-1">Estados incluidos</label>
+                <label class="block text-[11px] uppercase tracking-wider text-primary-700/70 mb-1">Estados incluidos</label>
                 <MultiSelect
                   v-model="semanticSearchFilters.statuses"
                   :options="backlogStatusOptions"
@@ -211,45 +205,37 @@
               </div>
             </div>
             <div class="flex flex-wrap items-center gap-3">
-              <button
+              <Button
                 @click="runSemanticSearch"
                 :disabled="isSemanticSearching || !semanticSearchQuery.trim() || !semanticSearchReady"
-                class="px-4 py-2 bg-indigo-400 hover:bg-indigo-300 disabled:opacity-50 text-slate-950 rounded-lg text-sm font-bold transition-colors"
-              >
-                {{ isSemanticSearching ? 'Buscando...' : 'Buscar en backlog' }}
-              </button>
-              <span v-if="!semanticSearchReady" class="text-xs text-amber-200">Indexa el backlog primero para habilitar resultados.</span>
-              <span v-else-if="semanticSearchMeta" class="text-xs text-gray-500">{{ semanticSearchMeta.candidates_scanned }} documentos evaluados.</span>
+                :label="isSemanticSearching ? 'Buscando...' : 'Buscar en backlog'"
+                icon="pi pi-search"
+                size="small"
+              />
+              <span v-if="!semanticSearchReady" class="text-xs text-amber-600">Indexa el backlog primero para habilitar resultados.</span>
+              <span v-else-if="semanticSearchMeta" class="text-xs text-surface-500">{{ semanticSearchMeta.candidates_scanned }} documentos evaluados.</span>
             </div>
           </div>
 
-          <div v-if="semanticSearchError" class="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-200">
-            {{ semanticSearchError }}
-          </div>
+          <Message v-if="semanticSearchError" severity="error" :closable="false">{{ semanticSearchError }}</Message>
 
           <div v-if="semanticSearchResults.length" class="space-y-3">
             <article
               v-for="result in semanticSearchResults"
               :key="result.scope_key"
-              class="rounded-xl border border-white/5 bg-gray-950/45 p-4 space-y-2"
+              class="rounded-xl border border-surface-200/40 bg-surface-100 p-4 space-y-2"
             >
               <div class="flex flex-wrap items-center gap-2">
-                <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-indigo-500/10 text-indigo-200">
-                  score {{ Math.round(result.similarity_score * 100) }}%
-                </span>
-                <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-fuchsia-500/10 text-fuchsia-200">
-                  {{ result.metadata?.item_type || result.source_type }}
-                </span>
-                <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-200">
-                  {{ result.metadata?.coverage_state || 'match' }}
-                </span>
+                <Tag :value="`score ${Math.round(result.similarity_score * 100)}%`" severity="info" />
+                <Tag :value="result.metadata?.item_type || result.source_type" severity="contrast" />
+                <Tag :value="result.metadata?.coverage_state || 'match'" severity="success" />
               </div>
-              <h4 class="text-sm font-semibold text-white">{{ result.title }}</h4>
-              <p class="text-sm leading-relaxed text-gray-300">{{ result.content_excerpt }}</p>
+              <h4 class="text-sm font-semibold">{{ result.title }}</h4>
+              <p class="text-sm leading-relaxed text-surface-600">{{ result.content_excerpt }}</p>
             </article>
           </div>
 
-          <div v-else-if="semanticSearchMeta && !isSemanticSearching" class="rounded-xl border border-white/5 bg-gray-950/40 p-4 text-sm text-gray-400">
+          <div v-else-if="semanticSearchMeta && !isSemanticSearching" class="rounded-xl border border-surface-200/40 bg-surface-100 p-4 text-sm text-surface-500">
             No hubo coincidencias para esta consulta con el umbral actual.
           </div>
         </section>
@@ -258,423 +244,369 @@
 
       <div v-if="activeTab === 'execution'" class="space-y-8">
       <div>
-        <div class="flex items-center space-x-2 mb-4">
-          <div class="w-1 h-5 bg-indigo-500 rounded-full"></div>
-          <h3 class="text-lg font-bold text-gray-200">Tareas Asociadas</h3>
+        <div class="flex items-center gap-2 mb-4">
+          <div class="w-1 h-5 bg-primary-500 rounded-full"></div>
+          <h3 class="text-lg font-bold">Tareas Asociadas</h3>
         </div>
 
-        <div class="bg-gray-800/40 rounded-xl border border-gray-700/50 overflow-hidden">
-          <DataTable
-            :value="projectTasks"
-            v-model:filters="taskFilters"
-            filterDisplay="row"
-            :paginator="true"
-            :rows="200"
-            :scrollable="true"
-            scrollHeight="480px"
-            class="w-full text-sm"
-            :pt="{
-              headerRow: { class: 'bg-gray-800/30' },
-              row: { class: 'border-b border-gray-700/30 hover:bg-gray-800/50 transition-colors' },
-              bodyCell: { class: 'py-3 px-4 border-none text-gray-300' },
-              headerCell: { class: 'py-3 px-4 text-gray-400 text-xs font-semibold uppercase tracking-wider border-none bg-transparent' },
-              paginator: { class: 'bg-transparent border-t border-gray-800/50' }
-            }"
-          >
-            <template #empty>
-              <div class="p-6 text-center text-gray-500 text-sm">No hay tareas asignadas a este proyecto aún.</div>
-            </template>
-
-            <Column field="title" header="Título de la Tarea">
-              <template #body="{ data }">
-                <span class="font-medium text-gray-300">{{ data.title }}</span>
+        <Card class="border border-surface-200" :pt="{ body: { class: 'p-0' }, content: { class: 'p-0' } }">
+          <template #content>
+            <DataTable
+              :value="projectTasks"
+              v-model:filters="taskFilters"
+              filterDisplay="row"
+              :paginator="true"
+              :rows="200"
+              :scrollable="true"
+              scrollHeight="480px"
+              class="w-full text-sm"
+            >
+              <template #empty>
+                <div class="p-6 text-center text-surface-500 text-sm">No hay tareas asignadas a este proyecto aún.</div>
               </template>
-            </Column>
-            <Column field="agent_name" header="Agente">
-              <template #body="{ data }">
-                <div class="flex items-center space-x-2">
-                  <div class="w-5 h-5 rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-[9px] font-bold text-white">
-                    {{ data.agent_name ? data.agent_name.charAt(0).toUpperCase() : '?' }}
+
+              <Column field="title" header="Título de la Tarea">
+                <template #body="{ data }">
+                  <span class="font-medium text-surface-700">{{ data.title }}</span>
+                </template>
+              </Column>
+              <Column field="agent_name" header="Agente">
+                <template #body="{ data }">
+                  <div class="flex items-center gap-2">
+                    <Avatar :label="data.agent_name ? data.agent_name.charAt(0).toUpperCase() : '?'" shape="circle" size="normal"
+                      :pt="{ root: { class: 'bg-primary text-primary-contrast text-[10px] font-bold' } }" />
+                    <span class="text-xs text-surface-600">{{ data.agent_name || 'Sin asignar' }}</span>
                   </div>
-                  <span class="text-xs text-gray-300">{{ data.agent_name || 'Sin asignar' }}</span>
-                </div>
-              </template>
-            </Column>
-            <Column field="status" header="Estado" filter filterField="status" :showFilterMenu="false">
-              <template #body="{ data }">
-                <span :class="['px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider', getTaskStatusClass(data.status)]">
-                  {{ data.status.replace('_', ' ') }}
-                </span>
-              </template>
-              <template #filter="{ filterModel, filterCallback }">
-                <MultiSelect
-                  v-model="filterModel.value"
-                  :options="taskStatusOptions"
-                  @change="filterCallback()"
-                  :maxSelectedLabels="1"
-                  class="w-full"
-                />
-              </template>
-            </Column>
-            <Column field="last_heartbeat" header="Última Señal">
-              <template #body="{ data }">
-                <span class="text-xs text-gray-500 flex items-center">
-                  <svg class="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                  {{ data.last_heartbeat ? new Date(data.last_heartbeat).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : 'Nunca' }}
-                </span>
-              </template>
-            </Column>
-          </DataTable>
-        </div>
+                </template>
+              </Column>
+              <Column field="status" header="Estado" filter filterField="status" :showFilterMenu="false">
+                <template #body="{ data }">
+                  <Tag :value="data.status.replace('_', ' ')" :severity="taskStatusSeverity(data.status)" />
+                </template>
+                <template #filter="{ filterModel, filterCallback }">
+                  <MultiSelect
+                    v-model="filterModel.value"
+                    :options="taskStatusOptions"
+                    @change="filterCallback()"
+                    :maxSelectedLabels="1"
+                    class="w-full"
+                  />
+                </template>
+              </Column>
+              <Column field="last_heartbeat" header="Última Señal">
+                <template #body="{ data }">
+                  <span class="text-xs text-surface-500 flex items-center gap-1">
+                    <i class="pi pi-clock"></i>
+                    {{ data.last_heartbeat ? new Date(data.last_heartbeat).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : 'Nunca' }}
+                  </span>
+                </template>
+              </Column>
+            </DataTable>
+          </template>
+        </Card>
       </div>
 
       <div>
         <div class="flex items-center justify-between mb-4">
-          <div class="flex items-center space-x-2">
+          <div class="flex items-center gap-2">
             <div class="w-1 h-5 bg-fuchsia-500 rounded-full"></div>
-            <h3 class="text-lg font-bold text-gray-200">Backlog Gestionado</h3>
+            <h3 class="text-lg font-bold">Backlog Gestionado</h3>
           </div>
           <div class="flex items-center gap-3">
-            <button
+            <Button
               @click="router.push('/dashboard/settings')"
-              class="px-3 py-1.5 border border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-200 rounded-lg text-xs font-medium transition-colors"
-            >
-              Configurar IA
-            </button>
-            <button
+              label="Configurar IA"
+              icon="pi pi-cog"
+              severity="info"
+              outlined
+              size="small"
+            />
+            <Button
               @click="analyzeProjectBacklog"
               :disabled="isAnalyzingBacklog || triageableBacklogCount === 0"
-              class="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-slate-950 rounded-lg text-xs font-semibold transition-colors"
-            >
-              {{ isAnalyzingBacklog ? 'Analizando backlog...' : `Analizar IA (${triageableBacklogCount})` }}
-            </button>
-            <button
+              :label="isAnalyzingBacklog ? 'Analizando backlog...' : `Analizar IA (${triageableBacklogCount})`"
+              icon="pi pi-sparkles"
+              severity="info"
+              size="small"
+            />
+            <Button
               @click="openBacklogCreator"
-              class="px-3 py-1.5 bg-fuchsia-600 hover:bg-fuchsia-700 text-white rounded-lg text-xs font-medium transition-colors"
-            >
-              Agregar item
-            </button>
-            <span class="text-xs font-medium text-gray-400">{{ projectBacklog.length }} item(s)</span>
+              label="Agregar item"
+              icon="pi pi-plus"
+              severity="help"
+              size="small"
+            />
+            <span class="text-xs font-medium text-surface-500">{{ projectBacklog.length }} item(s)</span>
           </div>
         </div>
 
-        <div class="bg-gray-800/40 rounded-xl border border-gray-700/50 overflow-hidden">
-          <DataTable
-            :value="projectBacklog"
-            v-model:filters="backlogFilters"
-            filterDisplay="row"
-            :paginator="true"
-            :rows="200"
-            :scrollable="true"
-            scrollHeight="480px"
-            class="w-full text-sm"
-            :pt="{
-              headerRow: { class: 'bg-gray-800/30' },
-              row: { class: 'border-b border-gray-700/30 hover:bg-gray-800/50 transition-colors' },
-              bodyCell: { class: 'py-3 px-4 border-none text-gray-300' },
-              headerCell: { class: 'py-3 px-4 text-gray-400 text-xs font-semibold uppercase tracking-wider border-none bg-transparent' },
-              paginator: { class: 'bg-transparent border-t border-gray-800/50' }
-            }"
-          >
-
-            <template #empty>
-              <div class="p-6 text-center text-gray-500 text-sm">No hay backlog para este proyecto todavía.</div>
-            </template>
-
-            <Column field="priority" header="Prioridad" sortable>
-              <template #body="{ data }">
-                <span class="text-xs font-semibold text-gray-200">{{ data.priority }}</span>
+        <Card class="border border-surface-200" :pt="{ body: { class: 'p-0' }, content: { class: 'p-0' } }">
+          <template #content>
+            <DataTable
+              :value="projectBacklog"
+              v-model:filters="backlogFilters"
+              filterDisplay="row"
+              :paginator="true"
+              :rows="200"
+              :scrollable="true"
+              scrollHeight="480px"
+              class="w-full text-sm"
+            >
+              <template #empty>
+                <div class="p-6 text-center text-surface-500 text-sm">No hay backlog para este proyecto todavía.</div>
               </template>
-            </Column>
 
-            <Column field="sort_order" header="Orden" sortable>
-              <template #body="{ data }">
-                <span class="text-xs text-gray-400">{{ data.sort_order }}</span>
-              </template>
-            </Column>
+              <Column field="priority" header="Prioridad" sortable>
+                <template #body="{ data }">
+                  <span class="text-xs font-semibold text-surface-700">{{ data.priority }}</span>
+                </template>
+              </Column>
 
-            <Column field="title" header="Título" sortable>
-              <template #body="{ data }">
-                <div>
-                  <p class="font-medium text-gray-200">{{ data.title }}</p>
-                  <p v-if="data.description" class="text-xs text-gray-500 truncate max-w-[260px]" :title="data.description">
-                    {{ data.description }}
-                  </p>
-                </div>
-              </template>
-            </Column>
+              <Column field="sort_order" header="Orden" sortable>
+                <template #body="{ data }">
+                  <span class="text-xs text-surface-500">{{ data.sort_order }}</span>
+                </template>
+              </Column>
 
-            <Column field="item_type" header="Tipo" sortable filter filterField="item_type" :showFilterMenu="false">
-              <template #body="{ data }">
-                <span class="text-xs uppercase tracking-wider text-gray-400">{{ data.item_type }}</span>
-              </template>
-              <template #filter="{ filterModel, filterCallback }">
-                <MultiSelect
-                  v-model="filterModel.value"
-                  :options="backlogTypeOptions"
-                  @change="filterCallback()"
-                  :maxSelectedLabels="1"
-                  class="w-full"
-                />
-              </template>
-            </Column>
-
-            <Column field="status" header="Estado" sortable filter filterField="status" :showFilterMenu="false">
-              <template #body="{ data }">
-                <span :class="['px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider', getBacklogStatusClass(data.status)]">
-                  {{ data.status.replace('_', ' ') }}
-                </span>
-              </template>
-              <template #filter="{ filterModel, filterCallback }">
-                <MultiSelect
-                  v-model="filterModel.value"
-                  :options="backlogStatusOptions"
-                  @change="filterCallback()"
-                  :maxSelectedLabels="1"
-                  class="w-full"
-                />
-              </template>
-            </Column>
-
-            <Column header="Triage IA">
-              <template #body="{ data }">
-                <div class="max-w-[280px]">
-                  <div v-if="data.llm_last_analyzed_at" class="space-y-1">
-                    <div class="flex flex-wrap items-center gap-2">
-                      <span :class="['px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider', getBacklogStatusClass(data.llm_recommendation_status || data.status)]">
-                        {{ (data.llm_recommendation_status || data.status).replace('_', ' ') }}
-                      </span>
-                      <span class="text-[11px] text-gray-500">{{ formatConfidence(data.llm_confidence) }}</span>
-                    </div>
-                    <p class="text-xs leading-snug text-gray-300">{{ data.llm_analysis_summary }}</p>
-                    <p v-if="data.llm_missing_details?.length" class="text-[11px] text-amber-300">
-                      Faltan {{ data.llm_missing_details.length }} dato(s) clave.
+              <Column field="title" header="Título" sortable>
+                <template #body="{ data }">
+                  <div>
+                    <p class="font-medium text-surface-700">{{ data.title }}</p>
+                    <p v-if="data.description" class="text-xs text-surface-500 truncate max-w-[260px]" :title="data.description">
+                      {{ data.description }}
                     </p>
                   </div>
-                  <p v-else class="text-xs text-gray-500">Sin análisis todavía.</p>
-                </div>
-              </template>
-            </Column>
+                </template>
+              </Column>
 
-            <Column header="Task Activa">
-              <template #body="{ data }">
-                <span v-if="data.active_task_id" class="text-xs text-indigo-300">En ejecución</span>
-                <span v-else class="text-xs text-gray-500">-</span>
-              </template>
-            </Column>
+              <Column field="item_type" header="Tipo" sortable filter filterField="item_type" :showFilterMenu="false">
+                <template #body="{ data }">
+                  <span class="text-xs uppercase tracking-wider text-surface-500">{{ data.item_type }}</span>
+                </template>
+                <template #filter="{ filterModel, filterCallback }">
+                  <MultiSelect
+                    v-model="filterModel.value"
+                    :options="backlogTypeOptions"
+                    @change="filterCallback()"
+                    :maxSelectedLabels="1"
+                    class="w-full"
+                  />
+                </template>
+              </Column>
 
-            <Column header="Acciones">
-              <template #body="{ data }">
-                <div class="flex flex-wrap items-center gap-2">
-                  <button
-                    @click="analyzeBacklogItem(data)"
-                    :disabled="analyzingBacklogId === data.id"
-                    class="px-2.5 py-1 bg-cyan-500/80 hover:bg-cyan-400 disabled:opacity-50 text-slate-950 text-xs font-semibold rounded transition-colors"
-                  >
-                    {{ analyzingBacklogId === data.id ? 'Analizando...' : 'Analizar IA' }}
-                  </button>
-                  <button
-                    @click="openBacklogEditor(data)"
-                    class="px-2.5 py-1 bg-gray-700/70 hover:bg-gray-700 text-gray-200 text-xs font-medium rounded transition-colors"
-                  >
-                    Editar
-                  </button>
-                  <button
-                    @click="hardDeleteBacklogItem(data)"
-                    :disabled="deletingBacklogId === data.id"
-                    class="px-2.5 py-1 bg-rose-500/80 hover:bg-rose-400 disabled:opacity-50 text-rose-950 text-xs font-semibold rounded transition-colors"
-                  >
-                    {{ deletingBacklogId === data.id ? 'Eliminando...' : 'Hard-delete' }}
-                  </button>
-                </div>
-              </template>
-            </Column>
-          </DataTable>
+              <Column field="status" header="Estado" sortable filter filterField="status" :showFilterMenu="false">
+                <template #body="{ data }">
+                  <Tag :value="data.status.replace('_', ' ')" :severity="backlogStatusSeverity(data.status)" />
+                </template>
+                <template #filter="{ filterModel, filterCallback }">
+                  <MultiSelect
+                    v-model="filterModel.value"
+                    :options="backlogStatusOptions"
+                    @change="filterCallback()"
+                    :maxSelectedLabels="1"
+                    class="w-full"
+                  />
+                </template>
+              </Column>
 
-          <div v-if="backlogError" class="mx-4 mb-4 p-3 rounded-lg bg-rose-500/10 border border-rose-500/30 text-sm text-rose-300">
-            {{ backlogError }}
-          </div>
-        </div>
+              <Column header="Triage IA">
+                <template #body="{ data }">
+                  <div class="max-w-[280px]">
+                    <div v-if="data.llm_last_analyzed_at" class="space-y-1">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <Tag
+                          :value="(data.llm_recommendation_status || data.status).replace('_', ' ')"
+                          :severity="backlogStatusSeverity(data.llm_recommendation_status || data.status)"
+                        />
+                        <span class="text-[11px] text-surface-500">{{ formatConfidence(data.llm_confidence) }}</span>
+                      </div>
+                      <p class="text-xs leading-snug text-surface-600">{{ data.llm_analysis_summary }}</p>
+                      <p v-if="data.llm_missing_details?.length" class="text-[11px] text-amber-600">
+                        Faltan {{ data.llm_missing_details.length }} dato(s) clave.
+                      </p>
+                    </div>
+                    <p v-else class="text-xs text-surface-500">Sin análisis todavía.</p>
+                  </div>
+                </template>
+              </Column>
+
+              <Column header="Task Activa">
+                <template #body="{ data }">
+                  <span v-if="data.active_task_id" class="text-xs text-primary-600">En ejecución</span>
+                  <span v-else class="text-xs text-surface-500">-</span>
+                </template>
+              </Column>
+
+              <Column header="Acciones">
+                <template #body="{ data }">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <Button
+                      @click="analyzeBacklogItem(data)"
+                      :disabled="analyzingBacklogId === data.id"
+                      :label="analyzingBacklogId === data.id ? 'Analizando...' : 'Analizar IA'"
+                      severity="info"
+                      size="small"
+                    />
+                    <Button
+                      @click="openBacklogEditor(data)"
+                      label="Editar"
+                      icon="pi pi-pencil"
+                      severity="secondary"
+                      size="small"
+                    />
+                    <Button
+                      @click="hardDeleteBacklogItem(data)"
+                      :disabled="deletingBacklogId === data.id"
+                      :label="deletingBacklogId === data.id ? 'Eliminando...' : 'Hard-delete'"
+                      severity="danger"
+                      outlined
+                      size="small"
+                    />
+                  </div>
+                </template>
+              </Column>
+            </DataTable>
+
+            <Message v-if="backlogError" severity="error" :closable="false" class="m-4">{{ backlogError }}</Message>
+          </template>
+        </Card>
       </div>
 
       <div>
-        <div class="flex items-center space-x-2 mb-4">
+        <div class="flex items-center gap-2 mb-4">
           <div class="w-1 h-5 bg-emerald-500 rounded-full"></div>
-          <h3 class="text-lg font-bold text-gray-200">Logs de Ejecución</h3>
+          <h3 class="text-lg font-bold">Logs de Ejecución</h3>
         </div>
 
-        <div class="bg-gray-800/40 rounded-xl border border-gray-700/50 overflow-hidden">
-          <DataTable
-            :value="projectLogs"
-            v-model:filters="logFilters"
-            filterDisplay="row"
-            :paginator="true"
-            :rows="200"
-            :scrollable="true"
-            scrollHeight="480px"
-            class="w-full text-sm"
-            :pt="{
-              headerRow: { class: 'bg-gray-800/30' },
-              row: { class: 'border-b border-gray-700/30 hover:bg-gray-800/50 transition-colors' },
-              bodyCell: { class: 'py-3 px-4 border-none text-gray-300' },
-              headerCell: { class: 'py-3 px-4 text-gray-400 text-xs font-semibold uppercase tracking-wider border-none bg-transparent' },
-              paginator: { class: 'bg-transparent border-t border-gray-800/50' }
-            }"
-          >
+        <Card class="border border-surface-200" :pt="{ body: { class: 'p-0' }, content: { class: 'p-0' } }">
+          <template #content>
+            <DataTable
+              :value="projectLogs"
+              v-model:filters="logFilters"
+              filterDisplay="row"
+              :paginator="true"
+              :rows="200"
+              :scrollable="true"
+              scrollHeight="480px"
+              class="w-full text-sm"
+            >
+              <template #empty>
+                <div class="p-6 text-center text-surface-500 text-sm">No hay logs de ejecución registrados aún.</div>
+              </template>
 
-            <template #empty>
-              <div class="p-6 text-center text-gray-500 text-sm">No hay logs de ejecución registrados aún.</div>
-            </template>
-
-            <Column field="action_type" header="Acción" filter filterField="action_type" :showFilterMenu="false">
-              <template #body="{ data }">
-                <span class="text-xs font-medium text-gray-400">{{ data.action_type || 'update' }}</span>
-              </template>
-              <template #filter="{ filterModel, filterCallback }">
-                <MultiSelect
-                  v-model="filterModel.value"
-                  :options="logActionOptions"
-                  @change="filterCallback()"
-                  :maxSelectedLabels="1"
-                  class="w-full"
-                />
-              </template>
-            </Column>
-            <Column field="task_title" header="Contexto (Tarea)">
-              <template #body="{ data }">
-                <span class="text-xs text-gray-500 truncate max-w-[150px] block" :title="data.task_title">{{ data.task_title || '-' }}</span>
-              </template>
-            </Column>
-            <Column field="message" header="Mensaje">
-              <template #body="{ data }">
-                <span class="text-sm text-gray-300 leading-snug">{{ data.message }}</span>
-              </template>
-            </Column>
-            <Column field="created_at" header="Hora">
-              <template #body="{ data }">
-                <span class="text-xs text-gray-500 whitespace-nowrap">
-                  {{ new Date(data.created_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) }}
-                </span>
-              </template>
-            </Column>
-          </DataTable>
-        </div>
+              <Column field="action_type" header="Acción" filter filterField="action_type" :showFilterMenu="false">
+                <template #body="{ data }">
+                  <span class="text-xs font-medium text-surface-500">{{ data.action_type || 'update' }}</span>
+                </template>
+                <template #filter="{ filterModel, filterCallback }">
+                  <MultiSelect
+                    v-model="filterModel.value"
+                    :options="logActionOptions"
+                    @change="filterCallback()"
+                    :maxSelectedLabels="1"
+                    class="w-full"
+                  />
+                </template>
+              </Column>
+              <Column field="task_title" header="Contexto (Tarea)">
+                <template #body="{ data }">
+                  <span class="text-xs text-surface-500 truncate max-w-[150px] block" :title="data.task_title">{{ data.task_title || '-' }}</span>
+                </template>
+              </Column>
+              <Column field="message" header="Mensaje">
+                <template #body="{ data }">
+                  <span class="text-sm text-surface-600 leading-snug">{{ data.message }}</span>
+                </template>
+              </Column>
+              <Column field="created_at" header="Hora">
+                <template #body="{ data }">
+                  <span class="text-xs text-surface-500 whitespace-nowrap">
+                    {{ new Date(data.created_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) }}
+                  </span>
+                </template>
+              </Column>
+            </DataTable>
+          </template>
+        </Card>
       </div>
       </div>
     </div>
 
     <Dialog
       v-model:visible="showEditBacklogDialog"
-      :pt="{
-        root: { class: 'bg-gray-900 border border-gray-700 shadow-2xl rounded-2xl overflow-hidden' },
-        header: { class: 'bg-gray-800/80 backdrop-blur-sm border-b border-gray-700/50 p-5 flex justify-between items-center' },
-        title: { class: 'text-lg font-bold text-fuchsia-300' },
-        content: { class: 'bg-gray-900/90 p-5' },
-        closeButton: { class: 'text-gray-400 hover:text-white transition-colors bg-gray-800 hover:bg-gray-700 rounded-full w-8 h-8 flex items-center justify-center border-none outline-none' }
-      }"
-      :style="{ width: '98vw', maxWidth: '1800px' }"
-      :contentStyle="{ maxHeight: 'calc(96vh - 8rem)', overflowY: 'auto' }"
       modal
       :dismissableMask="true"
+      :style="{ width: '98vw', maxWidth: '1800px' }"
+      :contentStyle="{ maxHeight: 'calc(96vh - 8rem)', overflowY: 'auto' }"
       @hide="cancelBacklogEdit"
     >
       <template #header>
         <div class="flex items-center gap-2">
           <div class="w-1 h-5 bg-fuchsia-500 rounded-full"></div>
-          <h4 class="text-sm md:text-base font-semibold text-fuchsia-300">{{ backlogDialogMode === 'create' ? 'Agregar backlog item' : 'Editar backlog item' }}</h4>
+          <h4 class="text-sm md:text-base font-semibold text-fuchsia-700">{{ backlogDialogMode === 'create' ? 'Agregar backlog item' : 'Editar backlog item' }}</h4>
         </div>
       </template>
 
       <div v-if="editingBacklog" class="space-y-4 min-h-[calc(96vh-14rem)] flex flex-col">
         <div class="grid grid-cols-1 md:grid-cols-4 gap-3">
-          <input
-            v-model="editingBacklog.title"
-            type="text"
-            class="md:col-span-2 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/40"
-          >
-          <select
-            v-model="editingBacklog.item_type"
-            class="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/40"
-          >
-            <option v-for="type in backlogTypeOptions" :key="`edit-${type}`" :value="type">{{ type }}</option>
-          </select>
-          <select
-            v-model="editingBacklog.status"
-            class="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/40"
-          >
-            <option v-for="status in backlogStatusOptions" :key="`edit-${status}`" :value="status">{{ status }}</option>
-          </select>
+          <InputText v-model="editingBacklog.title" class="md:col-span-2" placeholder="Título" />
+          <Select v-model="editingBacklog.item_type" :options="backlogTypeOptions" placeholder="Tipo" />
+          <Select v-model="editingBacklog.status" :options="backlogStatusOptions" placeholder="Estado" />
         </div>
 
         <div class="grid grid-cols-1 xl:grid-cols-2 gap-4 flex-1">
           <div class="flex flex-col min-h-[34vh]">
-            <label class="block text-[11px] uppercase tracking-wider text-fuchsia-200/70 mb-1">Descripcion</label>
-            <textarea
-              v-model="editingBacklog.description"
-              rows="14"
-              class="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/40 resize-y min-h-[34vh]"
-            ></textarea>
+            <label class="block text-[11px] uppercase tracking-wider text-fuchsia-700/70 mb-1">Descripcion</label>
+            <Textarea v-model="editingBacklog.description" class="flex-1 min-h-[34vh]" />
           </div>
           <div class="flex flex-col min-h-[34vh]">
-            <label class="block text-[11px] uppercase tracking-wider text-fuchsia-200/70 mb-1">Criterios de aceptacion</label>
-            <textarea
-              v-model="editingBacklog.acceptance_criteria"
-              rows="14"
-              class="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/40 resize-y min-h-[34vh]"
-            ></textarea>
+            <label class="block text-[11px] uppercase tracking-wider text-fuchsia-700/70 mb-1">Criterios de aceptacion</label>
+            <Textarea v-model="editingBacklog.acceptance_criteria" class="flex-1 min-h-[34vh]" />
           </div>
         </div>
 
         <div v-if="editingBacklog.llm_last_analyzed_at" class="rounded-xl border border-cyan-500/20 bg-cyan-500/5 p-4 space-y-3">
           <div class="flex flex-wrap items-center gap-3">
-            <span :class="['px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider', getBacklogStatusClass(editingBacklog.llm_recommendation_status || editingBacklog.status)]">
-              {{ (editingBacklog.llm_recommendation_status || editingBacklog.status).replace('_', ' ') }}
-            </span>
-            <span class="text-xs text-cyan-100">{{ formatConfidence(editingBacklog.llm_confidence) }}</span>
-            <span class="text-xs text-gray-400">{{ editingBacklog.llm_analysis_model || 'modelo no informado' }}</span>
-            <span class="text-xs text-gray-500">{{ formatDateTime(editingBacklog.llm_last_analyzed_at) }}</span>
+            <Tag
+              :value="(editingBacklog.llm_recommendation_status || editingBacklog.status).replace('_', ' ')"
+              :severity="backlogStatusSeverity(editingBacklog.llm_recommendation_status || editingBacklog.status)"
+            />
+            <span class="text-xs text-cyan-700">{{ formatConfidence(editingBacklog.llm_confidence) }}</span>
+            <span class="text-xs text-surface-500">{{ editingBacklog.llm_analysis_model || 'modelo no informado' }}</span>
+            <span class="text-xs text-surface-500">{{ formatDateTime(editingBacklog.llm_last_analyzed_at) }}</span>
           </div>
-          <p class="text-sm text-gray-200 leading-relaxed">{{ editingBacklog.llm_analysis_summary }}</p>
+          <p class="text-sm text-surface-700 leading-relaxed">{{ editingBacklog.llm_analysis_summary }}</p>
           <div v-if="editingBacklog.llm_missing_details?.length" class="space-y-2">
-            <p class="text-[11px] uppercase tracking-wider text-amber-200/80">Datos que faltan</p>
-            <ul class="space-y-2 text-sm text-amber-100/90 list-disc pl-5">
+            <p class="text-[11px] uppercase tracking-wider text-amber-600/80">Datos que faltan</p>
+            <ul class="space-y-2 text-sm text-amber-600/90 list-disc pl-5">
               <li v-for="detail in editingBacklog.llm_missing_details" :key="detail">{{ detail }}</li>
             </ul>
           </div>
         </div>
 
-        <div class="flex flex-wrap items-end gap-3 pt-2 border-t border-gray-700/40">
+        <div class="flex flex-wrap items-end gap-3 pt-2 border-t border-surface-200/40">
           <div>
-            <label class="block text-[11px] uppercase tracking-wider text-fuchsia-200/70 mb-1">Prioridad</label>
-            <input
-              v-model.number="editingBacklog.priority"
-              type="number"
-              class="w-28 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/40"
-            >
+            <label class="block text-[11px] uppercase tracking-wider text-fuchsia-700/70 mb-1">Prioridad</label>
+            <InputNumber v-model="editingBacklog.priority" class="w-28" :useGrouping="false" />
           </div>
           <div>
-            <label class="block text-[11px] uppercase tracking-wider text-fuchsia-200/70 mb-1">Orden</label>
-            <input
-              v-model.number="editingBacklog.sort_order"
-              type="number"
-              class="w-28 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-fuchsia-500/40"
-            >
+            <label class="block text-[11px] uppercase tracking-wider text-fuchsia-700/70 mb-1">Orden</label>
+            <InputNumber v-model="editingBacklog.sort_order" class="w-28" :useGrouping="false" />
           </div>
-          <button
+          <Button
             @click="saveBacklogItem"
             :disabled="isSavingBacklog || !editingBacklog.title?.trim()"
-            class="ml-auto px-4 py-2 bg-fuchsia-600 hover:bg-fuchsia-700 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors"
-          >
-            {{ isSavingBacklog ? 'Guardando...' : backlogDialogMode === 'create' ? 'Crear item' : 'Guardar cambios' }}
-          </button>
-          <button
+            :label="isSavingBacklog ? 'Guardando...' : backlogDialogMode === 'create' ? 'Crear item' : 'Guardar cambios'"
+            severity="help"
+            class="ml-auto"
+          />
+          <Button
             v-if="backlogDialogMode === 'edit' && editingBacklog.id"
             @click="hardDeleteBacklogItem(editingBacklog)"
             :disabled="deletingBacklogId === editingBacklog.id"
-            class="px-4 py-2 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-lg text-sm font-medium transition-colors"
-          >
-            {{ deletingBacklogId === editingBacklog.id ? 'Eliminando...' : 'Eliminar permanentemente' }}
-          </button>
+            :label="deletingBacklogId === editingBacklog.id ? 'Eliminando...' : 'Eliminar permanentemente'"
+            severity="danger"
+          />
         </div>
       </div>
     </Dialog>
@@ -684,16 +616,16 @@
 <script setup>
 import { computed, ref, onMounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-import DataTable from 'primevue/datatable';
-import Column from 'primevue/column';
-import Dialog from 'primevue/dialog';
-import MultiSelect from 'primevue/multiselect';
 import { apiFetchJson, getApiErrorMessage } from '../config/api';
 
 const route = useRoute();
 const router = useRouter();
 
 const activeTab = ref('execution');
+const tabOptions = [
+  { label: 'Ejecución', value: 'execution' },
+  { label: 'Semántico', value: 'semantic' }
+];
 const selectedProject = ref(null);
 const loadingProject = ref(true);
 const loadError = ref(null);
@@ -1120,40 +1052,40 @@ const saveBacklogItem = async () => {
   }
 };
 
-const getStatusClass = (status) => {
+const statusSeverity = (status) => {
   const map = {
-    pending: 'bg-gray-500/10 text-gray-400',
-    active: 'bg-emerald-500/10 text-emerald-400',
-    blocked: 'bg-rose-500/10 text-rose-400',
-    stalled: 'bg-amber-500/10 text-amber-400',
-    completed: 'bg-emerald-500/10 text-emerald-400'
+    pending: 'secondary',
+    active: 'success',
+    blocked: 'danger',
+    stalled: 'warn',
+    completed: 'success'
   };
-  return map[status] || 'bg-gray-500/10 text-gray-400';
+  return map[status] || 'secondary';
 };
 
-const getTaskStatusClass = (status) => {
+const taskStatusSeverity = (status) => {
   const map = {
-    todo: 'bg-blue-500/10 text-blue-400',
-    in_progress: 'bg-indigo-500/10 text-indigo-400',
-    review: 'bg-purple-500/10 text-purple-400',
-    done: 'bg-emerald-500/10 text-emerald-400',
-    stalled: 'bg-amber-500/10 text-amber-400'
+    todo: 'secondary',
+    in_progress: 'info',
+    review: 'contrast',
+    done: 'success',
+    stalled: 'warn'
   };
-  return map[status] || 'bg-gray-500/10 text-gray-400';
+  return map[status] || 'secondary';
 };
 
-const getBacklogStatusClass = (status) => {
+const backlogStatusSeverity = (status) => {
   const map = {
-    draft: 'bg-gray-500/10 text-gray-400',
-    needs_details: 'bg-amber-500/10 text-amber-300',
-    ready: 'bg-blue-500/10 text-blue-400',
-    in_progress: 'bg-indigo-500/10 text-indigo-400',
-    review: 'bg-purple-500/10 text-purple-400',
-    blocked: 'bg-rose-500/10 text-rose-400',
-    done: 'bg-emerald-500/10 text-emerald-400',
-    archived: 'bg-slate-500/10 text-slate-400'
+    draft: 'secondary',
+    needs_details: 'warn',
+    ready: 'info',
+    in_progress: 'info',
+    review: 'contrast',
+    blocked: 'danger',
+    done: 'success',
+    archived: 'secondary'
   };
-  return map[status] || 'bg-gray-500/10 text-gray-400';
+  return map[status] || 'secondary';
 };
 
 const formatConfidence = (value) => {
@@ -1203,7 +1135,7 @@ const formatModelPrice = (value) => {
     currency: 'USD',
     minimumFractionDigits: 8,
     maximumFractionDigits: 8
-  })} por token`; 
+  })} por token`;
 };
 
 watch(() => route.params.projectId, () => {
@@ -1214,14 +1146,3 @@ onMounted(() => {
   loadProject();
 });
 </script>
-
-<style scoped>
-.animate-fade-in {
-  animation: fadeIn 0.4s ease-out;
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(5px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-</style>
