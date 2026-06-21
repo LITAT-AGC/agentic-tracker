@@ -27,6 +27,8 @@
 //   args     : identificadores mínimos para el goteo F3 { phase, workflow_key, step_key }
 
 const { resolvePhaseStep, evaluatePrimitive } = require('./method_primitives');
+const { buildWorkflowCompletion } = require('./method_outputs');
+const { applyRewire } = require('../importer/rewire');
 
 const LIFECYCLE = ['analysis', 'planning', 'solutioning', 'implementation', 'done'];
 const TERMINAL_STATUSES = ['done', 'archived'];
@@ -38,23 +40,13 @@ const TERMINAL_STATUSES = ['done', 'archived'];
 // artefacto/estado declarado (routing.outputs) se cumple; la fase cierra cuando
 // TODOS sus required cierran, recorridos en orden topológico (preceded_by).
 //
-// Mapa de completitud a nivel-workflow (derivado de routing.outputs → doc_type/
-// estado-servidor). Editable-by-design (data del método). Los que no mapean a un
-// doc_type del enum usan el mejor predicado de estado y quedan marcados provisionales
-// (se validan/afinan en F4, fuera del gate F3 que sólo recorre analysis→planning).
-const WORKFLOW_COMPLETION = {
-  'bmad-product-brief': { primitive: 'artifact-exists', params: { doc_type: 'brief' } },
-  'bmad-prd': { primitive: 'artifact-exists', params: { doc_type: 'prd' } },
-  'bmad-create-architecture': { primitive: 'artifact-exists', params: { doc_type: 'architecture' } },
-  'bmad-create-epics-and-stories': { primitive: 'artifact-exists', params: { doc_type: 'epics' } },
-  // provisional (F4): "readiness report"/"sprint status"/"story" no mapean a doc_type;
-  // se gatean por estado-servidor (hay historias bajo el epic).
-  'bmad-check-implementation-readiness': { primitive: 'count-threshold', params: { parent: 'epic', min: 1 }, provisional: true },
-  'bmad-sprint-planning': { primitive: 'count-threshold', params: { parent: 'epic', min: 1 }, provisional: true },
-  'bmad-create-story': { primitive: 'count-threshold', params: { parent: 'epic', min: 1 }, provisional: true },
-  // especial: dev-story (routing.outputs vacío) cierra cuando todas las historias están done.
-  'bmad-dev-story': { primitive: 'all-children-status', params: { parent: 'epic', status: 'done' } },
-};
+// Mapa de completitud a nivel-workflow. F3-T2: DERIVADO de la fuente única
+// (method_outputs.WORKFLOW_OUTPUTS) en vez de un literal, para que la completitud
+// de T1.5 y los outputs[] per-step de T2 no puedan divergir (acordado con el
+// operador). El resultado es idéntico al literal previo (verificado): brief/prd/
+// architecture/epics por artifact-exists; readiness/sprint-planning/create-story
+// por count-threshold (provisional F4); dev-story por all-children-status.
+const WORKFLOW_COMPLETION = buildWorkflowCompletion();
 
 // Fases sin ningún required en el CSV (analysis): workflow deliverable de facto.
 const PHASE_FALLBACK_WORKFLOW = { analysis: 'bmad-product-brief' };
@@ -323,6 +315,274 @@ const aptsNext = (db, { project_url, agent_name }) =>
     }
   });
 
+// ---- F3-T2 — apts_workflow_step: goteo modelo B (contexto fresco por paso) ----
+// El server reconstruye el payload del paso ACTUAL desde el estado (puntero en
+// project_state) y reinyecta SOLO lo que el paso needs[]. Costo-B: el payload por
+// paso es ~constante (instrucción del paso + slices acotados de needs + template),
+// no crece con el proyecto. Lado de LECTURA: sirve el paso actual. El AVANCE del
+// cursor lo hace apts_submit_step (T4); la elicitación (await_input) la hace T3.
+//
+// Input { project_url, agent_name } (server-autoritativo, lee/inicializa el cursor):
+//   · si el caller ya está corriendo un paso (puntero running) → lo sirve;
+//   · si está idle → bootstrap vía aptsNext (rol-aware + claim), fija el cursor al
+//     paso de entrada del workflow recomendado y lo sirve.
+// Si aptsNext no da run_step (wait/done/blocked), se devuelve ese modo.
+
+const SLICE_CHARS = 1200; // tope por need: slice acotado (costo-B, sin embeddings)
+
+const truncateSlice = (text) => {
+  if (!text) return null;
+  if (text.length <= SLICE_CHARS) return text;
+  return `${text.slice(0, SLICE_CHARS)}…[+${text.length - SLICE_CHARS} chars]`;
+};
+
+// Resuelve un need a { referencia + slice acotado } desde el estado servidor.
+// Determinista (sin API de embeddings): el slice es un excerpt de tamaño fijo del
+// artefacto upstream. La recuperación semántica embedding-ranked es refinamiento
+// opcional (requiere OPENROUTER_API_KEY); el contrato del payload no cambia.
+const resolveNeed = async (db, ctx, need) => {
+  if (need.kind === 'artifact') {
+    const row = await db('semantic_documents')
+      .where({ initiative_id: ctx.initiative_id, doc_type: need.doc_type })
+      .orderBy('version', 'desc')
+      .first('id', 'doc_type', 'version', 'title', 'content');
+    if (!row) {
+      return { kind: 'artifact', doc_type: need.doc_type, present: false, ref: null, slice: null };
+    }
+    return {
+      kind: 'artifact',
+      doc_type: row.doc_type,
+      present: true,
+      ref: { id: row.id, version: row.version, title: row.title || null },
+      slice: truncateSlice(row.content),
+    };
+  }
+  // Otros kinds (config/entity) se sirven inline por rewire; no son needs recuperables aquí.
+  return { kind: need.kind, present: false, ref: null, slice: null };
+};
+
+// Puntos de elicitación del paso = los <ask> estructurados que BMAD marca
+// (preservados en step.metadata.asks por el importador). Señal determinista de
+// "este paso requiere input del usuario" (F3-T3). Los workflows en prosa elicitan
+// dentro del instruction_chunk verbatim; no traen asks estructurados.
+const stepAsks = (step) =>
+  (step.metadata && Array.isArray(step.metadata.asks) ? step.metadata.asks : []);
+
+// Serializa el cursor preservando story_id (claim) y answers (elicitación).
+const serializeCursor = (cursor) => {
+  const c = {};
+  if (cursor && cursor.story_id) c.story_id = cursor.story_id;
+  if (cursor && cursor.answers && Object.keys(cursor.answers).length) c.answers = cursor.answers;
+  return Object.keys(c).length ? JSON.stringify(c) : null;
+};
+
+// Construye el payload servido de un paso (ADN re-cableado en serve-time + needs).
+// mode: 'run' | 'await_input' (F3-T3). En await_input expone `questions`; cuando ya
+// hubo input, lo devuelve en `provided_input` para que el paso se reconstruya completo.
+const buildStepPayload = async (db, ctx, {
+  initiative, workflow, step, role, storyId, mode = 'run', questions = null, providedInput = null,
+}) => {
+  const needs = [];
+  for (const need of step.needs || []) {
+    needs.push(await resolveNeed(db, ctx, need));
+  }
+  const payload = {
+    mode,
+    workflow_key: workflow.key,
+    step_key: step.key,
+    step_order: step.step_order,
+    goal: step.goal || null,
+    role,
+    target_id: storyId || initiative.id,
+    // ADN generativo verbatim re-cableado en serve-time (NO se muta el almacenado):
+    instruction_chunk: applyRewire(step.instruction_chunk),
+    template_slice: applyRewire(step.template_slice),
+    needs,
+    outputs: step.outputs || [],
+  };
+  if (mode === 'await_input') payload.questions = questions || [];
+  if (providedInput != null) payload.provided_input = providedInput;
+  return payload;
+};
+
+// `answers` (opcional): cuando el paso estaba pausado en espera-input (T3), el
+// agente reanuda pasándolo aquí — se registra en cursor.answers[step.key] y el paso
+// pasa a 'run' con `provided_input`. Servir y reanudar son el mismo punto de
+// interacción (modelo B), por eso una sola tool en vez de una `resume` aparte.
+const aptsWorkflowStep = (db, { project_url, agent_name, answers }) =>
+  db.transaction(async (trx) => {
+    const initiative = await loadActiveInitiative(trx, project_url);
+    if (!initiative) {
+      return { mode: 'blocked', why: `sin iniciativa activa en ${project_url}` };
+    }
+    let caller = await loadCallerPointer(trx, initiative.id, agent_name);
+    if (!caller) {
+      return { mode: 'blocked', why: `agente '${agent_name}' sin puntero en la iniciativa` };
+    }
+    const epic = await loadEpic(trx, initiative.id);
+    const ctx = { initiative_id: initiative.id, project_url, epic_id: epic ? epic.id : null };
+
+    // ¿El caller ya está a mitad de un workflow? (puntero con paso fijado, corriendo
+    // o pausado en espera-input → se re-sirve el mismo paso, no se re-bootstrapea).
+    let workflow = null;
+    let step = null;
+    if (caller.current_workflow_id && caller.current_step_id
+        && ['running', 'await_input'].includes(caller.step_status)) {
+      workflow = await trx('workflow_definitions').where({ id: caller.current_workflow_id }).first();
+      step = await trx('workflow_steps').where({ id: caller.current_step_id }).first();
+    }
+
+    // Idle / sin paso fijado → bootstrap vía el resolver (rol-aware + claim de unidad).
+    if (!workflow || !step) {
+      const rec = await aptsNext(trx, { project_url, agent_name });
+      if (rec.next !== 'run_step') {
+        return { mode: rec.next, why: rec.why, role: rec.role || null, args: rec.args || null };
+      }
+      workflow = await trx('workflow_definitions')
+        .where({ key: rec.args.workflow_key })
+        .modify((q) => { if (initiative.source_ref) q.where({ source_ref: initiative.source_ref }); })
+        .first();
+      step = await trx('workflow_steps').where({ workflow_id: workflow.id, key: rec.args.step_key }).first();
+      // aptsNext ya persistió el cursor para iterables (claimDevStory); re-leemos para
+      // recoger story_id antes de fijar el cursor del paso de entrada.
+      caller = await loadCallerPointer(trx, initiative.id, agent_name);
+    }
+
+    // Cursor vigente (story_id del claim + answers de elicitaciones previas).
+    const cursor = caller.cursor || {};
+    // Resume de elicitación: si llega input y el paso estaba pausado, se registra
+    // (la elicitación es PAUSA, ≠ blocker; ver F3-T3).
+    if (answers !== undefined && answers !== null && caller.step_status === 'await_input') {
+      cursor.answers = { ...(cursor.answers || {}), [step.key]: answers };
+    }
+    const storyId = cursor.story_id || null;
+
+    // ¿El paso es un punto de elicitación aún sin responder? → pausa await_input.
+    const asks = stepAsks(step);
+    const answered = Boolean(cursor.answers && cursor.answers[step.key] !== undefined);
+    const elicit = asks.length > 0 && !answered;
+    const stepStatus = elicit ? 'await_input' : 'running';
+
+    // Persistencia única del puntero (idempotente; preserva story_id + answers).
+    await trx('project_state').where({ id: caller.id }).update({
+      current_workflow_id: workflow.id,
+      current_step_id: step.id,
+      step_status: stepStatus,
+      cursor: serializeCursor(cursor),
+      updated_at: trx.fn.now(),
+    });
+
+    const role = await entityKey(trx, step.entity_id || workflow.default_entity_id);
+    return buildStepPayload(trx, ctx, {
+      initiative, workflow, step, role, storyId,
+      mode: elicit ? 'await_input' : 'run',
+      questions: elicit ? asks : null,
+      providedInput: answered ? cursor.answers[step.key] : null,
+    });
+  });
+
+// ---- F3-T4 — apts_submit_step: captura de output del paso + avance del cursor ----
+// Doc-artefactos → APTS (semantic_documents tipados, doc_type del enum); código →
+// referencia (code_ref); unidades iterables → status de la story reclamada. Luego
+// avanza el cursor al próximo paso (o cierra el workflow y libera el puntero).
+//
+// El descriptor de output del paso (step.outputs, cableado en T2) decide QUÉ se
+// captura; el `output` del caller trae el contenido/referencia. Coherente con la
+// completitud a nivel-workflow de T1.5 (el artefacto del paso terminal es el que
+// WORKFLOW_COMPLETION verifica).
+
+const crypto = require('crypto');
+
+// Upsert de artefacto tipado (1 fila por initiative+doc_type; version=contador).
+const upsertArtifact = async (db, { initiativeId, projectUrl, docType, title, content }) => {
+  const strategy_key = 'method_artifact';
+  const scope_key = `initiative:${initiativeId}:${docType}`;
+  const body = content || '';
+  const content_hash = crypto.createHash('sha256').update(body).digest('hex');
+  const existing = await db('semantic_documents')
+    .where({ project_url: projectUrl, strategy_key, scope_key })
+    .first('id', 'version');
+  if (existing) {
+    await db('semantic_documents').where({ id: existing.id }).update({
+      content: body, content_hash, title: title || null, doc_type: docType,
+      version: existing.version + 1, initiative_id: initiativeId, updated_at: db.fn.now(),
+    });
+    return { id: existing.id, doc_type: docType, version: existing.version + 1, created: false };
+  }
+  const [row] = await db('semantic_documents').insert({
+    project_url: projectUrl, strategy_key, scope_key, source_type: 'method_step',
+    title: title || null, content: body, content_hash, doc_type: docType, version: 1,
+    initiative_id: initiativeId,
+  }).returning(['id']);
+  return { id: row.id, doc_type: docType, version: 1, created: true };
+};
+
+const aptsSubmitStep = (db, { project_url, agent_name, output }) =>
+  db.transaction(async (trx) => {
+    const initiative = await loadActiveInitiative(trx, project_url);
+    if (!initiative) {
+      return { ok: false, why: `sin iniciativa activa en ${project_url}` };
+    }
+    const caller = await loadCallerPointer(trx, initiative.id, agent_name);
+    if (!caller || !caller.current_step_id) {
+      return { ok: false, why: `el agente '${agent_name}' no tiene un paso activo` };
+    }
+    if (caller.step_status === 'await_input') {
+      return { ok: false, why: 'paso en espera-input; usá apts_resume_input antes de submit' };
+    }
+    const step = await trx('workflow_steps').where({ id: caller.current_step_id }).first();
+    const workflow = await trx('workflow_definitions').where({ id: caller.current_workflow_id }).first();
+    const cursor = caller.cursor || {};
+    const declared = step.outputs || [];
+    const out = output || {};
+
+    // ---- 1. Captura de output según el descriptor del paso ----
+    const captured = [];
+    for (const decl of declared) {
+      if (decl.kind === 'artifact') {
+        const res = await upsertArtifact(trx, {
+          initiativeId: initiative.id, projectUrl: project_url,
+          docType: decl.doc_type, title: out.title, content: out.content,
+        });
+        captured.push({ kind: 'artifact', doc_type: decl.doc_type, id: res.id, version: res.version });
+        // Conveniencia: cerrar el FK prd_artifact_id de la iniciativa cuando es el PRD.
+        if (decl.doc_type === 'prd') {
+          await trx('initiatives').where({ id: initiative.id }).update({ prd_artifact_id: res.id, updated_at: trx.fn.now() });
+        }
+      } else if (decl.kind === 'backlog_items') {
+        // Las historias se crean con las tools de backlog existentes; submit reconoce.
+        captured.push({ kind: 'backlog_items', note: 'creadas vía tools de backlog (update_backlog_item)' });
+      } else if (decl.kind === 'status') {
+        // Iterable (dev-story): actualiza la story reclamada + registra code_ref.
+        if (cursor.story_id) {
+          const to = out.status || decl.value || 'done';
+          await trx('backlog_items').where({ id: cursor.story_id }).update({ status: to, updated_at: trx.fn.now() });
+          captured.push({ kind: 'status', story_id: cursor.story_id, to, code_ref: out.code_ref || null });
+        }
+      } else if (decl.kind === 'code_ref') {
+        captured.push({ kind: 'code_ref', ref: out.code_ref || null });
+      }
+    }
+
+    // ---- 2. Avance del cursor: próximo paso, o cierre del workflow ----
+    const steps = await loadSteps(trx, workflow.id);
+    const next = steps.find((s) => s.step_order > step.step_order) || null;
+
+    if (next) {
+      // Mantiene el cursor (story_id/answers) y avanza dentro del workflow.
+      await trx('project_state').where({ id: caller.id }).update({
+        current_step_id: next.id, step_status: 'running', updated_at: trx.fn.now(),
+      });
+      return { ok: true, captured, advanced_to: next.key, workflow_complete: false };
+    }
+    // Sin próximo paso → workflow completo: libera el puntero (vuelve a idle). Para
+    // iterables, liberar el cursor permite que el próximo claim tome otra unidad.
+    await trx('project_state').where({ id: caller.id }).update({
+      current_workflow_id: null, current_step_id: null, step_status: 'idle', cursor: null, updated_at: trx.fn.now(),
+    });
+    return { ok: true, captured, advanced_to: null, workflow_complete: true, iterable_unit_done: Boolean(step.iterable) };
+  });
+
 // ---- apts_status (data-mode): conteos + recomendación, SOLO LECTURA ----
 // La recomendación se computa con el MISMO aptsNext (sin duplicar routing), pero
 // dentro de una transacción que se ROLLBACKEA: aptsNext puede escribir (avance de
@@ -413,6 +673,8 @@ const setMethodStatus = (db, { backlog_item_id, status }) =>
 
 module.exports = {
   aptsNext,
+  aptsWorkflowStep,
+  aptsSubmitStep,
   methodStatus,
   setMethodStatus,
   STORY_METHOD_STATUSES,
@@ -427,4 +689,9 @@ module.exports = {
   topoSortRequired,
   WORKFLOW_COMPLETION,
   PHASE_FALLBACK_WORKFLOW,
+  // F3-T2 — goteo modelo B (exportadas para tests/harness)
+  resolveNeed,
+  buildStepPayload,
+  upsertArtifact,
+  SLICE_CHARS,
 };

@@ -9,20 +9,27 @@
 // source_ref `bmad:v6.8.0` y reinserta, SIN pisar la fixture (`fixture:f1-toy`)
 // ni las primitivas implementadas (este loader NO toca primitives_palette = T3).
 //
-// Alcance (T2 = baldes 1–2): solo ADN generativo. Lo que queda explícitamente
-// para fases posteriores (anotado en coverage/tracking):
+// Alcance: ADN generativo (baldes 1–2) + wiring per-step del goteo (F3-T2).
+// Lo que queda explícitamente para fases posteriores (anotado en coverage/tracking):
 //   - balde 3 (checks/routing → primitivas + next_rules deterministas) = T3
-//   - needs[]/outputs[] por step y `iterable` (p.ej. dev-story) = F3-T2 (goteo)
-//   - default_entity_id por workflow (rol) = CABLEADO en F3-T1.5 (desde menús de agente);
-//     entity_id POR-STEP sigue diferido a F3-T2
-// Por eso acá: next_rules=null, needs/outputs=null, iterable=false; el routing
-// y los puntos de elicitación/checks se preservan en metadata para no perder nada.
+//   - entity_id POR-STEP (rol fino) sigue diferido; default_entity_id por workflow
+//     se cableó en F3-T1.5 (desde menús de agente)
+// F3-T2 cablea needs[]/outputs[]/iterable per-step vía scripts/importer/wiring.js
+// (derivados de routing + la fuente única scripts/lib/method_outputs.js):
+//   - outputs[]  → SOLO el paso terminal lleva el output del workflow (coherente con
+//                  la completitud a nivel-workflow de T1.5, por construcción).
+//   - needs[]    → artefactos upstream (routing.preceded_by); el goteo reinyecta un
+//                  slice acotado por need en serve-time (costo-B).
+//   - iterable   → ejecutor per-historia (dev-story).
+// next_rules sigue null (generative avanza por step_order; gates/routing = T3).
+// El routing y los checks/elicitación se preservan en metadata para no perder nada.
 //
 // Ejecutar contra APTS_test:  cd backend && node seeds/bmad_seed.js
 
 const fs = require('fs');
 const path = require('path');
 const knex = require('knex')(require('../knexfile').test);
+const { deriveWiring } = require('../scripts/importer/wiring');
 
 const j = (v) => (v === undefined || v === null ? null : JSON.stringify(v));
 
@@ -130,7 +137,11 @@ async function run() {
         })
         .returning('id');
 
+      // F3-T2 — wiring per-step derivado de la IR (needs/outputs/iterable).
+      const wiring = deriveWiring(ir);
+
       let order = 1;
+      let stepIdx = 0;
       for (const s of ir.steps) {
         const tmpl = (s.generative.template_outputs || []).map((t) => t.text).filter(Boolean).join('\n\n');
         await trx('workflow_steps').insert({
@@ -138,15 +149,15 @@ async function run() {
           key: String(s.n), // único por workflow_id (unique(workflow_id,key))
           step_order: order++, // secuencial: ordena aunque los n de BMAD no lo sean (0,20,30)
           goal: s.goal || null,
-          kind: 'generative', // T2 = balde 2; los gates deterministas son T3
+          kind: 'generative', // balde 2; los gates deterministas son T3
           instruction_chunk: s.generative.instruction_md || null,
           template_slice: tmpl || null,
           primitive_key: null, // T3
           entity_id: null, // rol por-step = T3
-          needs: null, // F3-wiring
-          outputs: null, // F3-wiring
+          needs: j(wiring.needs), // F3-T2: artefactos upstream (uniforme por workflow)
+          outputs: j(wiring.outputsByIndex[stepIdx]), // F3-T2: solo el paso terminal lo lleva
           next_rules: null, // generative avanza por step_order; gates/routing = T3
-          iterable: false, // detección de iterable (dev-story) = T3
+          iterable: wiring.iterable, // F3-T2: ejecutor per-historia (dev-story)
           metadata: j({
             asks: s.generative.asks || [],
             template_outputs: s.generative.template_outputs || [],
@@ -155,6 +166,7 @@ async function run() {
             tag: s.tag || null,
           }),
         });
+        stepIdx++;
         stepTotal++;
       }
     }

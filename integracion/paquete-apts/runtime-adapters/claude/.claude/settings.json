@@ -20,7 +20,9 @@
       "mcp__apts__heartbeat",
       "mcp__apts__apts_next",
       "mcp__apts__apts_status",
-      "mcp__apts__apts_set_status"
+      "mcp__apts__apts_set_status",
+      "mcp__apts__apts_workflow_step",
+      "mcp__apts__apts_submit_step"
     ]
   },
   "hooks": {}

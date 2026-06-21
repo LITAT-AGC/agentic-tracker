@@ -21,6 +21,8 @@ const {
 } = require('./scripts/lib/semantic_documents');
 const {
   aptsNext,
+  aptsWorkflowStep,
+  aptsSubmitStep,
   methodStatus,
   setMethodStatus,
   STORY_METHOD_STATUSES
@@ -1957,10 +1959,19 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-const integrationManifestSchemaVersion = '2.2.0';
+const integrationManifestSchemaVersion = '2.3.0';
 const publicIntegrationBasePath = '/api/public/integrar';
 // Append-only history: never replace older versions with only the latest entry.
 const integrationManifestReleaseNotes = [
+  {
+    version: '2.3.0',
+    date: '2026-06-21',
+    changes: [
+      'Added the generative goteo driver (model B, fresh context per step) to the contract: apts_workflow_step serves the current workflow step reconstructed from server-authoritative state (verbatim instruction re-cabled at serve-time, only the step needs[] reinjected as bounded slices) so per-step context stays ~constant regardless of project size; pass `answers` to resume an elicitation paused in await_input.',
+      'Added apts_submit_step: captures the step output (doc artifacts -> typed semantic_documents, code -> reference, iterable units -> claimed story status) coherently with the workflow-level completion apts_next checks, then advances the cursor or closes the workflow.',
+      'The contract now exposes 19 operations; the self-checked client/CLI/MCP surfaces and the generated per-runtime adapters were regenerated from apts_skills.json (no hand edits).'
+    ]
+  },
   {
     version: '2.2.0',
     date: '2026-06-20',
@@ -2408,8 +2419,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts_skills.json'),
     fileName: 'apts_skills.json',
     contentType: 'application/json; charset=utf-8',
-    artifactVersion: '2.2.0',
-    updatedInSchemaVersion: '2.2.0',
+    artifactVersion: '2.3.0',
+    updatedInSchemaVersion: '2.3.0',
     kind: 'skills_contract',
     recommended: true,
     usagePriority: 'discovery',
@@ -2497,8 +2508,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-mcp.js'),
     fileName: 'apts-mcp.js',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.2.0',
-    updatedInSchemaVersion: '2.2.0',
+    artifactVersion: '2.3.0',
+    updatedInSchemaVersion: '2.3.0',
     kind: 'reference_mcp_server',
     recommended: true,
     usagePriority: 'primary',
@@ -2515,8 +2526,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-cli.js'),
     fileName: 'apts-cli.js',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.2.0',
-    updatedInSchemaVersion: '2.2.0',
+    artifactVersion: '2.3.0',
+    updatedInSchemaVersion: '2.3.0',
     kind: 'reference_cli',
     recommended: true,
     usagePriority: 'fallback',
@@ -2533,8 +2544,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-client.js'),
     fileName: 'apts-client.js',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '2.2.0',
-    updatedInSchemaVersion: '2.2.0',
+    artifactVersion: '2.3.0',
+    updatedInSchemaVersion: '2.3.0',
     kind: 'reference_client',
     recommended: false,
     usagePriority: 'internal_dependency',
@@ -2559,7 +2570,7 @@ const integrationArtifacts = {
     syncAction: 'overwrite',
     deprecatedFilenames: [],
     module_system: 'esm',
-    selection_rule: 'Startup self-check used by the CLI and MCP server to verify that client, CLI, and MCP stay aligned with apts_skills.json (17 operations). Install it beside apts-cli.js and apts-mcp.js.',
+    selection_rule: 'Startup self-check used by the CLI and MCP server to verify that client, CLI, and MCP stay aligned with apts_skills.json (19 operations). Install it beside apts-cli.js and apts-mcp.js.',
     description: 'Contract self-check that validates client/CLI/MCP alignment with apts_skills.json.'
   },
   package_manifest: {
@@ -4001,6 +4012,63 @@ app.patch('/api/backlog/:id/method-status', apiLimiter, authenticateAgent, async
       fallbackMessage: 'Failed to set method status',
       logMessage: 'apts_set_status failed',
       logContext: { backlog_item_id: id }
+    });
+  }
+});
+
+// F3-T2/T3 — apts_workflow_step: goteo modelo B. Sirve el paso actual reconstruido
+// desde el estado (rewire en serve-time + needs acotados); `answers` reanuda una
+// elicitación pausada (await_input). Server-autoritativo (lee/inicializa el cursor).
+app.post('/api/projects/workflow-step', apiLimiter, authenticateAgent, async (req, res) => {
+  const projectUrl = typeof req.body?.project_url === 'string' ? req.body.project_url.trim() : '';
+  const agentName = typeof req.body?.agent_name === 'string' ? req.body.agent_name.trim() : '';
+  if (!projectUrl) {
+    return res.status(400).json({ error: 'project_url is required' });
+  }
+  if (!agentName) {
+    return res.status(400).json({ error: 'agent_name is required' });
+  }
+  const answers = req.body?.answers;
+  if (answers !== undefined && answers !== null && (typeof answers !== 'object' || Array.isArray(answers))) {
+    return res.status(400).json({ error: 'answers must be an object' });
+  }
+
+  try {
+    const payload = await aptsWorkflowStep(db, { project_url: projectUrl, agent_name: agentName, answers });
+    return res.json(payload);
+  } catch (routeError) {
+    return sendApiError(res, routeError, {
+      fallbackMessage: 'Failed to serve workflow step',
+      logMessage: 'apts_workflow_step failed',
+      logContext: { project_url: projectUrl, agent_name: agentName }
+    });
+  }
+});
+
+// F3-T4 — apts_submit_step: captura el output del paso (doc→semantic_documents
+// tipados / código→referencia / iterable→status de story) y avanza el cursor.
+app.post('/api/projects/submit-step', apiLimiter, authenticateAgent, async (req, res) => {
+  const projectUrl = typeof req.body?.project_url === 'string' ? req.body.project_url.trim() : '';
+  const agentName = typeof req.body?.agent_name === 'string' ? req.body.agent_name.trim() : '';
+  if (!projectUrl) {
+    return res.status(400).json({ error: 'project_url is required' });
+  }
+  if (!agentName) {
+    return res.status(400).json({ error: 'agent_name is required' });
+  }
+  const output = req.body?.output;
+  if (output !== undefined && output !== null && (typeof output !== 'object' || Array.isArray(output))) {
+    return res.status(400).json({ error: 'output must be an object' });
+  }
+
+  try {
+    const payload = await aptsSubmitStep(db, { project_url: projectUrl, agent_name: agentName, output });
+    return res.json(payload);
+  } catch (routeError) {
+    return sendApiError(res, routeError, {
+      fallbackMessage: 'Failed to submit workflow step',
+      logMessage: 'apts_submit_step failed',
+      logContext: { project_url: projectUrl, agent_name: agentName }
     });
   }
 });

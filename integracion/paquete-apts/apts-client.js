@@ -33,6 +33,8 @@ const AUTO_FILL_FIELDS_BY_OPERATION = {
   heartbeat: ['task_id', 'project_url', 'agent_name'],
   apts_next: ['project_url', 'agent_name'],
   apts_status: ['project_url'],
+  apts_workflow_step: ['project_url', 'agent_name'],
+  apts_submit_step: ['project_url', 'agent_name'],
 };
 const IDENTITY_FIELD_HINTS = {
   project_url: { env: 'APTS_PROJECT_URL', git: 'git remote get-url origin' },
@@ -1654,11 +1656,81 @@ async function aptsSetStatus(payload) {
   });
 }
 
+function validateAptsWorkflowStepInput(payload) {
+  const operation = 'apts_workflow_step';
+  const preparedPayload = prepareOperationPayload(payload, operation, ['project_url', 'agent_name']);
+  assertPayloadObject(preparedPayload, operation);
+
+  const normalized = {
+    project_url: requiredString(preparedPayload, 'project_url', operation, { unwrapQuotes: true }),
+    agent_name: requiredString(preparedPayload, 'agent_name', operation),
+  };
+  // `answers` (opcional): reanuda un paso pausado en espera-input (elicitación).
+  if (preparedPayload.answers !== undefined && preparedPayload.answers !== null) {
+    if (typeof preparedPayload.answers !== 'object' || Array.isArray(preparedPayload.answers)) {
+      throw invalidArgument(`${operation} 'answers' must be an object`, {
+        operation, field: 'answers', received: preparedPayload.answers,
+      });
+    }
+    normalized.answers = preparedPayload.answers;
+  }
+  return normalized;
+}
+
+async function aptsWorkflowStep(payload) {
+  const normalizedPayload = validateAptsWorkflowStepInput(payload);
+  persistExecutionContextFromPayload({
+    project_url: normalizedPayload.project_url,
+    agent_name: normalizedPayload.agent_name,
+  });
+
+  return request('/projects/workflow-step', {
+    method: 'POST',
+    body: JSON.stringify(normalizedPayload),
+  });
+}
+
+function validateAptsSubmitStepInput(payload) {
+  const operation = 'apts_submit_step';
+  const preparedPayload = prepareOperationPayload(payload, operation, ['project_url', 'agent_name']);
+  assertPayloadObject(preparedPayload, operation);
+
+  const normalized = {
+    project_url: requiredString(preparedPayload, 'project_url', operation, { unwrapQuotes: true }),
+    agent_name: requiredString(preparedPayload, 'agent_name', operation),
+  };
+  // `output` (opcional): contenido/referencia del artefacto producido por el paso.
+  if (preparedPayload.output !== undefined && preparedPayload.output !== null) {
+    if (typeof preparedPayload.output !== 'object' || Array.isArray(preparedPayload.output)) {
+      throw invalidArgument(`${operation} 'output' must be an object`, {
+        operation, field: 'output', received: preparedPayload.output,
+      });
+    }
+    normalized.output = preparedPayload.output;
+  }
+  return normalized;
+}
+
+async function aptsSubmitStep(payload) {
+  const normalizedPayload = validateAptsSubmitStepInput(payload);
+  persistExecutionContextFromPayload({
+    project_url: normalizedPayload.project_url,
+    agent_name: normalizedPayload.agent_name,
+  });
+
+  return request('/projects/submit-step', {
+    method: 'POST',
+    body: JSON.stringify(normalizedPayload),
+  });
+}
+
 export {
   AptsClientError,
   aptsNext,
   aptsSetStatus,
   aptsStatus,
+  aptsSubmitStep,
+  aptsWorkflowStep,
   clearStoredExecutionContext,
   createBacklogItem,
   deleteBacklogItem,

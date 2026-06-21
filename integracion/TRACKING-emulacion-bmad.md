@@ -27,20 +27,21 @@ una decisión del ledger estaba mal, **se detiene y se replantea**, no se improv
 | F0 Modelo de datos y fundaciones | 🛑 En gate | esquema soporta jerarquía+flujos+goteo+multi-agente; migra limpio en `APTS_test` | T1–T3 hechos; migra/rollback/re-latest limpios en `APTS_test`; espera aprobación |
 | F1 Motor determinista + `apts_next` (costo A) | ✅ Hecho | **GATE APROBADO 2026-06-20** | T1–T5 hechos. T4: 3 tools por contrato (17 ops), adaptadores idempotentes, ejercitadas vía CLI real. T5: reducción de contexto **6.8×–18.7×** (números reales). Gate aprobado por el operador |
 | F2 Importador seed (BMAD v6.8 → datos) | ✅ Hecho | **GATE APROBADO 2026-06-21** | T1–T5 hechos. Cobertura balde 1–2 100%; catálogo balde 3 (104 checks→3 primitivas nuevas); 31 IR válidas; `apts_next` sobre 4 flujos reales role-aware; re-cableado 100%; idempotente. Gate aprobado por el operador. Hallazgo: resolver multi-skill-por-fase → F3-T1.5 |
-| F3 Driver de goteo (costo B) | 🟡 En curso | `create-prd` por goteo end-to-end; contexto por paso ~constante | T1 (3 primitivas, 31/31) + T1.5 (resolver DAG multi-skill role-aware, 10/10) hechos. Siguiente: T2 (goteo modelo B) |
-| F4 Validación end-to-end (proyecto real) | ⬜ Pendiente | proyecto gestionado de punta a punta; métricas A y B vs BMAD; informe | — |
+| F3 Driver de goteo (costo B) | ✅ Hecho | **GATE APROBADO 2026-06-21** | T1–T5 hechos (31/31, 10/10, 27/27, 16/16, 26/26; contract-check 19 ops; schema 2.3.0). bmad-prd por goteo vía CLI real; ctx/paso constante bajo escala (5.8×–41.1×); elicitación OK. Gate aprobado por el operador |
+| F4 Validación end-to-end (proyecto real) | 🟡 En curso | proyecto gestionado de punta a punta; métricas A y B vs BMAD; informe | F3-GATE aprobado. Siguiente: F4-T1 |
 
 Leyenda: ⬜ Pendiente · 🟡 En curso · ✅ Hecho · ⛔ Bloqueado · 🛑 En gate (espera operador)
 
-**Próxima acción:** 🟡 **F3 en curso.** F2-GATE aprobado (2026-06-21). **F3-T1 + F3-T1.5 hechos.**
-T1 = 3 primitivas nuevas (31/31). T1.5 = resolver DAG multi-skill-por-fase role-aware + scoping por
-`source_ref` + rol cableado desde menús (10/10). **Siguiente: F3-T2** (goteo modelo B,
-`apts_workflow_step`): reconstruir el payload por paso desde el estado, reinyectar solo `needs[]`,
-aplicar el re-cableado (`applyRewire`/`rewire-map`) sobre el `instruction_chunk` verbatim; requiere
-cablear `needs[]`/`outputs[]`/`iterable` per-step desde la IR (diferido de F2; ahora `step.metadata`
-trae asks/template_outputs/checks como insumo). NO empezar F4 sin aprobación de 🛑 F3-GATE. Estado
-de `APTS_test`: fixture toy (con `source_ref`) + corpus bmad (26 roles cableados) prístinos, 6
-primitivas implemented. Re-seed: `cd backend` → `node seeds/f1_toy_fixture.js` + `node seeds/bmad_seed.js`.
+**Próxima acción:** 🟡 **F4 en curso.** F3-GATE **aprobado 2026-06-21** (commiteado). Toda la
+maquinaria del motor está lista: `apts_next` (DAG role-aware), goteo modelo B (`apts_workflow_step` +
+`apts_submit_step`), elicitación (await_input), 6 primitivas, 19 ops en el contrato (schema 2.3.0).
+**Siguiente: F4-T1** — definir un proyecto real de prueba y correrlo de punta a punta
+(analysis→planning→solutioning→implementation) con `apts_next` guiando y el goteo sirviendo, multi-agente.
+Luego F4-T2 (ciclo de implementación create-story→dev-story→code-review→retrospective por goteo) y
+F4-T3 (métricas costo A y B vs BMAD nativo sobre el MISMO proyecto). 🛑 F4-GATE = proyecto gestionado
+end-to-end + informe de cierre v1. Estado de `APTS_test`: fixture toy + corpus bmad (wiring per-step)
+prístinos, 6 primitivas implemented. Re-seed: `cd backend` → `node seeds/f1_toy_fixture.js` +
+`node seeds/bmad_seed.js`.
 
 ---
 
@@ -377,14 +378,101 @@ sigue siendo la autoridad, decisión F1).
     phase persistida; analyst→wait; prd→avanza a solutioning + architect corre `bmad-create-architecture`
     = 1er required topo). Migración up/down limpia; `APTS_test` prístino (toy con source_ref + bmad
     con 26 roles + 6 primitivas).
-- [ ] **F3-T2** `apts_workflow_step` modelo B: reconstrucción de payload por paso desde estado;
-  reinyección solo de `needs[]` (referencia + recuperación semántica). Pasos iterables.
-- [ ] **F3-T3** Estado **espera-input** para elicitación (≠ blocker): pausa, expone pregunta, reanuda.
-- [ ] **F3-T4** Captura de output: doc-artefactos → APTS (`artifacts`); código → repo + referencia.
-  `apts_submit_step`.
-- [ ] **F3-T5** Tools por contrato + regenerar adaptadores.
-- [ ] **F3-GATE** 🛑 `create-prd` (u otro real) corre por goteo end-to-end; **contexto por paso
-  ~constante** demostrado con números; elicitación funciona.
+- [x] **F3-T2** `apts_workflow_step` modelo B: reconstrucción de payload por paso desde estado;
+  reinyección solo de `needs[]` (referencia + recuperación semántica). Pasos iterables. **Hecho 2026-06-21.**
+  - *Decisiones acordadas con el operador antes de codear (3):* (a) **outputs[] per-step** derivados
+    de la MISMA fuente que la completitud de T1.5 y adjuntados SOLO al paso terminal → coherentes por
+    construcción (sin choque, `resolvePhaseStep` no cambia); (b) **needs[]** se resuelven con **slice
+    determinista acotado** (sin API de embeddings: el pipeline `semantic_embeddings.js` llama a
+    OpenRouter en vivo, fragilizaría el gate) — referencia + excerpt de tamaño fijo, constante aunque
+    el artefacto crezca; la recuperación semántica embedding-ranked queda como refinamiento opcional;
+    (c) **input** = `{project_url, agent_name}` (server-autoritativo: lee/inicializa el cursor); T2 =
+    LADO DE LECTURA (servir el paso actual), el AVANCE del cursor lo hace T4 (`apts_submit_step`).
+  - *Hecho:* **Fuente única** `backend/scripts/lib/method_outputs.js` (`WORKFLOW_OUTPUTS` = qué produce
+    cada workflow) de la que se derivan SIN drift: la completitud a nivel-workflow de T1.5
+    (`buildWorkflowCompletion()` → reemplaza el literal en `method_resolver.js`, **idéntico** al previo,
+    verificado) y los `outputs[]`/`needs[]` per-step. **Derivación per-step** `backend/scripts/importer/wiring.js`
+    (`deriveWiring`: outputs solo en paso terminal; needs = artefactos upstream de `routing.preceded_by`
+    mapeados a doc_type; iterable = ejecutor per-historia). **Cableado en el seed** `backend/seeds/bmad_seed.js`
+    (steps ahora con `needs`/`outputs`/`iterable` reales en vez de NULL/false). **Goteo**
+    `method_resolver.js` `aptsWorkflowStep(db,{project_url,agent_name})`: si el caller corre un paso
+    (puntero `running`) lo sirve; si está idle hace bootstrap vía `aptsNext` (rol-aware + claim),
+    fija el cursor al paso de entrada y lo sirve; `resolveNeed` resuelve cada need a `{ref, slice}`
+    acotado (`SLICE_CHARS=1200`); `buildStepPayload` aplica `applyRewire` al `instruction_chunk`/
+    `template_slice` en serve-time (NO muta el ADN almacenado). Payload §7
+    `{mode, workflow_key, step_key, step_order, goal, role, target_id, instruction_chunk, template_slice, needs[], outputs[]}`.
+  - *Aceptación:* harness throwaway (no en repo, trx rollbackeada) contra `APTS_test`, **27/27**:
+    coherencia (completitud derivada == literal T1.5, 8 entradas); wiring en DB (bmad-prd needs=brief
+    uniforme, outputs solo en paso terminal=prd, no iterable; dev-story todos iterable, terminal=status
+    done); goteo bmad-prd end-to-end (mode=run, entry step_order=1, instruction verbatim presente, need
+    brief resuelto con slice, idempotente sin avanzar solo, rewire serve-time elimina andamiaje
+    `{workflow.*}` sin tocar el almacenado, paso terminal declara output prd); slice acotado (brief de
+    50k chars → slice ≤ tope); contexto por paso < workflow entero (preview costo-B: `[652,1218,3914,
+    1948,1837,2130]` vs ~12871 chars); dev-story iterable (claim per-historia, target=story); regresión
+    toy (aptsNext intacto). `APTS_test` prístino (31 bmad / 4 toy, cero orphans).
+- [x] **F3-T3** Estado **espera-input** para elicitación (≠ blocker): pausa, expone pregunta, reanuda. **Hecho 2026-06-21.**
+  - *Diseño:* una elicitación es un paso con `<ask>` estructurados (`step.metadata.asks` no vacío) —
+    la señal determinista que BMAD marca. El goteo lo sirve con `mode:'await_input'` + `questions[]`,
+    persiste `step_status='await_input'` (≠ blocker) y NO avanza. El **resume** se fusionó en
+    `apts_workflow_step` como parámetro opcional `answers` (servir y reanudar son el mismo punto de
+    interacción del modelo B → 1 tool, no una `resume` aparte): guarda en `cursor.answers[step.key]`,
+    vuelve a `running` y re-sirve en `mode:'run'` con `provided_input`. Los workflows en prosa
+    (bmad-prd) traen asks=[] → NO pausan; elicitan dentro del `instruction_chunk` verbatim.
+  - *Aceptación:* harness throwaway (trx rollbackeada) **16/16**: ciclo await_input→resume→run
+    (questions expuestas, story reclamada igual, answer en cursor, story_id preservado, re-serve
+    idempotente, resume fuera de await_input→blocked); prosa no pausa; regresión toy.
+  - *⚠️ Para el gate:* la elicitación estructurada (await_input) se ejercita en workflows con `<ask>`
+    (implementation, p.ej. dev-story). bmad-prd (prosa) NO tiene asks estructurados en el corpus
+    (importar unos sería fabricar ADN); su elicitación viaja verbatim en el instruction_chunk servido.
+- [x] **F3-T4** Captura de output: doc-artefactos → APTS (`semantic_documents` tipados); código →
+  referencia. `apts_submit_step`. **Hecho 2026-06-21.**
+  - *Hecho:* `aptsSubmitStep(db,{project_url,agent_name,output})` captura según el descriptor
+    `step.outputs` (cableado en T2, misma fuente que la completitud T1.5): `artifact`→`upsertArtifact`
+    (semantic_documents tipado, 1 fila/initiative+doc_type, version=contador; cierra
+    `initiatives.prd_artifact_id` si es prd); `backlog_items`→reconoce (creadas vía tools de backlog);
+    `status` (iterable dev-story)→actualiza la story reclamada + `code_ref`; `code_ref`→referencia.
+    Luego AVANZA el cursor al próximo paso, o cierra el workflow y libera el puntero (idle, cursor
+    null → el próximo claim toma otra unidad). Guardas: sin paso activo / en await_input → `ok:false`.
+  - *Aceptación:* harness throwaway (trx rollbackeada) **26/26**: **goteo bmad-prd END-TO-END**
+    (serve→submit×6→prd persistido→FK cerrado→workflow_complete→fase avanza a solutioning→pm wait);
+    upsert idempotente (version incrementa, 1 fila); captura iterable dev-story (story done, puntero
+    liberado); guardas; contexto por paso < workflow entero.
+- [x] **F3-T5** Tools por contrato (`apts_workflow_step`, `apts_submit_step`) + regenerar adaptadores. **Hecho 2026-06-21.**
+  - *Hecho:* 2 tools nuevas en `apts_skills.json` (apts_workflow_step {project_url,agent_name,answers?};
+    apts_submit_step {project_url,agent_name,output?}; req[]). Cliente (`apts-client.js`): +`aptsWorkflowStep`/
+    `aptsSubmitStep` (validación + `persistExecutionContext`) + 2 entradas en `AUTO_FILL_FIELDS_BY_OPERATION`
+    + exports. Backend (`index.js`): 2 rutas finas (`POST /api/projects/workflow-step`,
+    `POST /api/projects/submit-step`, apiLimiter+authenticateAgent) + imports del resolver. CLI/MCP son
+    **contract-driven** (derivan las ops del contrato) → no requieren edición a mano. Manifiesto público:
+    `schema_version` 2.2.0→**2.3.0** (minor aditivo) + nota append-only prepended; bumps a 2.3.0 de
+    skills_json/js_client/js_cli/mcp_server; contract_check corrige conteo 17→**19 ops** sin bump (criterio T4-C).
+  - *Aceptación cumplida:* `contract-check.js` → **19 ops alineadas**; `generate-adapters.js` 2× →
+    salida idéntica + árbol estable (único delta: `runtime-adapters/claude/.claude/settings.json` con
+    `mcp__apts__apts_{workflow_step,submit_step}`); backend levanta en 2.3.0; **ejercitado VÍA LA CLI
+    real** (→HTTP) en el gate.
+- [x] **F3-GATE** ✅ **APROBADO 2026-06-21.** `create-prd` (bmad-prd) corre por goteo end-to-end;
+  **contexto por paso ~constante** demostrado con números; elicitación funciona. El operador aprobó
+  la lectura fiel (elicitación estructurada sobre workflows con `<ask>`; bmad-prd elicita en prosa verbatim).
+  - *Evidencia (toda contra `APTS_test`):*
+    - **bmad-prd end-to-end vía la CLI real** (`apts-workflow-step`/`apts-submit-step` → HTTP backend
+      NODE_ENV=test): 6 pasos servidos en `mode:run`, brief reinyectado como slice acotado (present ✓)
+      en cada paso, submit captura el artefacto prd, `workflow_complete`, fase avanza a solutioning;
+      el siguiente `apts-workflow-step` → `wait` (rol architect). Goteo real, no harness.
+    - **Contexto por paso ~constante (tesis costo-B, números reales, `tokens=ceil(chars/4)`):**
+      | brief | APTS goteo ctx/paso (max) | BMAD-nativo ctx/paso | reducción |
+      |---|---|---|---|
+      | 20 000 chars | **5 096 chars (~1 274 tok)** | 29 353 chars (~7 339 tok) | **5.8×** |
+      | 200 000 chars (10×) | **5 097 chars (~1 275 tok)** | 209 353 chars (~52 339 tok) | **41.1×** |
+      El ctx/paso de APTS es **idéntico** entre 20k y 200k (slice acotado, `SLICE_CHARS=1200`) =
+      **constante bajo escala**; el de BMAD-nativo (workflow entero + artefacto entero, sostenido en
+      cada paso) **crece sin techo**. La brecha se ensancha al acumular PRD+arquitectura+épicas (F4).
+    - **Elicitación funciona:** ciclo `await_input`→(questions)→`answers`→`run`(provided_input)
+      verificado (T3, 16/16) sobre pasos con `<ask>` estructurados. Nota de fidelidad arriba (T3):
+      bmad-prd elicita en prosa verbatim; la pausa estructurada se ejercita en implementation.
+  - *Decisión abierta para el gate:* ¿la "elicitación funciona" del gate se da por satisfecha con la
+    pausa estructurada sobre workflows con `<ask>` (no bmad-prd, que no trae asks en el corpus)? Es la
+    lectura fiel (no fabricar asks). Si el operador quiere elicitación estructurada DENTRO de bmad-prd,
+    es un tema de corpus/diseño a tratar (no improvisar, regla 2).
 
 ## F4 — Validación end-to-end: gestionar un proyecto real
 
@@ -458,6 +546,16 @@ sigue siendo la autoridad, decisión F1).
 | 2026-06-21 | (F3-T1.5) Scoping de librería = `source_ref` en `initiatives` (migración aditiva) | Decisión del operador. toy y bmad coexisten en `workflow_definitions` (global) y comparten phase+track → selección por fase ambigua. `source_ref` alinea con la convención ya usada; el resolver filtra `workflow_definitions.source_ref = initiative.source_ref`. En T5 esto se hacía solo en el harness; ahora committeado |
 | 2026-06-21 | (F3-T1.5) Rol por workflow (`default_entity_id`) derivado de los menús de agente (`entity.menu[].skill`) | El corpus mapea workflow→agente como dato; derivación determinista (tie-break agente alfab. → readiness=architect). Resuelve el diferido de rol de F2 a nivel-workflow; `entity_id` POR-STEP sigue diferido a T2. Cableado en `bmad_seed`, no hardcode en el resolver |
 | 2026-06-21 | (F3-T1.5) Completitud provisional de readiness/sprint-planning/create-story = `count-threshold epic>=1` | "readiness report"/"sprint status"/"story" no mapean a un `doc_type` del enum; se gatean por estado-servidor. Marcado `provisional` en `WORKFLOW_COMPLETION`; se afina en F4 (el gate F3 sólo recorre analysis→planning, con specs limpias brief/prd) |
+| 2026-06-21 | (F3-T2) **Fuente única** `method_outputs.WORKFLOW_OUTPUTS` para outputs[] per-step (T2) y completitud a nivel-workflow (T1.5) | Resuelve por construcción el riesgo de choque que marcó el operador: ambos se DERIVAN del mismo mapa, no se pueden contradecir. `buildWorkflowCompletion()` reemplaza el literal de T1.5 (idéntico, verificado) |
+| 2026-06-21 | (F3-T2) outputs[] per-step SOLO en el paso terminal (derivado de `routing.outputs`); pasos previos outputs:[] | Acordado con el operador. La completitud se decide a nivel-workflow ANTES de `resolvePhaseStep` → el paso terminal no afecta el verdicto de T1.5 (regresión cero) y los outputs sólo los consume el goteo (T2)/submit (T4). Distribuir por paso exigiría NLP sobre prosa (ledger §9 lo desaconseja) |
+| 2026-06-21 | (F3-T2) needs[] = slice determinista acotado (`SLICE_CHARS=1200`), NO recuperación semántica embedding-ranked | Acordado con el operador. El pipeline de embeddings (`semantic_embeddings.js`) llama a OpenRouter en vivo (`OPENROUTER_API_KEY` + red) → fragilizaría el gate "contexto ~constante con números reales". El slice acotado da contexto por paso constante y reproducible; la versión semántica queda como refinamiento opcional detrás de flag. El contrato del payload no cambia |
+| 2026-06-21 | (F3-T2) needs[] uniforme por workflow (artefactos upstream de `routing.preceded_by`), refinamiento per-step diferido a F4 | El corpus no da atribución per-step de dependencias sin NLP; `preceded_by` es la señal determinista de qué artefacto consume el workflow. Cada paso reinyecta un slice acotado → costo-B constante igual. La granularidad fina (qué paso necesita qué) se afina en F4 |
+| 2026-06-21 | (F3-T2) `apts_workflow_step` = lado de LECTURA (servir paso actual); el AVANCE del cursor es T4 | Separa "servir el paso" (reconstrucción modelo-B) de "capturar output + avanzar" (`apts_submit_step`) y de la elicitación (await_input, T3). Re-llamar `apts_workflow_step` es idempotente (mismo paso) hasta que T4 avance. Input `{project_url,agent_name}`: el server lee/inicializa el cursor (server-autoritativo), no el cliente |
+| 2026-06-21 | (F3-T3) Elicitación = paso con `<ask>` estructurados (`step.metadata.asks`); resume FUSIONADO en `apts_workflow_step` (param `answers`), no una tool `resume` aparte | Señal determinista que BMAD marca; los workflows en prosa elicitan en el instruction_chunk verbatim (asks=[]→no pausan). Servir y reanudar son el mismo punto de interacción del modelo B → alinea con las 2 tools de goteo del PLAN §7 (no agrega una 3ª). Fidelidad: no se fabrican asks para bmad-prd |
+| 2026-06-21 | (F3-T4) `apts_submit_step` captura según el descriptor `step.outputs` (no por inferencia); artefacto = upsert 1 fila/initiative+doc_type (version=contador) | `step.outputs` (T2) ya es la fuente coherente con la completitud T1.5 → qué se captura no se adivina. Upsert in-place respeta el modelo F0 (1 fila/scope, version contador); cierra `prd_artifact_id`. Avance: próximo paso o cierre+liberación del puntero (idle) para que el próximo claim tome otra unidad iterable |
+| 2026-06-21 | (F3-T5) 2 tools nuevas (`apts_workflow_step`/`apts_submit_step`); CLI/MCP no se editan (contract-driven); bump 2.2.0→2.3.0 | El PLAN §7 define 2 tools de goteo (el resume va como `answers` de workflow_step, no una 3ª). CLI/MCP derivan las ops del contrato → solo se editan contrato + cliente + rutas. Bump minor aditivo + nota append-only; contract_check corrige 17→19 ops sin bump (criterio T4-C) |
+| 2026-06-21 | (F3-GATE) Elicitación estructurada (await_input) se demuestra sobre workflows con `<ask>` (implementation), NO dentro de bmad-prd | bmad-prd (prosa) no trae asks en el corpus v6.8; importarlos sería fabricar ADN (viola "verbatim"). Su elicitación viaja en el instruction_chunk servido. **Operador aprobó esta lectura fiel en el gate** |
+| 2026-06-21 | **F3-GATE aprobado** por el operador | bmad-prd corre por goteo end-to-end vía la CLI real; contexto por paso constante bajo escala (5.8×–41.1×, plateau 5 096↔5 097 chars entre brief 20k y 200k); elicitación await_input→resume OK; contract-check 19 ops, adaptadores idempotentes. Habilita F4 (validación end-to-end con un proyecto real) |
 
 ## Log de cambios (archivos tocados)
 
@@ -480,6 +578,11 @@ sigue siendo la autoridad, decisión F1).
 | 2026-06-20 | F2-T5 | Harness throwaway (no en repo): `apts_next` sobre instancia real del corpus en `APTS_test`, 4 fases role-aware + mismatch→wait. Sin cambios de código committeado. `APTS_test` restaurado |
 | 2026-06-21 | F3-T1 | `backend/scripts/lib/method_primitives.js` (+3 primitivas: `entity-status`/`count-compare`/`next-sibling-exists` + helpers `resolveEntityRow`/`METRICS`/`COMPARATORS`/`siblingsInOrder`, registradas en `PRIMITIVES` + exports); `backend/seeds/f1_toy_fixture.js` (+3 filas de paleta + `PRIMITIVE_KEYS`). Harness throwaway 31/31 contra `APTS_test` (no en repo, trx rollbackeada). `APTS_test` prístino |
 | 2026-06-21 | F3-T1.5 | `backend/migrations/20260621000014_initiative_source_ref.js` (nueva, `initiatives.source_ref`); `backend/scripts/lib/method_resolver.js` (`resolvePhaseSpine`/`topoSortRequired`/`resolveWorkflowVerdict`/`WORKFLOW_COMPLETION`/`PHASE_FALLBACK_WORKFLOW`; walk de `aptsNext` itera la espina; import de `evaluatePrimitive`; quitado `selectPhaseWorkflow`); `backend/seeds/f1_toy_fixture.js` (toy initiative `source_ref`); `backend/seeds/bmad_seed.js` (`default_entity_id` desde menús de agente). Harness throwaway 10/10. Migración up/down limpia; `APTS_test` prístino |
+| 2026-06-21 | F3-T2 | `backend/scripts/lib/method_outputs.js` (NUEVO, fuente única `WORKFLOW_OUTPUTS` + `buildWorkflowCompletion`/`outputToCompletion`); `backend/scripts/importer/wiring.js` (NUEVO, `deriveWiring`/`deriveNeeds`); `backend/scripts/lib/method_resolver.js` (`aptsWorkflowStep`/`resolveNeed`/`buildStepPayload`/`SLICE_CHARS`; `WORKFLOW_COMPLETION` ahora derivado de la fuente única; imports `buildWorkflowCompletion` + `applyRewire`); `backend/seeds/bmad_seed.js` (cablea `needs`/`outputs`/`iterable` per-step vía `deriveWiring`, antes NULL/false). Sin migración (sin cambio de esquema). Harness throwaway 27/27 contra `APTS_test`; re-seed limpio; `APTS_test` prístino |
+| 2026-06-21 | F3-T3 | `backend/scripts/lib/method_resolver.js` (`aptsWorkflowStep` gana param `answers` + lógica de elicitación/resume; helpers `stepAsks`/`serializeCursor`; `buildStepPayload` con `mode`/`questions`/`provided_input`). Harness throwaway 16/16; `APTS_test` prístino |
+| 2026-06-21 | F3-T4 | `backend/scripts/lib/method_resolver.js` (`aptsSubmitStep` + `upsertArtifact`; require `crypto`; exports). Harness throwaway 26/26 (goteo bmad-prd end-to-end); `APTS_test` prístino |
+| 2026-06-21 | F3-T5 | `integracion/paquete-apts/apts_skills.json` (+2 tools); `integracion/paquete-apts/apts-client.js` (+`aptsWorkflowStep`/`aptsSubmitStep` + AUTO_FILL + exports); `backend/index.js` (+2 rutas, imports del resolver, `schema_version` 2.2.0→2.3.0 + nota append-only + bumps skills_json/js_client/js_cli/mcp_server, contract_check 17→19 ops); `integracion/paquete-apts/runtime-adapters/claude/.claude/settings.json` (regenerado, +2 mcp tools). `contract-check` 19 ops; `generate-adapters` 2× idéntico |
+| 2026-06-21 | F3-GATE | Demostración vía CLI real (→HTTP backend NODE_ENV=test) + medición costo-B throwaway (no en repo). Instancia gate persistente creada y limpiada (`APTS_test` prístino: 31 bmad / 4 toy). Sin cambios de código committeado en el gate |
 
 ## Mapa de archivos clave (se irá llenando)
 
@@ -492,6 +595,19 @@ sigue siendo la autoridad, decisión F1).
 - Resolver `apts_next` (F1-T3; +DAG multi-skill en F3-T1.5): `backend/scripts/lib/method_resolver.js`
   (`aptsNext` itera la espina vía `resolvePhaseSpine`/`topoSortRequired`/`resolveWorkflowVerdict`,
   scopeado por `initiatives.source_ref`; `WORKFLOW_COMPLETION` = completitud por `routing.outputs`)
+- Goteo modelo B (F3 T2–T4): `backend/scripts/lib/method_resolver.js`:
+  - `aptsWorkflowStep` (T2/T3) = servir paso actual desde el cursor + bootstrap vía `aptsNext`;
+    `resolveNeed` slice acotado (`SLICE_CHARS`); `buildStepPayload` re-cablea en serve-time; param
+    `answers` = resume de elicitación (`mode:await_input`→`run`, `provided_input`).
+  - `aptsSubmitStep` (T4) = captura output por descriptor `step.outputs` (`upsertArtifact` doc tipado /
+    code_ref / status iterable) + avanza el cursor o cierra el workflow y libera el puntero.
+  - Fuente única de outputs: `backend/scripts/lib/method_outputs.js` (`WORKFLOW_OUTPUTS` → deriva
+    completitud T1.5 Y outputs[] per-step, coherentes por construcción).
+  - Derivación per-step: `backend/scripts/importer/wiring.js` (`deriveWiring`), cableada en `bmad_seed.js`.
+- Contrato/superficie (F3-T5): `integracion/paquete-apts/apts_skills.json` (+`apts_workflow_step`/
+  `apts_submit_step` = 19 ops); cliente `apts-client.js` (+exports + AUTO_FILL); rutas
+  `backend/index.js` (`POST /api/projects/{workflow-step,submit-step}`; `schema_version` 2.3.0).
+  CLI/MCP/adaptadores son contract-driven (se regeneran, no se editan a mano)
 - Scoping de librería (F3-T1.5): `backend/migrations/20260621000014_initiative_source_ref.js`;
   rol por workflow cableado en `backend/seeds/bmad_seed.js` (desde menús de agente)
 - Importador (F2 T1–T5, HECHO): parser puro `backend/scripts/importer/` (`toml_min.js`, `classify.js`,

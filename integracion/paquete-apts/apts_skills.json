@@ -890,6 +890,44 @@
           "status"
         ]
       }
+    },
+    {
+      "name": "apts_workflow_step",
+      "description": "Serve the current generative workflow step for an agent by goteo (model B: fresh context per step). The server reconstructs the step payload from server-authoritative state (the agent's cursor in project_state): it re-cables the verbatim instruction_chunk at serve-time and reinjects only what the step needs[] as bounded slices, so per-step context stays ~constant regardless of project size. Returns { mode: run|await_input|wait|done|blocked, workflow_key, step_key, step_order, goal, role, target_id, instruction_chunk, template_slice, needs[], outputs[] }. If the step is an elicitation point, mode='await_input' with questions[]; resume by calling again with `answers`. Minimum payload in official CLI/helper: none (project_url and agent_name auto-resolve from env/local managed context/Git when omitted).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project_url": {
+            "type": "string"
+          },
+          "agent_name": {
+            "type": "string"
+          },
+          "answers": {
+            "type": "object"
+          }
+        },
+        "required": []
+      }
+    },
+    {
+      "name": "apts_submit_step",
+      "description": "Capture the output of the current workflow step and advance the cursor (goteo, model B). Doc artifacts are persisted as typed semantic_documents (doc_type from the enum: brief/prd/architecture/epics/story_spec/retro), code is recorded as a reference (code_ref), and iterable units update the claimed story's status. What is captured is decided by the step's declared outputs[] (coherent with the workflow-level completion that apts_next checks). Then it advances to the next step, or closes the workflow and releases the pointer. Returns { ok, captured[], advanced_to, workflow_complete }. Pass the produced content/reference in `output`. Minimum payload in official CLI/helper: none (project_url and agent_name auto-resolve from env/local managed context/Git when omitted).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project_url": {
+            "type": "string"
+          },
+          "agent_name": {
+            "type": "string"
+          },
+          "output": {
+            "type": "object"
+          }
+        },
+        "required": []
+      }
     }
   ]
 }
