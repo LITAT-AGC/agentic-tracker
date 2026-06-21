@@ -1,0 +1,110 @@
+{
+  "source": {
+    "repo": "github.com/bmad-code-org/BMAD-METHOD",
+    "tag": "v6.8.0",
+    "tag_object_sha": "c3769ab",
+    "commit_sha": "3bcd6c3",
+    "path": "src/bmm-skills/3-solutioning/bmad-check-implementation-readiness"
+  },
+  "kind": "workflow",
+  "key": "bmad-check-implementation-readiness",
+  "phase": "solutioning",
+  "frontmatter": {
+    "name": "bmad-check-implementation-readiness",
+    "description": "Validate PRD, UX, Architecture and Epics specs are complete. Use when the user says \"check implementation readiness\"."
+  },
+  "dialect": "prose",
+  "entity": null,
+  "steps": [
+    {
+      "n": "0",
+      "goal": "Implementation Readiness",
+      "tag": null,
+      "generative": {
+        "instruction_md": "**Goal:** Validate that PRD, UX, Architecture, Epics and Stories are complete and aligned before Phase 4 implementation starts, with a focus on ensuring epics and stories are logical and have accounted for all requirements and planning.\n\n**Your Role:** You are an expert Product Manager, renowned and respected in the field of requirements traceability and spotting gaps in planning. Your success is measured in spotting the failures others have made in planning or preparation of epics and stories to produce the user's product vision.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "1",
+      "goal": "WORKFLOW ARCHITECTURE",
+      "tag": null,
+      "generative": {
+        "instruction_md": "### Core Principles\n\n- **Micro-file Design**: Each step toward the overall goal is a self-contained instruction file; adhere to one file at a time, as directed\n- **Just-In-Time Loading**: Only 1 current step file will be loaded and followed to completion - never load future step files until told to do so\n- **Sequential Enforcement**: Sequence within the step files must be completed in order, no skipping or optimization allowed\n- **State Tracking**: Document progress in output file frontmatter using `stepsCompleted` array when a workflow produces a document\n- **Append-Only Building**: Build documents by appending content as directed to the output file\n\n### Step Processing Rules\n\n1. **READ COMPLETELY**: Always read the entire step file before taking any action\n2. **FOLLOW SEQUENCE**: Execute all numbered sections in order, never deviate\n3. **WAIT FOR INPUT**: If a menu is presented, halt and wait for user selection\n4. **CHECK CONTINUATION**: If the step has a menu with Continue as an option, only proceed to next step when user selects 'C' (Continue)\n5. **SAVE STATE**: Update `stepsCompleted` in frontmatter before loading next step\n6. **LOAD NEXT**: When directed, read fully and follow the next step file\n\n### Critical Rules (NO EXCEPTIONS)\n\n- 🛑 **NEVER** load multiple step files simultaneously\n- 📖 **ALWAYS** read entire step file before execution\n- 🚫 **NEVER** skip steps or optimize the sequence\n- 💾 **ALWAYS** update frontmatter of output files when writing the final output for a specific step\n- 🎯 **ALWAYS** follow the exact instructions in the step file\n- ⏸️ **ALWAYS** halt at menus and wait for user input\n- 📋 **NEVER** create mental todo lists from future steps",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "2",
+      "goal": "Execution",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Read fully and follow: `./steps/step-01-document-discovery.md` to begin the workflow.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    }
+  ],
+  "routing": {
+    "preceded_by": [
+      "bmad-create-epics-and-stories"
+    ],
+    "followed_by": [],
+    "required": true,
+    "outputs": [
+      "readiness report"
+    ],
+    "output_location": [
+      "planning_artifacts"
+    ],
+    "actions": [
+      {
+        "action": null,
+        "phase": "3-solutioning",
+        "preceded_by": [
+          "bmad-create-epics-and-stories"
+        ],
+        "followed_by": [],
+        "required": true,
+        "outputs": "readiness report",
+        "output_location": "planning_artifacts"
+      }
+    ]
+  },
+  "templates": [
+    {
+      "name": "templates/readiness-report-template.md",
+      "body_md": "# Implementation Readiness Assessment Report\r\n\r\n**Date:** {{date}}\r\n**Project:** {{project_name}}\r\n"
+    }
+  ],
+  "checklists": [],
+  "unresolved_refs": [
+    "{communication_language}",
+    "{document_output_language}",
+    "{planning_artifacts}",
+    "{project-root}",
+    "{project-root}/_bmad/bmm/config.yaml",
+    "{project-root}/_bmad/custom/{skill-name}.toml",
+    "{project-root}/_bmad/custom/{skill-name}.user.toml",
+    "{project-root}/_bmad/scripts/resolve_customization.py",
+    "{project_knowledge}",
+    "{skill-name}",
+    "{skill-root}",
+    "{user_name}",
+    "{workflow.activation_steps_append}",
+    "{workflow.activation_steps_prepend}",
+    "{workflow.persistent_facts}"
+  ],
+  "dropped_sections": [
+    "Conventions",
+    "On Activation"
+  ]
+}

@@ -1,0 +1,101 @@
+{
+  "source": {
+    "repo": "github.com/bmad-code-org/BMAD-METHOD",
+    "tag": "v6.8.0",
+    "tag_object_sha": "c3769ab",
+    "commit_sha": "3bcd6c3",
+    "path": "src/core-skills/bmad-help"
+  },
+  "kind": "workflow",
+  "key": "bmad-help",
+  "phase": "anytime",
+  "frontmatter": {
+    "name": "bmad-help",
+    "description": "Analyzes current state and user query to answer BMad questions or recommend the next skill(s) to use. Use when user asks for help, bmad help, what to do next, or what to start with in BMad."
+  },
+  "dialect": "prose",
+  "entity": null,
+  "steps": [
+    {
+      "n": "1",
+      "goal": "Purpose",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Help the user understand where they are in their BMad workflow and what to do next, and also answer broader questions when asked that could be augmented with remote sources such as module documentation sources.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "2",
+      "goal": "Desired Outcomes",
+      "tag": null,
+      "generative": {
+        "instruction_md": "When this skill completes, the user should:\n\n1. **Know where they are** — which module and phase they're in, what's already been completed\n2. **Know what to do next** — the next recommended and/or required step, with clear reasoning\n3. **Know how to invoke it** — skill name, menu code, action context, and any args that shortcut the conversation\n4. **Get offered a quick start** — when a single skill is the clear next step, offer to run it for the user right now rather than just listing it\n5. **Feel oriented, not overwhelmed** — surface only what's relevant to their current position; don't dump the entire catalog\n6. **Get answers to general questions** — when the question doesn't map to a specific skill, use the module's registered documentation to give a grounded answer",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "3",
+      "goal": "Data Sources",
+      "tag": null,
+      "generative": {
+        "instruction_md": "- **Catalog**: `{project-root}/_bmad/_config/bmad-help.csv` — assembled manifest of all installed module skills\n- **Config**: `config.yaml` and `user-config.yaml` files in `{project-root}/_bmad/` and its subfolders — resolve `output-location` variables, provide `communication_language` and `project_knowledge`\n- **Artifacts**: Files matching `outputs` patterns at resolved `output-location` paths reveal which steps are possibly completed; their content may also provide grounding context for recommendations\n- **Project knowledge**: If `project_knowledge` resolves to an existing path, read it for grounding context. Never fabricate project-specific details.\n- **Module docs**: Rows with `_meta` in the `skill` column carry a URL or path in `output-location` pointing to the module's documentation (e.g., llms.txt). Fetch and use these to answer general questions about that module.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "4",
+      "goal": "CSV Interpretation",
+      "tag": null,
+      "generative": {
+        "instruction_md": "The catalog uses this format:\n\n```\nmodule,skill,display-name,menu-code,description,action,args,phase,preceded-by,followed-by,required,output-location,outputs\n```\n\n**Phases** determine the high-level flow:\n- `anytime` — available regardless of workflow state\n- Numbered phases (`1-analysis`, `2-planning`, etc.) flow in order; naming varies by module\n\n**Sequencing** determines recommended ordering within and across phases (these are soft suggestions, not hard gates — see `required` for gating):\n- `preceded-by` — skills that should ideally complete before this one\n- `followed-by` — skills that should ideally run after this one\n- Format: `skill-name` for single-action skills, `skill-name:action` for multi-action skills\n\n**Required gates**:\n- `required=true` items must complete before the user can meaningfully proceed to later phases\n- A phase with no required items is entirely optional — recommend it but be clear about what's actually required next\n\n**Completion detection**:\n- Search resolved output paths for `outputs` patterns\n- Fuzzy-match found files to catalog rows\n- User may also state completion explicitly, or it may be evident from the current conversation\n\n**Descriptions carry routing context** — some contain cycle info and alternate paths (e.g., \"back to DS if fixes needed\"). Read them as navigation hints, not just display text.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "5",
+      "goal": "Response Format",
+      "tag": null,
+      "generative": {
+        "instruction_md": "For each recommended item, present:\n- `[menu-code]` **Display name** — e.g., \"[PR] PRD\"\n- Skill name in backticks — e.g., `bmad-prd`\n- For multi-action skills: action invocation context — e.g., \"tech-writer lets create a mermaid diagram!\"\n- Description if present in CSV; otherwise your existing knowledge of the skill suffices\n- Args if available\n\n**Ordering**: Show optional items first, then the next required item. Make it clear which is which.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "6",
+      "goal": "Constraints",
+      "tag": null,
+      "generative": {
+        "instruction_md": "- Present all output in `{communication_language}`\n- Recommend running each skill in a **fresh context window**\n- Match the user's tone — conversational when they're casual, structured when they want specifics\n- If the active module is ambiguous, retrieve all meta rows remote sources to find relevant info also to help answer their question",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    }
+  ],
+  "routing": null,
+  "templates": [],
+  "checklists": [],
+  "unresolved_refs": [
+    "{communication_language}",
+    "{project-root}",
+    "{project-root}/_bmad/_config/bmad-help.csv"
+  ],
+  "dropped_sections": []
+}

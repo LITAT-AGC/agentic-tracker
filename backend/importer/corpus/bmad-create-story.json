@@ -1,0 +1,400 @@
+{
+  "source": {
+    "repo": "github.com/bmad-code-org/BMAD-METHOD",
+    "tag": "v6.8.0",
+    "tag_object_sha": "c3769ab",
+    "commit_sha": "3bcd6c3",
+    "path": "src/bmm-skills/4-implementation/bmad-create-story"
+  },
+  "kind": "workflow",
+  "key": "bmad-create-story",
+  "phase": "implementation",
+  "frontmatter": {
+    "name": "bmad-create-story",
+    "description": "Creates a dedicated story file with all the context the agent will need to implement it later. Use when the user says \"create the next story\" or \"create story [story identifier]\""
+  },
+  "dialect": "structured",
+  "entity": null,
+  "steps": [
+    {
+      "n": "1",
+      "goal": "Determine target story",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Check if {{sprint_status}} file exists for auto discover\n\r\n  \r\n\r\n  \r\n  \r\n  \nLoad the FULL file: {{sprint_status}}\n\r\n  \nRead ALL lines from beginning to end - do not skip any content\n\r\n  \nParse the development_status section completely\n\r\n\r\n  \nFind the FIRST story (by reading in order from top to bottom) where:\r\n    - Key matches pattern: number-number-name (e.g., \"1-2-user-auth\")\r\n    - NOT an epic key (epic-X) or retrospective (epic-X-retrospective)\r\n    - Status value equals \"backlog\"\r\n  \n\r\n\r\n  \r\n\r\n  \nExtract from found story key (e.g., \"1-2-user-authentication\"):\r\n    - epic_num: first number before dash (e.g., \"1\")\r\n    - story_num: second number after first dash (e.g., \"2\")\r\n    - story_title: remainder after second dash (e.g., \"user-authentication\")\r\n  \n\r\n  \nSet {{story_id}} = \"{{epic_num}}.{{story_num}}\"\n\r\n  \nStore story_key for later use (e.g., \"1-2-user-authentication\")\n\r\n\r\n  \r\n  \nCheck if this is the first story in epic {{epic_num}} by looking for {{epic_num}}-1-* pattern\n\r\n  \r\n\r\n  \nGOTO step 2a",
+        "asks": [
+          "Choose option [1], provide epic-story number, path to story docs, or [q] to quit:"
+        ],
+        "template_outputs": []
+      },
+      "checks": [
+        {
+          "condition_text": "{{story_path}} is provided by user or user provided the epic and story number such as 2-4 or 1.6 or epic 1 story 5",
+          "true": null,
+          "false": null,
+          "raw": "<action>Parse user-provided story path: extract epic_num, story_num, story_title from format like \"1-2-user-auth\"</action>\n<action>Set {{epic_num}}, {{story_num}}, {{story_key}} from user input</action>\n<action>GOTO step 2a</action>"
+        },
+        {
+          "condition_text": "sprint status file does NOT exist",
+          "true": null,
+          "false": null,
+          "raw": "<output>🚫 No sprint status file found and no story specified</output>\n<output>\n  **Required Options:**\n  1. Run `sprint-planning` to initialize sprint tracking (recommended)\n  2. Provide specific epic-story number to create (e.g., \"1-2-user-auth\")\n  3. Provide path to story documents if sprint status doesn't exist yet\n</output>\n<ask>Choose option [1], provide epic-story number, path to story docs, or [q] to quit:</ask>\n\n<check if=\"user chooses 'q'\">\n  <action>HALT - No work needed</action>\n</check>\n\n<check if=\"user chooses '1'\">\n  <output>Run sprint-planning workflow first to create sprint-status.yaml</output>\n  <action>HALT - User needs to run sprint-planning</action>\n</check>\n\n<check if=\"user provides epic-story number\">\n  <action>Parse user input: extract epic_num, story_num, story_title</action>\n  <action>Set {{epic_num}}, {{story_num}}, {{story_key}} from user input</action>\n  <action>GOTO step 2a</action>\n</check>\n\n<check if=\"user provides story docs path\">\n  <action>Use user-provided path for story documents</action>\n  <action>GOTO step 2a</action>\n</check>"
+        },
+        {
+          "condition_text": "user chooses 'q'",
+          "true": null,
+          "false": null,
+          "raw": "<action>HALT - No work needed</action>"
+        },
+        {
+          "condition_text": "user chooses '1'",
+          "true": null,
+          "false": null,
+          "raw": "<output>Run sprint-planning workflow first to create sprint-status.yaml</output>\n<action>HALT - User needs to run sprint-planning</action>"
+        },
+        {
+          "condition_text": "user provides epic-story number",
+          "true": null,
+          "false": null,
+          "raw": "<action>Parse user input: extract epic_num, story_num, story_title</action>\n<action>Set {{epic_num}}, {{story_num}}, {{story_key}} from user input</action>\n<action>GOTO step 2a</action>"
+        },
+        {
+          "condition_text": "user provides story docs path",
+          "true": null,
+          "false": null,
+          "raw": "<action>Use user-provided path for story documents</action>\n<action>GOTO step 2a</action>"
+        },
+        {
+          "condition_text": "no user input provided",
+          "true": null,
+          "false": null,
+          "raw": "<critical>MUST read COMPLETE {sprint_status} file from start to end to preserve order</critical>\n<action>Load the FULL file: {{sprint_status}}</action>\n<action>Read ALL lines from beginning to end - do not skip any content</action>\n<action>Parse the development_status section completely</action>\n\n<action>Find the FIRST story (by reading in order from top to bottom) where:\n  - Key matches pattern: number-number-name (e.g., \"1-2-user-auth\")\n  - NOT an epic key (epic-X) or retrospective (epic-X-retrospective)\n  - Status value equals \"backlog\"\n</action>\n\n<check if=\"no backlog story found\">\n  <output>📋 No backlog stories found in sprint-status.yaml\n\n    All stories are either already created, in progress, or done.\n\n    **Options:**\n    1. Run sprint-planning to refresh story tracking\n    2. Load PM agent and run correct-course to add more stories\n    3. Check if current sprint is complete and run retrospective\n  </output>\n  <action>HALT</action>\n</check>\n\n<action>Extract from found story key (e.g., \"1-2-user-authentication\"):\n  - epic_num: first number before dash (e.g., \"1\")\n  - story_num: second number after first dash (e.g., \"2\")\n  - story_title: remainder after second dash (e.g., \"user-authentication\")\n</action>\n<action>Set {{story_id}} = \"{{epic_num}}.{{story_num}}\"</action>\n<action>Store story_key for later use (e.g., \"1-2-user-authentication\")</action>\n\n<!-- Mark epic as in-progress if this is first story -->\n<action>Check if this is the first story in epic {{epic_num}} by looking for {{epic_num}}-1-* pattern</action>\n<check if=\"this is first story in epic {{epic_num}}\">\n  <action>Load {{sprint_status}} and check epic-{{epic_num}} status</action>\n  <action>If epic status is \"backlog\" → update to \"in-progress\"</action>\n  <action>If epic status is \"contexted\" (legacy status) → update to \"in-progress\" (backward compatibility)</action>\n  <action>If epic status is \"in-progress\" → no change needed</action>\n  <check if=\"epic status is 'done'\">\n    <output>🚫 ERROR: Cannot create story in completed epic</output>\n    <output>Epic {{epic_num}} is marked as 'done'. All stories are complete.</output>\n    <output>If you need to add more work, either:</output>\n    <output>1. Manually change epic status back to 'in-progress' in sprint-status.yaml</output>\n    <output>2. Create a new epic for additional work</output>\n    <action>HALT - Cannot proceed</action>\n  </check>\n  <check if=\"epic status is not one of: backlog, contexted, in-progress, done\">\n    <output>🚫 ERROR: Invalid epic status '{{epic_status}}'</output>\n    <output>Epic {{epic_num}} has invalid status. Expected: backlog, in-progress, or done</output>\n    <output>Please fix sprint-status.yaml manually or run sprint-planning to regenerate</output>\n    <action>HALT - Cannot proceed</action>\n  </check>\n  <output>📊 Epic {{epic_num}} status updated to in-progress</output>\n</check>\n\n<action>GOTO step 2a</action>"
+        },
+        {
+          "condition_text": "no backlog story found",
+          "true": null,
+          "false": null,
+          "raw": "<output>📋 No backlog stories found in sprint-status.yaml\n\n  All stories are either already created, in progress, or done.\n\n  **Options:**\n  1. Run sprint-planning to refresh story tracking\n  2. Load PM agent and run correct-course to add more stories\n  3. Check if current sprint is complete and run retrospective\n</output>\n<action>HALT</action>"
+        },
+        {
+          "condition_text": "this is first story in epic {{epic_num}}",
+          "true": null,
+          "false": null,
+          "raw": "<action>Load {{sprint_status}} and check epic-{{epic_num}} status</action>\n<action>If epic status is \"backlog\" → update to \"in-progress\"</action>\n<action>If epic status is \"contexted\" (legacy status) → update to \"in-progress\" (backward compatibility)</action>\n<action>If epic status is \"in-progress\" → no change needed</action>\n<check if=\"epic status is 'done'\">\n  <output>🚫 ERROR: Cannot create story in completed epic</output>\n  <output>Epic {{epic_num}} is marked as 'done'. All stories are complete.</output>\n  <output>If you need to add more work, either:</output>\n  <output>1. Manually change epic status back to 'in-progress' in sprint-status.yaml</output>\n  <output>2. Create a new epic for additional work</output>\n  <action>HALT - Cannot proceed</action>\n</check>\n<check if=\"epic status is not one of: backlog, contexted, in-progress, done\">\n  <output>🚫 ERROR: Invalid epic status '{{epic_status}}'</output>\n  <output>Epic {{epic_num}} has invalid status. Expected: backlog, in-progress, or done</output>\n  <output>Please fix sprint-status.yaml manually or run sprint-planning to regenerate</output>\n  <action>HALT - Cannot proceed</action>\n</check>\n<output>📊 Epic {{epic_num}} status updated to in-progress</output>"
+        },
+        {
+          "condition_text": "epic status is 'done'",
+          "true": null,
+          "false": null,
+          "raw": "<output>🚫 ERROR: Cannot create story in completed epic</output>\n<output>Epic {{epic_num}} is marked as 'done'. All stories are complete.</output>\n<output>If you need to add more work, either:</output>\n<output>1. Manually change epic status back to 'in-progress' in sprint-status.yaml</output>\n<output>2. Create a new epic for additional work</output>\n<action>HALT - Cannot proceed</action>"
+        },
+        {
+          "condition_text": "epic status is not one of: backlog, contexted, in-progress, done",
+          "true": null,
+          "false": null,
+          "raw": "<output>🚫 ERROR: Invalid epic status '{{epic_status}}'</output>\n<output>Epic {{epic_num}} has invalid status. Expected: backlog, in-progress, or done</output>\n<output>Please fix sprint-status.yaml manually or run sprint-planning to regenerate</output>\n<action>HALT - Cannot proceed</action>"
+        },
+        {
+          "condition_text": "no backlog story found",
+          "true": null,
+          "false": null,
+          "raw": "<output>No backlog stories found in sprint-status.yaml\n\n  All stories are either already created, in progress, or done.\n\n  **Options:**\n  1. Run sprint-planning to refresh story tracking\n  2. Load PM agent and run correct-course to add more stories\n  3. Check if current sprint is complete and run retrospective\n</output>\n<action>HALT</action>"
+        },
+        {
+          "condition_text": "this is first story in epic {{epic_num}}",
+          "true": null,
+          "false": null,
+          "raw": "<action>Load {{sprint_status}} and check epic-{{epic_num}} status</action>\n<action>If epic status is \"backlog\" → update to \"in-progress\"</action>\n<action>If epic status is \"contexted\" (legacy status) → update to \"in-progress\" (backward compatibility)</action>\n<action>If epic status is \"in-progress\" → no change needed</action>\n<check if=\"epic status is 'done'\">\n  <output>ERROR: Cannot create story in completed epic</output>\n  <output>Epic {{epic_num}} is marked as 'done'. All stories are complete.</output>\n  <output>If you need to add more work, either:</output>\n  <output>1. Manually change epic status back to 'in-progress' in sprint-status.yaml</output>\n  <output>2. Create a new epic for additional work</output>\n  <action>HALT - Cannot proceed</action>\n</check>\n<check if=\"epic status is not one of: backlog, contexted, in-progress, done\">\n  <output>ERROR: Invalid epic status '{{epic_status}}'</output>\n  <output>Epic {{epic_num}} has invalid status. Expected: backlog, in-progress, or done</output>\n  <output>Please fix sprint-status.yaml manually or run sprint-planning to regenerate</output>\n  <action>HALT - Cannot proceed</action>\n</check>\n<output>Epic {{epic_num}} status updated to in-progress</output>"
+        },
+        {
+          "condition_text": "epic status is 'done'",
+          "true": null,
+          "false": null,
+          "raw": "<output>ERROR: Cannot create story in completed epic</output>\n<output>Epic {{epic_num}} is marked as 'done'. All stories are complete.</output>\n<output>If you need to add more work, either:</output>\n<output>1. Manually change epic status back to 'in-progress' in sprint-status.yaml</output>\n<output>2. Create a new epic for additional work</output>\n<action>HALT - Cannot proceed</action>"
+        },
+        {
+          "condition_text": "epic status is not one of: backlog, contexted, in-progress, done",
+          "true": null,
+          "false": null,
+          "raw": "<output>ERROR: Invalid epic status '{{epic_status}}'</output>\n<output>Epic {{epic_num}} has invalid status. Expected: backlog, in-progress, or done</output>\n<output>Please fix sprint-status.yaml manually or run sprint-planning to regenerate</output>\n<action>HALT - Cannot proceed</action>"
+        }
+      ],
+      "control": [
+        "HALT"
+      ]
+    },
+    {
+      "n": "2",
+      "goal": "Load and analyze core artifacts",
+      "tag": null,
+      "generative": {
+        "instruction_md": "🔬 EXHAUSTIVE ARTIFACT ANALYSIS - This is where you prevent future developer mistakes!\n\r\n\r\n  \r\n  \nRead fully and follow `./discover-inputs.md` to load all input files\n\r\n  Available content: {epics_content}, {prd_content}, {architecture_content}, {ux_content}, plus the project-context facts loaded during activation via `persistent_facts`.\r\n\r\n  \r\n  \nFrom {epics_content}, extract Epic {{epic_num}} complete context:\n **EPIC ANALYSIS:** - Epic\r\n  objectives and business value - ALL stories in this epic for cross-story context - Our specific story's requirements, user story\r\n  statement, acceptance criteria - Technical requirements and constraints - Dependencies on other stories/epics - Source hints pointing to\r\n  original documents \r\n  \nExtract our story ({{epic_num}}-{{story_num}}) details:\n **STORY FOUNDATION:** - User story statement\r\n  (As a, I want, so that) - Detailed acceptance criteria (already BDD formatted) - Technical requirements specific to this story -\r\n  Business context and value - Success criteria",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [
+        {
+          "condition_text": null,
+          "true": null,
+          "false": null,
+          "raw": "1\">\n   <action>Find {{previous_story_num}}: scan {implementation_artifacts} for the story file in epic {{epic_num}} with the highest story number less than {{story_num}}</action>\n   <action>Load previous story file: {implementation_artifacts}/{{epic_num}}-{{previous_story_num}}-*.md</action> **PREVIOUS STORY INTELLIGENCE:** -\n Dev notes and learnings from previous story - Review feedback and corrections needed - Files that were created/modified and their\n patterns - Testing approaches that worked/didn't work - Problems encountered and solutions found - Code patterns established <action>Extract\n all learnings that could impact current story implementation</action>"
+        },
+        {
+          "condition_text": "previous story exists AND git repository detected",
+          "true": null,
+          "false": null,
+          "raw": "<action>Get last 5 commit titles to understand recent work patterns</action>\n<action>Analyze 1-5 most recent commits for relevance to current story:\n  - Files created/modified\n  - Code patterns and conventions used\n  - Library dependencies added/changed\n  - Architecture decisions implemented\n  - Testing approaches used\n</action>\n<action>Extract actionable insights for current story implementation</action>"
+        }
+      ],
+      "control": []
+    },
+    {
+      "n": "3",
+      "goal": "Architecture analysis for developer guardrails",
+      "tag": null,
+      "generative": {
+        "instruction_md": "🏗️ ARCHITECTURE INTELLIGENCE - Extract everything the developer MUST follow!\n **ARCHITECTURE DOCUMENT ANALYSIS:** \nSystematically\r\n  analyze architecture content for story-relevant requirements:\n\r\n\r\n  \r\n  \r\n   **CRITICAL ARCHITECTURE EXTRACTION:** \nFor\r\n  each architecture section, determine if relevant to this story:\n - **Technical Stack:** Languages, frameworks, libraries with\r\n  versions - **Code Structure:** Folder organization, naming conventions, file patterns - **API Patterns:** Service structure, endpoint\r\n  patterns, data contracts - **Database Schemas:** Tables, relationships, constraints relevant to story - **Security Requirements:**\r\n  Authentication patterns, authorization rules - **Performance Requirements:** Caching strategies, optimization patterns - **Testing\r\n  Standards:** Testing frameworks, coverage expectations, test patterns - **Deployment Patterns:** Environment configurations, build\r\n  processes - **Integration Patterns:** External service integrations, data flows \nExtract any story-specific requirements that the\r\n  developer MUST follow\n\r\n  \nIdentify any architectural decisions that override previous patterns\n\r\n\r\n  \r\n  \n📂 READ FILES BEING MODIFIED — skipping this is the primary cause of implementation failures and review cycles\n\r\n  \nFrom the architecture directory structure, identify every file marked UPDATE (not NEW) that this story will touch\n\r\n  \nRead each relevant UPDATE file completely. For each one, document in dev notes:\r\n    - Current state: what it does today (state machine, API calls, data shapes, existing behaviors)\r\n    - What this story changes: the specific sections or behaviors being modified\r\n    - What must be preserved: existing interactions and behaviors the story must not break\r\n  \n\r\n  \nA story implementation must leave the system working end-to-end — not just satisfy its stated ACs.\r\n  If a behavior is required for the feature to work correctly in the existing system, it is a requirement\r\n  whether or not it is explicitly written in the story. The dev agent owns this.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [
+        {
+          "condition_text": "architecture file is single file",
+          "true": null,
+          "false": null,
+          "raw": "<action>Load complete {architecture_content}</action>"
+        },
+        {
+          "condition_text": "architecture is sharded to folder",
+          "true": null,
+          "false": null,
+          "raw": "<action>Load architecture index and scan all architecture files</action>"
+        }
+      ],
+      "control": []
+    },
+    {
+      "n": "4",
+      "goal": "Web research for latest technical specifics",
+      "tag": null,
+      "generative": {
+        "instruction_md": "🌐 ENSURE LATEST TECH KNOWLEDGE - Prevent outdated implementations!\n **WEB INTELLIGENCE:** \nIdentify specific\r\n  technical areas that require latest version knowledge:\n\r\n\r\n  \r\n  \nFrom architecture analysis, identify specific libraries, APIs, or\r\n  frameworks\n\r\n  \nFor each critical technology, research latest stable version and key changes:\r\n    - Latest API documentation and breaking changes\r\n    - Security vulnerabilities or updates\r\n    - Performance improvements or deprecations\r\n    - Best practices for current version\r\n  \n\r\n  **EXTERNAL CONTEXT INCLUSION:** \nInclude in story any critical latest information the developer needs:\r\n    - Specific library versions and why chosen\r\n    - API endpoints with parameters and authentication\r\n    - Recent security patches or considerations\r\n    - Performance optimization techniques\r\n    - Migration considerations if upgrading",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "5",
+      "goal": "Create comprehensive story file",
+      "tag": null,
+      "generative": {
+        "instruction_md": "📝 CREATE ULTIMATE STORY FILE - The developer's master implementation guide!\n\r\n\r\n  \nInitialize from template.md:\r\n  {default_output_file}\n\r\n  story_header\r\n\r\n  \r\n  story_requirements\r\n\r\n  \r\n  \r\n  developer_context_section **DEV AGENT GUARDRAILS:** \r\n  technical_requirements\r\n  architecture_compliance\r\n  library_framework_requirements\r\n  \r\n  file_structure_requirements\r\n  testing_requirements\r\n\r\n  \r\n  \r\n\r\n  \r\n  \r\n\r\n  \r\n  \r\n\r\n  \r\n  project_context_reference\r\n\r\n  \r\n  \r\n  story_completion_status\r\n\r\n  \r\n  \nSet story Status to: \"ready-for-dev\"\n\r\n  \nAdd completion note: \"Ultimate\r\n  context engine analysis completed - comprehensive developer guide created\"",
+        "asks": [],
+        "template_outputs": [
+          {
+            "attrs": {
+              "file": "{default_output_file}"
+            },
+            "text": "story_header"
+          },
+          {
+            "attrs": {
+              "file": "{default_output_file}"
+            },
+            "text": "story_requirements"
+          },
+          {
+            "attrs": {
+              "file": "{default_output_file}"
+            },
+            "text": "developer_context_section"
+          },
+          {
+            "attrs": {
+              "file": "{default_output_file}"
+            },
+            "text": "technical_requirements"
+          },
+          {
+            "attrs": {
+              "file": "{default_output_file}"
+            },
+            "text": "architecture_compliance"
+          },
+          {
+            "attrs": {
+              "file": "{default_output_file}"
+            },
+            "text": "library_framework_requirements"
+          },
+          {
+            "attrs": {
+              "file": "{default_output_file}"
+            },
+            "text": "file_structure_requirements"
+          },
+          {
+            "attrs": {
+              "file": "{default_output_file}"
+            },
+            "text": "testing_requirements"
+          },
+          {
+            "attrs": {
+              "file": "{default_output_file}"
+            },
+            "text": "previous_story_intelligence"
+          },
+          {
+            "attrs": {
+              "file": "{default_output_file}"
+            },
+            "text": "git_intelligence_summary"
+          },
+          {
+            "attrs": {
+              "file": "{default_output_file}"
+            },
+            "text": "latest_tech_information"
+          },
+          {
+            "attrs": {
+              "file": "{default_output_file}"
+            },
+            "text": "project_context_reference"
+          },
+          {
+            "attrs": {
+              "file": "{default_output_file}"
+            },
+            "text": "story_completion_status"
+          }
+        ]
+      },
+      "checks": [
+        {
+          "condition_text": "previous story learnings available",
+          "true": null,
+          "false": null,
+          "raw": "<template-output file=\"{default_output_file}\">previous_story_intelligence</template-output>"
+        },
+        {
+          "condition_text": "git analysis completed",
+          "true": null,
+          "false": null,
+          "raw": "<template-output file=\"{default_output_file}\">git_intelligence_summary</template-output>"
+        },
+        {
+          "condition_text": "web research completed",
+          "true": null,
+          "false": null,
+          "raw": "<template-output file=\"{default_output_file}\">latest_tech_information</template-output>"
+        }
+      ],
+      "control": []
+    },
+    {
+      "n": "6",
+      "goal": "Update sprint status and finalize",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Validate the newly created story file {default_output_file} against `./checklist.md` and apply any required fixes before finalizing\n\r\n  \nSave story document unconditionally\n\r\n\r\n  \r\n  \r\n\r\n  \nReport completion\n\r\n  \n**🎯 ULTIMATE BMad Method STORY CONTEXT CREATED, {user_name}!**\r\n\r\n    **Story Details:**\r\n    - Story ID: {{story_id}}\r\n    - Story Key: {{story_key}}\r\n    - File: {{story_file}}\r\n    - Status: ready-for-dev\r\n\r\n    **Next Steps:**\r\n    1. Review the comprehensive story in {{story_file}}\r\n    2. Run dev agents `dev-story` for optimized implementation\r\n    3. Run `code-review` when complete (auto-marks done)\r\n    4. Optional: If Test Architect module installed, run `/bmad:tea:automate` after `dev-story` to generate guardrail tests\r\n\r\n    **The developer now has everything needed for flawless implementation!**\r\n  \n\r\n  \nRun: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --key workflow.on_complete` — if the resolved value is non-empty, follow it as the final terminal instruction before exiting.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [
+        {
+          "condition_text": "sprint status file exists",
+          "true": null,
+          "false": null,
+          "raw": "<action>Update {{sprint_status}}</action>\n<action>Load the FULL file and read all development_status entries</action>\n<action>Find development_status key matching {{story_key}}</action>\n<action>Verify current status is \"backlog\" (expected previous state)</action>\n<action>Update development_status[{{story_key}}] = \"ready-for-dev\"</action>\n<action>Update last_updated field to current date</action>\n<action>Save file, preserving ALL comments and structure including STATUS DEFINITIONS</action>"
+        }
+      ],
+      "control": []
+    }
+  ],
+  "routing": {
+    "preceded_by": [
+      "bmad-sprint-planning",
+      "bmad-create-story:create"
+    ],
+    "followed_by": [
+      "bmad-create-story:validate",
+      "bmad-dev-story"
+    ],
+    "required": true,
+    "outputs": [
+      "story",
+      "story validation report"
+    ],
+    "output_location": [
+      "implementation_artifacts"
+    ],
+    "actions": [
+      {
+        "action": "create",
+        "phase": "4-implementation",
+        "preceded_by": [
+          "bmad-sprint-planning"
+        ],
+        "followed_by": [
+          "bmad-create-story:validate"
+        ],
+        "required": true,
+        "outputs": "story",
+        "output_location": "implementation_artifacts"
+      },
+      {
+        "action": "validate",
+        "phase": "4-implementation",
+        "preceded_by": [
+          "bmad-create-story:create"
+        ],
+        "followed_by": [
+          "bmad-dev-story"
+        ],
+        "required": false,
+        "outputs": "story validation report",
+        "output_location": "implementation_artifacts"
+      }
+    ]
+  },
+  "templates": [
+    {
+      "name": "template.md",
+      "body_md": "# Story {{epic_num}}.{{story_num}}: {{story_title}}\r\n\r\nStatus: ready-for-dev\r\n\r\n<!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->\r\n\r\n## Story\r\n\r\nAs a {{role}},\r\nI want {{action}},\r\nso that {{benefit}}.\r\n\r\n## Acceptance Criteria\r\n\r\n1. [Add acceptance criteria from epics/PRD]\r\n\r\n## Tasks / Subtasks\r\n\r\n- [ ] Task 1 (AC: #)\r\n  - [ ] Subtask 1.1\r\n- [ ] Task 2 (AC: #)\r\n  - [ ] Subtask 2.1\r\n\r\n## Dev Notes\r\n\r\n- Relevant architecture patterns and constraints\r\n- Source tree components to touch\r\n- Testing standards summary\r\n\r\n### Project Structure Notes\r\n\r\n- Alignment with unified project structure (paths, modules, naming)\r\n- Detected conflicts or variances (with rationale)\r\n\r\n### References\r\n\r\n- Cite all technical details with source paths and sections, e.g. [Source: docs/<file>.md#Section]\r\n\r\n## Dev Agent Record\r\n\r\n### Agent Model Used\r\n\r\n{{agent_model_name_version}}\r\n\r\n### Debug Log References\r\n\r\n### Completion Notes List\r\n\r\n### File List\r\n"
+    }
+  ],
+  "checklists": [
+    {
+      "name": "checklist.md",
+      "body_md": "# 🎯 Story Context Quality Competition Prompt\r\n\r\n## **🔥 CRITICAL MISSION: Outperform and Fix the Original Create-Story LLM**\r\n\r\nYou are an independent quality validator in a **FRESH CONTEXT**. Your mission is to **thoroughly review** a story file that was generated by the create-story workflow and **systematically identify any mistakes, omissions, or disasters** that the original LLM missed.\r\n\r\n**Your purpose is NOT just to validate - it's to FIX and PREVENT LLM developer mistakes, omissions, or disasters!**\r\n\r\n### **🚨 CRITICAL MISTAKES TO PREVENT:**\r\n\r\n- **Reinventing wheels** - Creating duplicate functionality instead of reusing existing\r\n- **Wrong libraries** - Using incorrect frameworks, versions, or dependencies\r\n- **Wrong file locations** - Violating project structure and organization\r\n- **Breaking regressions** - Implementing changes that break existing functionality\r\n- **Ignoring UX** - Not following user experience design requirements\r\n- **Vague implementations** - Creating unclear, ambiguous implementations\r\n- **Lying about completion** - Implementing incorrectly or incompletely\r\n- **Not learning from past work** - Ignoring previous story learnings and patterns\r\n\r\n### **🚨 EXHAUSTIVE ANALYSIS REQUIRED:**\r\n\r\nYou must thoroughly analyze **ALL artifacts** to extract critical context - do NOT be lazy or skim! This is the most important quality control function in the entire development process!\r\n\r\n### **🔬 UTILIZE SUBPROCESSES AND SUBAGENTS:**\r\n\r\nUse research subagents, subprocesses, or parallel processing if available to thoroughly analyze different artifacts **simultaneously and thoroughly**. Leave no stone unturned!\r\n\r\n### **🎯 COMPETITIVE EXCELLENCE:**\r\n\r\nThis is a COMPETITION to create the **ULTIMATE story context** that makes LLM developer mistakes **IMPOSSIBLE**!\r\n\r\n## **🚀 HOW TO USE THIS CHECKLIST**\r\n\r\n### **When Running from Create-Story Workflow:**\r\n\r\n- The workflow framework will automatically:\r\n  - Load this checklist file\r\n  - Load the newly created story file (`{story_file_path}`)\r\n  - Load workflow variables from `./workflow.md`\r\n  - Execute the validation process\r\n\r\n### **When Running in Fresh Context:**\r\n\r\n- User should provide the story file path being reviewed\r\n- Load the story file directly\r\n- Load the corresponding workflow.md for variable context\r\n- Proceed with systematic analysis\r\n\r\n### **Required Inputs:**\r\n\r\n- **Story file**: The story file to review and improve\r\n- **Workflow variables**: From workflow.md (implementation_artifacts, epics_file, etc.)\r\n- **Source documents**: Epics, architecture, etc. (discovered or provided)\r\n- **Validation framework**: The workflow's checklist execution system\r\n\r\n---\r\n\r\n## **🔬 SYSTEMATIC RE-ANALYSIS APPROACH**\r\n\r\nYou will systematically re-do the entire story creation process, but with a critical eye for what the original LLM might have missed:\r\n\r\n### **Step 1: Load and Understand the Target**\r\n\r\n1. **Load the workflow configuration**: `./workflow.md` for variable inclusion\r\n2. **Load the story file**: `{story_file_path}` (provided by user or discovered)\r\n3. **Extract metadata**: epic_num, story_num, story_key, story_title from story file\r\n4. **Resolve all workflow variables**: implementation_artifacts, epics_file, architecture_file, etc.\r\n5. **Understand current status**: What story implementation guidance is currently provided?\r\n\r\n**Note:** If running in fresh context, user should provide the story file path being reviewed. If running from create-story workflow, the validation framework will automatically discover the checklist and story file.\r\n\r\n### **Step 2: Exhaustive Source Document Analysis**\r\n\r\n**🔥 CRITICAL: Treat this like YOU are creating the story from scratch to PREVENT DISASTERS!**\r\n**Discover everything the original LLM missed that could cause developer mistakes, omissions, or disasters!**\r\n\r\n#### **2.1 Epics and Stories Analysis**\r\n\r\n- Load `{epics_file}` (or sharded equivalents)\r\n- Extract **COMPLETE Epic {{epic_num}} context**:\r\n  - Epic objectives and business value\r\n  - ALL stories in this epic (for cross-story context)\r\n  - Our specific story's requirements, acceptance criteria\r\n  - Technical requirements and constraints\r\n  - Cross-story dependencies and prerequisites\r\n\r\n#### **2.2 Architecture Deep-Dive**\r\n\r\n- Load `{architecture_file}` (single or sharded)\r\n- **Systematically scan for ANYTHING relevant to this story:**\r\n  - Technical stack with versions (languages, frameworks, libraries)\r\n  - Code structure and organization patterns\r\n  - API design patterns and contracts\r\n  - Database schemas and relationships\r\n  - Security requirements and patterns\r\n  - Performance requirements and optimization strategies\r\n  - Testing standards and frameworks\r\n  - Deployment and environment patterns\r\n  - Integration patterns and external services\r\n\r\n#### **2.3 Previous Story Intelligence (if applicable)**\r\n\r\n- If `story_num > 1`, load the previous story file\r\n- Extract **actionable intelligence**:\r\n  - Dev notes and learnings\r\n  - Review feedback and corrections needed\r\n  - Files created/modified and their patterns\r\n  - Testing approaches that worked/didn't work\r\n  - Problems encountered and solutions found\r\n  - Code patterns and conventions established\r\n\r\n#### **2.4 Git History Analysis (if available)**\r\n\r\n- Analyze recent commits for patterns:\r\n  - Files created/modified in previous work\r\n  - Code patterns and conventions used\r\n  - Library dependencies added/changed\r\n  - Architecture decisions implemented\r\n  - Testing approaches used\r\n\r\n#### **2.5 Latest Technical Research**\r\n\r\n- Identify any libraries/frameworks mentioned\r\n- Research latest versions and critical information:\r\n  - Breaking changes or security updates\r\n  - Performance improvements or deprecations\r\n  - Best practices for current versions\r\n\r\n### **Step 3: Disaster Prevention Gap Analysis**\r\n\r\n**🚨 CRITICAL: Identify every mistake the original LLM missed that could cause DISASTERS!**\r\n\r\n#### **3.1 Reinvention Prevention Gaps**\r\n\r\n- **Wheel reinvention:** Areas where developer might create duplicate functionality\r\n- **Code reuse opportunities** not identified that could prevent redundant work\r\n- **Existing solutions** not mentioned that developer should extend instead of replace\r\n\r\n#### **3.2 Technical Specification DISASTERS**\r\n\r\n- **Wrong libraries/frameworks:** Missing version requirements that could cause compatibility issues\r\n- **API contract violations:** Missing endpoint specifications that could break integrations\r\n- **Database schema conflicts:** Missing requirements that could corrupt data\r\n- **Security vulnerabilities:** Missing security requirements that could expose the system\r\n- **Performance disasters:** Missing requirements that could cause system failures\r\n\r\n#### **3.3 File Structure DISASTERS**\r\n\r\n- **Wrong file locations:** Missing organization requirements that could break build processes\r\n- **Coding standard violations:** Missing conventions that could create inconsistent codebase\r\n- **Integration pattern breaks:** Missing data flow requirements that could cause system failures\r\n- **Deployment failures:** Missing environment requirements that could prevent deployment\r\n\r\n#### **3.4 Regression DISASTERS**\r\n\r\n- **Breaking changes:** Missing requirements that could break existing functionality\r\n- **Test failures:** Missing test requirements that could allow bugs to reach production\r\n- **UX violations:** Missing user experience requirements that could ruin the product\r\n- **Learning failures:** Missing previous story context that could repeat same mistakes\r\n\r\n#### **3.5 Implementation DISASTERS**\r\n\r\n- **Vague implementations:** Missing details that could lead to incorrect or incomplete work\r\n- **Completion lies:** Missing acceptance criteria that could allow fake implementations\r\n- **Scope creep:** Missing boundaries that could cause unnecessary work\r\n- **Quality failures:** Missing quality requirements that could deliver broken features\r\n\r\n### **Step 4: LLM-Dev-Agent Optimization Analysis**\r\n\r\n**CRITICAL STEP: Optimize story context for LLM developer agent consumption**\r\n\r\n**Analyze current story for LLM optimization issues:**\r\n\r\n- **Verbosity problems:** Excessive detail that wastes tokens without adding value\r\n- **Ambiguity issues:** Vague instructions that could lead to multiple interpretations\r\n- **Context overload:** Too much information not directly relevant to implementation\r\n- **Missing critical signals:** Key requirements buried in verbose text\r\n- **Poor structure:** Information not organized for efficient LLM processing\r\n\r\n**Apply LLM Optimization Principles:**\r\n\r\n- **Clarity over verbosity:** Be precise and direct, eliminate fluff\r\n- **Actionable instructions:** Every sentence should guide implementation\r\n- **Scannable structure:** Use clear headings, bullet points, and emphasis\r\n- **Token efficiency:** Pack maximum information into minimum text\r\n- **Unambiguous language:** Clear requirements with no room for interpretation\r\n\r\n### **Step 5: Improvement Recommendations**\r\n\r\n**For each gap identified, provide specific, actionable improvements:**\r\n\r\n#### **5.1 Critical Misses (Must Fix)**\r\n\r\n- Missing essential technical requirements\r\n- Missing previous story context that could cause errors\r\n- Missing anti-pattern prevention that could lead to duplicate code\r\n- Missing security or performance requirements\r\n\r\n#### **5.2 Enhancement Opportunities (Should Add)**\r\n\r\n- Additional architectural guidance that would help developer\r\n- More detailed technical specifications\r\n- Better code reuse opportunities\r\n- Enhanced testing guidance\r\n\r\n#### **5.3 Optimization Suggestions (Nice to Have)**\r\n\r\n- Performance optimization hints\r\n- Additional context for complex scenarios\r\n- Enhanced debugging or development tips\r\n\r\n#### **5.4 LLM Optimization Improvements**\r\n\r\n- Token-efficient phrasing of existing content\r\n- Clearer structure for LLM processing\r\n- More actionable and direct instructions\r\n- Reduced verbosity while maintaining completeness\r\n\r\n---\r\n\r\n## **🎯 COMPETITION SUCCESS METRICS**\r\n\r\n**You WIN against the original LLM if you identify:**\r\n\r\n### **Category 1: Critical Misses (Blockers)**\r\n\r\n- Essential technical requirements the developer needs but aren't provided\r\n- Previous story learnings that would prevent errors if ignored\r\n- Anti-pattern prevention that would prevent code duplication\r\n- Security or performance requirements that must be followed\r\n\r\n### **Category 2: Enhancement Opportunities**\r\n\r\n- Architecture guidance that would significantly help implementation\r\n- Technical specifications that would prevent wrong approaches\r\n- Code reuse opportunities the developer should know about\r\n- Testing guidance that would improve quality\r\n\r\n### **Category 3: Optimization Insights**\r\n\r\n- Performance or efficiency improvements\r\n- Development workflow optimizations\r\n- Additional context for complex scenarios\r\n\r\n---\r\n\r\n## **📋 INTERACTIVE IMPROVEMENT PROCESS**\r\n\r\nAfter completing your systematic analysis, present your findings to the user interactively:\r\n\r\n### **Step 5: Present Improvement Suggestions**\r\n\r\n```\r\n🎯 **STORY CONTEXT QUALITY REVIEW COMPLETE**\r\n\r\n**Story:** {{story_key}} - {{story_title}}\r\n\r\nI found {{critical_count}} critical issues, {{enhancement_count}} enhancements, and {{optimization_count}} optimizations.\r\n\r\n## **🚨 CRITICAL ISSUES (Must Fix)**\r\n\r\n{{list each critical issue with clear, actionable description}}\r\n\r\n## **⚡ ENHANCEMENT OPPORTUNITIES (Should Add)**\r\n\r\n{{list each enhancement with clear benefit description}}\r\n\r\n## **✨ OPTIMIZATIONS (Nice to Have)**\r\n\r\n{{list each optimization with benefit description}}\r\n\r\n## **🤖 LLM OPTIMIZATION (Token Efficiency & Clarity)**\r\n\r\n{{list each LLM optimization that will improve dev agent performance:\r\n- Reduce verbosity while maintaining completeness\r\n- Improve structure for better LLM processing\r\n- Make instructions more actionable and direct\r\n- Enhance clarity and reduce ambiguity}}\r\n```\r\n\r\n### **Step 6: Interactive User Selection**\r\n\r\nAfter presenting the suggestions, ask the user:\r\n\r\n```\r\n**IMPROVEMENT OPTIONS:**\r\n\r\nWhich improvements would you like me to apply to the story?\r\n\r\n**Select from the numbered list above, or choose:**\r\n- **all** - Apply all suggested improvements\r\n- **critical** - Apply only critical issues\r\n- **select** - I'll choose specific numbers\r\n- **none** - Keep story as-is\r\n- **details** - Show me more details about any suggestion\r\n\r\nYour choice:\r\n```\r\n\r\n### **Step 7: Apply Selected Improvements**\r\n\r\nWhen user accepts improvements:\r\n\r\n- **Load the story file**\r\n- **Apply accepted changes** (make them look natural, as if they were always there)\r\n- **DO NOT reference** the review process, original LLM, or that changes were \"added\" or \"enhanced\"\r\n- **Ensure clean, coherent final story** that reads as if it was created perfectly the first time\r\n\r\n### **Step 8: Confirmation**\r\n\r\nAfter applying changes:\r\n\r\n```\r\n✅ **STORY IMPROVEMENTS APPLIED**\r\n\r\nUpdated {{count}} sections in the story file.\r\n\r\nThe story now includes comprehensive developer guidance to prevent common implementation issues and ensure flawless execution.\r\n\r\n**Next Steps:**\r\n1. Review the updated story\r\n2. Run `dev-story` for implementation\r\n```\r\n\r\n---\r\n\r\n## **💪 COMPETITIVE EXCELLENCE MINDSET**\r\n\r\n**Your goal:** Improve the story file with dev agent needed context that makes flawless implementation inevitable while being optimized for LLM developer agent consumption. Remember the dev agent will ONLY have this file to use.\r\n\r\n**Success Criteria:** The LLM developer agent that processes your improved story will have:\r\n\r\n- ✅ Clear technical requirements they must follow\r\n- ✅ Previous work context they can build upon\r\n- ✅ Anti-pattern prevention to avoid common mistakes\r\n- ✅ Comprehensive guidance for efficient implementation\r\n- ✅ **Optimized content structure** for maximum clarity and minimum token waste\r\n- ✅ **Actionable instructions** with no ambiguity or verbosity\r\n- ✅ **Efficient information density** - maximum guidance in minimum text\r\n\r\n**Every improvement should make it IMPOSSIBLE for the developer to:**\r\n\r\n- Reinvent existing solutions\r\n- Use wrong approaches or libraries\r\n- Create duplicate functionality\r\n- Miss critical requirements\r\n- Make implementation errors\r\n\r\n**LLM Optimization Should Make it IMPOSSIBLE for the developer agent to:**\r\n\r\n- Misinterpret requirements due to ambiguity\r\n- Waste tokens on verbose, non-actionable content\r\n- Struggle to find critical information buried in text\r\n- Get confused by poor structure or organization\r\n- Miss key implementation signals due to inefficient communication\r\n\r\n**Go create the ultimate developer implementation guide! 🚀**\r\n"
+    }
+  ],
+  "unresolved_refs": [
+    "{architecture_content}",
+    "{communication_language}",
+    "{default_output_file}",
+    "{document_output_language}",
+    "{epics_content}",
+    "{implementation_artifacts}",
+    "{planning_artifacts}",
+    "{prd_content}",
+    "{project-root}",
+    "{project-root}/_bmad/bmm/config.yaml",
+    "{project-root}/_bmad/custom/{skill-name}.toml",
+    "{project-root}/_bmad/custom/{skill-name}.user.toml",
+    "{project-root}/_bmad/scripts/resolve_customization.py",
+    "{skill-name}",
+    "{skill-root}",
+    "{sprint_status}",
+    "{user_name}",
+    "{ux_content}",
+    "{workflow.activation_steps_append}",
+    "{workflow.activation_steps_prepend}",
+    "{workflow.persistent_facts}"
+  ],
+  "workflow_critical": []
+}

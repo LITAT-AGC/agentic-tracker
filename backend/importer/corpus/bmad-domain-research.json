@@ -1,0 +1,118 @@
+{
+  "source": {
+    "repo": "github.com/bmad-code-org/BMAD-METHOD",
+    "tag": "v6.8.0",
+    "tag_object_sha": "c3769ab",
+    "commit_sha": "3bcd6c3",
+    "path": "src/bmm-skills/1-analysis/research/bmad-domain-research"
+  },
+  "kind": "workflow",
+  "key": "bmad-domain-research",
+  "phase": "analysis",
+  "frontmatter": {
+    "name": "bmad-domain-research",
+    "description": "Conduct domain and industry research. Use when the user says wants to do domain research for a topic or industry"
+  },
+  "dialect": "prose",
+  "entity": null,
+  "steps": [
+    {
+      "n": "0",
+      "goal": "Domain Research Workflow",
+      "tag": null,
+      "generative": {
+        "instruction_md": "**Goal:** Conduct comprehensive domain/industry research using current web data and verified sources to produce complete research documents with compelling narratives and proper citations.\n\n**Your Role:** You are a domain research facilitator working with an expert partner. This is a collaboration where you bring research methodology and web search capabilities, while your partner brings domain knowledge and research direction.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "1",
+      "goal": "PREREQUISITE",
+      "tag": null,
+      "generative": {
+        "instruction_md": "**⛔ Web search required.** If unavailable, abort and tell the user.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "2",
+      "goal": "QUICK TOPIC DISCOVERY",
+      "tag": null,
+      "generative": {
+        "instruction_md": "\"Welcome {{user_name}}! Let's get started with your **domain/industry research**.\n\n**What domain, industry, or sector do you want to research?**\n\nFor example:\n- 'The healthcare technology industry'\n- 'Sustainable packaging regulations in Europe'\n- 'Construction and building materials sector'\n- 'Or any other domain you have in mind...'\"\n\n### Topic Clarification\n\nBased on the user's topic, briefly clarify:\n1. **Core Domain**: \"What specific aspect of [domain] are you most interested in?\"\n2. **Research Goals**: \"What do you hope to achieve with this research?\"\n3. **Scope**: \"Should we focus broadly or dive deep into specific aspects?\"",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "3",
+      "goal": "ROUTE TO DOMAIN RESEARCH STEPS",
+      "tag": null,
+      "generative": {
+        "instruction_md": "After gathering the topic and goals:\n\n1. Set `research_type = \"domain\"`\n2. Set `research_topic = [discovered topic from discussion]`\n3. Set `research_goals = [discovered goals from discussion]`\n4. Derive `research_topic_slug` from `{{research_topic}}`: lowercase, trim, replace whitespace with `-`, strip path separators (`/`, `\\`), `..`, and any character that is not alphanumeric, `-`, or `_`. Collapse repeated `-` and strip leading/trailing `-`. If the result is empty, use `untitled`.\n5. Create the starter output file: `{planning_artifacts}/research/domain-{{research_topic_slug}}-research-{{date}}.md` with exact copy of the `./research.template.md` contents\n6. Load: `./domain-steps/step-01-init.md` with topic context\n\n**Note:** The discovered topic from the discussion should be passed to the initialization step, so it doesn't need to ask \"What do you want to research?\" again - it can focus on refining the scope for domain research.\n\n**✅ YOU MUST ALWAYS SPEAK OUTPUT In your Agent communication style with the config `{communication_language}`**",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    }
+  ],
+  "routing": {
+    "preceded_by": [],
+    "followed_by": [],
+    "required": false,
+    "outputs": [
+      "research documents"
+    ],
+    "output_location": [
+      "planning_artifacts|project_knowledge"
+    ],
+    "actions": [
+      {
+        "action": null,
+        "phase": "1-analysis",
+        "preceded_by": [],
+        "followed_by": [],
+        "required": false,
+        "outputs": "research documents",
+        "output_location": "planning_artifacts|project_knowledge"
+      }
+    ]
+  },
+  "templates": [
+    {
+      "name": "research.template.md",
+      "body_md": "---\r\nstepsCompleted: []\r\ninputDocuments: []\r\nworkflowType: 'research'\r\nlastStep: 1\r\nresearch_type: '{{research_type}}'\r\nresearch_topic: '{{research_topic}}'\r\nresearch_goals: '{{research_goals}}'\r\nuser_name: '{{user_name}}'\r\ndate: '{{date}}'\r\nweb_research_enabled: true\r\nsource_verification: true\r\n---\r\n\r\n# Research Report: {{research_type}}\r\n\r\n**Date:** {{date}}\r\n**Author:** {{user_name}}\r\n**Research Type:** {{research_type}}\r\n\r\n---\r\n\r\n## Research Overview\r\n\r\n[Research overview and methodology will be appended here]\r\n\r\n---\r\n\r\n<!-- Content will be appended sequentially through research workflow steps -->\r\n"
+    }
+  ],
+  "checklists": [],
+  "unresolved_refs": [
+    "{communication_language}",
+    "{document_output_language}",
+    "{planning_artifacts}",
+    "{project-root}",
+    "{project-root}/_bmad/bmm/config.yaml",
+    "{project-root}/_bmad/custom/{skill-name}.toml",
+    "{project-root}/_bmad/custom/{skill-name}.user.toml",
+    "{project-root}/_bmad/scripts/resolve_customization.py",
+    "{project_knowledge}",
+    "{skill-name}",
+    "{skill-root}",
+    "{user_name}",
+    "{workflow.activation_steps_append}",
+    "{workflow.activation_steps_prepend}",
+    "{workflow.persistent_facts}"
+  ],
+  "dropped_sections": [
+    "Conventions",
+    "On Activation"
+  ]
+}

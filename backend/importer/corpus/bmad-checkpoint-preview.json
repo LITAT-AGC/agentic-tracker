@@ -1,0 +1,94 @@
+{
+  "source": {
+    "repo": "github.com/bmad-code-org/BMAD-METHOD",
+    "tag": "v6.8.0",
+    "tag_object_sha": "c3769ab",
+    "commit_sha": "3bcd6c3",
+    "path": "src/bmm-skills/4-implementation/bmad-checkpoint-preview"
+  },
+  "kind": "workflow",
+  "key": "bmad-checkpoint-preview",
+  "phase": "implementation",
+  "frontmatter": {
+    "name": "bmad-checkpoint-preview",
+    "description": "LLM-assisted human-in-the-loop review. Make sense of a change, focus attention where it matters, test. Use when the user says \"checkpoint\", \"human review\", or \"walk me through this change\"."
+  },
+  "dialect": "prose",
+  "entity": null,
+  "steps": [
+    {
+      "n": "0",
+      "goal": "Checkpoint Review Workflow",
+      "tag": null,
+      "generative": {
+        "instruction_md": "**Goal:** Guide a human through reviewing a change — from purpose and context into details.\n\n**Your Role:** You are assisting the user in reviewing a change.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "1",
+      "goal": "Global Step Rules (apply to every step)",
+      "tag": null,
+      "generative": {
+        "instruction_md": "- **Path:line format** — Every code reference must use CWD-relative `path:line` format (no leading `/`) so it is clickable in IDE-embedded terminals (e.g., `src/auth/middleware.ts:42`).\n- **Front-load then shut up** — Present the entire output for the current step in a single coherent message. Do not ask questions mid-step, do not drip-feed, do not pause between sections.\n- **Language** — Speak in `{communication_language}`. Write any file output in `{document_output_language}`.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "2",
+      "goal": "FIRST STEP",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Read fully and follow `./step-01-orientation.md` to begin.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    }
+  ],
+  "routing": {
+    "preceded_by": [],
+    "followed_by": [],
+    "required": false,
+    "outputs": [],
+    "output_location": [],
+    "actions": [
+      {
+        "action": null,
+        "phase": "4-implementation",
+        "preceded_by": [],
+        "followed_by": [],
+        "required": false,
+        "outputs": null,
+        "output_location": null
+      }
+    ]
+  },
+  "templates": [],
+  "checklists": [],
+  "unresolved_refs": [
+    "{communication_language}",
+    "{document_output_language}",
+    "{project-root}",
+    "{project-root}/_bmad/bmm/config.yaml",
+    "{project-root}/_bmad/custom/{skill-name}.toml",
+    "{project-root}/_bmad/custom/{skill-name}.user.toml",
+    "{project-root}/_bmad/scripts/resolve_customization.py",
+    "{skill-name}",
+    "{skill-root}",
+    "{workflow.activation_steps_append}",
+    "{workflow.activation_steps_prepend}",
+    "{workflow.persistent_facts}"
+  ],
+  "dropped_sections": [
+    "Conventions",
+    "On Activation"
+  ]
+}

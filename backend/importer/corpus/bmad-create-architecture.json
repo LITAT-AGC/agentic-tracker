@@ -1,0 +1,106 @@
+{
+  "source": {
+    "repo": "github.com/bmad-code-org/BMAD-METHOD",
+    "tag": "v6.8.0",
+    "tag_object_sha": "c3769ab",
+    "commit_sha": "3bcd6c3",
+    "path": "src/bmm-skills/3-solutioning/bmad-create-architecture"
+  },
+  "kind": "workflow",
+  "key": "bmad-create-architecture",
+  "phase": "solutioning",
+  "frontmatter": {
+    "name": "bmad-create-architecture",
+    "description": "Create architecture solution design decisions for AI agent consistency. Use when the user says \"lets create architecture\" or \"create technical architecture\" or \"create a solution design\""
+  },
+  "dialect": "prose",
+  "entity": null,
+  "steps": [
+    {
+      "n": "0",
+      "goal": "Architecture Workflow",
+      "tag": null,
+      "generative": {
+        "instruction_md": "**Goal:** Create comprehensive architecture decisions through collaborative step-by-step discovery that ensures AI agents implement consistently.\n\n**Your Role:** You are an architectural facilitator collaborating with a peer. This is a partnership, not a client-vendor relationship. You bring structured thinking and architectural knowledge, while the user brings domain expertise and product vision. Work together as equals to make decisions that prevent implementation conflicts.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "1",
+      "goal": "WORKFLOW ARCHITECTURE",
+      "tag": null,
+      "generative": {
+        "instruction_md": "This uses **micro-file architecture** for disciplined execution:\n\n- Each step is a self-contained file with embedded rules\n- Sequential progression with user control at each step\n- Document state tracked in frontmatter\n- Append-only document building through conversation\n- You NEVER proceed to a step file if the current step file indicates the user must approve and indicate continuation.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "2",
+      "goal": "Execution",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Read fully and follow: `./steps/step-01-init.md` to begin the workflow.\n\n**Note:** Input document discovery and all initialization protocols are handled in step-01-init.md.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    }
+  ],
+  "routing": {
+    "preceded_by": [],
+    "followed_by": [],
+    "required": true,
+    "outputs": [
+      "architecture"
+    ],
+    "output_location": [
+      "planning_artifacts"
+    ],
+    "actions": [
+      {
+        "action": null,
+        "phase": "3-solutioning",
+        "preceded_by": [],
+        "followed_by": [],
+        "required": true,
+        "outputs": "architecture",
+        "output_location": "planning_artifacts"
+      }
+    ]
+  },
+  "templates": [
+    {
+      "name": "architecture-decision-template.md",
+      "body_md": "---\r\nstepsCompleted: []\r\ninputDocuments: []\r\nworkflowType: 'architecture'\r\nproject_name: '{{project_name}}'\r\nuser_name: '{{user_name}}'\r\ndate: '{{date}}'\r\n---\r\n\r\n# Architecture Decision Document\r\n\r\n_This document builds collaboratively through step-by-step discovery. Sections are appended as we work through each architectural decision together._\r\n"
+    }
+  ],
+  "checklists": [],
+  "unresolved_refs": [
+    "{communication_language}",
+    "{document_output_language}",
+    "{planning_artifacts}",
+    "{project-root}",
+    "{project-root}/_bmad/bmm/config.yaml",
+    "{project-root}/_bmad/custom/{skill-name}.toml",
+    "{project-root}/_bmad/custom/{skill-name}.user.toml",
+    "{project-root}/_bmad/scripts/resolve_customization.py",
+    "{project_knowledge}",
+    "{skill-name}",
+    "{skill-root}",
+    "{user_name}",
+    "{workflow.activation_steps_append}",
+    "{workflow.activation_steps_prepend}",
+    "{workflow.persistent_facts}"
+  ],
+  "dropped_sections": [
+    "Conventions",
+    "On Activation"
+  ]
+}

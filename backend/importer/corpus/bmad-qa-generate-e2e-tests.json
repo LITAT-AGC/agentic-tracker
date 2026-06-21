@@ -1,0 +1,170 @@
+{
+  "source": {
+    "repo": "github.com/bmad-code-org/BMAD-METHOD",
+    "tag": "v6.8.0",
+    "tag_object_sha": "c3769ab",
+    "commit_sha": "3bcd6c3",
+    "path": "src/bmm-skills/4-implementation/bmad-qa-generate-e2e-tests"
+  },
+  "kind": "workflow",
+  "key": "bmad-qa-generate-e2e-tests",
+  "phase": "implementation",
+  "frontmatter": {
+    "name": "bmad-qa-generate-e2e-tests",
+    "description": "Generate end to end automated tests for existing features. Use when the user says \"create qa automated tests for [feature]\""
+  },
+  "dialect": "prose",
+  "entity": null,
+  "steps": [
+    {
+      "n": "0",
+      "goal": "QA Generate E2E Tests Workflow",
+      "tag": null,
+      "generative": {
+        "instruction_md": "**Goal:** Generate automated API and E2E tests for implemented code.\n\n**Your Role:** You are a QA automation engineer. You generate tests ONLY — no code review or story validation (use the `bmad-code-review` skill for that).",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "1",
+      "goal": "Execution",
+      "tag": null,
+      "generative": {
+        "instruction_md": "### Step 0: Detect Test Framework\n\nCheck project for existing test framework:\n\n- Look for `package.json` dependencies (playwright, jest, vitest, cypress, etc.)\n- Check for existing test files to understand patterns\n- Use whatever test framework the project already has\n- If no framework exists:\n  - Analyze source code to determine project type (React, Vue, Node API, etc.)\n  - Search online for current recommended test framework for that stack\n  - Suggest the meta framework and use it (or ask user to confirm)\n\n### Step 1: Identify Features\n\nAsk user what to test:\n\n- Specific feature/component name\n- Directory to scan (e.g., `src/components/`)\n- Or auto-discover features in the codebase\n\n### Step 2: Generate API Tests (if applicable)\n\nFor API endpoints/services, generate tests that:\n\n- Test status codes (200, 400, 404, 500)\n- Validate response structure\n- Cover happy path + 1-2 error cases\n- Use project's existing test framework patterns\n\n### Step 3: Generate E2E Tests (if UI exists)\n\nFor UI features, generate tests that:\n\n- Test user workflows end-to-end\n- Use semantic locators (roles, labels, text)\n- Focus on user interactions (clicks, form fills, navigation)\n- Assert visible outcomes\n- Keep tests linear and simple\n- Follow project's existing test patterns\n\n### Step 4: Run Tests\n\nExecute tests to verify they pass (use project's test command).\n\nIf failures occur, fix them immediately.\n\n### Step 5: Create Summary\n\nOutput markdown summary:\n\n```markdown\n# Test Automation Summary",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "2",
+      "goal": "Generated Tests",
+      "tag": null,
+      "generative": {
+        "instruction_md": "### API Tests\n- [x] tests/api/endpoint.spec.ts - Endpoint validation\n\n### E2E Tests\n- [x] tests/e2e/feature.spec.ts - User workflow",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "3",
+      "goal": "Coverage",
+      "tag": null,
+      "generative": {
+        "instruction_md": "- API endpoints: 5/10 covered\n- UI features: 3/8 covered",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "4",
+      "goal": "Next Steps",
+      "tag": null,
+      "generative": {
+        "instruction_md": "- Run tests in CI\n- Add more edge cases as needed\n```",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "5",
+      "goal": "Keep It Simple",
+      "tag": null,
+      "generative": {
+        "instruction_md": "**Do:**\n\n- Use standard test framework APIs\n- Focus on happy path + critical errors\n- Write readable, maintainable tests\n- Run tests to verify they pass\n\n**Avoid:**\n\n- Complex fixture composition\n- Over-engineering\n- Unnecessary abstractions\n\n**For Advanced Features:**\n\nIf the project needs:\n\n- Risk-based test strategy\n- Test design planning\n- Quality gates and NFR assessment\n- Comprehensive coverage analysis\n- Advanced testing patterns and utilities\n\n> **Install Test Architect (TEA) module**: <https://bmad-code-org.github.io/bmad-method-test-architecture-enterprise/>",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "6",
+      "goal": "Output",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Save summary to: `{default_output_file}`\n\n**Done!** Tests generated and verified. Validate against `./checklist.md`.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "7",
+      "goal": "On Complete",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --key workflow.on_complete`\n\nIf the resolved `workflow.on_complete` is non-empty, follow it as the final terminal instruction before exiting.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    }
+  ],
+  "routing": {
+    "preceded_by": [
+      "bmad-dev-story"
+    ],
+    "followed_by": [],
+    "required": false,
+    "outputs": [
+      "test suite"
+    ],
+    "output_location": [
+      "implementation_artifacts"
+    ],
+    "actions": [
+      {
+        "action": null,
+        "phase": "4-implementation",
+        "preceded_by": [
+          "bmad-dev-story"
+        ],
+        "followed_by": [],
+        "required": false,
+        "outputs": "test suite",
+        "output_location": "implementation_artifacts"
+      }
+    ]
+  },
+  "templates": [],
+  "checklists": [
+    {
+      "name": "checklist.md",
+      "body_md": "# QA Automate - Validation Checklist\r\n\r\n## Test Generation\r\n\r\n- [ ] API tests generated (if applicable)\r\n- [ ] E2E tests generated (if UI exists)\r\n- [ ] Tests use standard test framework APIs\r\n- [ ] Tests cover happy path\r\n- [ ] Tests cover 1-2 critical error cases\r\n\r\n## Test Quality\r\n\r\n- [ ] All generated tests run successfully\r\n- [ ] Tests use proper locators (semantic, accessible)\r\n- [ ] Tests have clear descriptions\r\n- [ ] No hardcoded waits or sleeps\r\n- [ ] Tests are independent (no order dependency)\r\n\r\n## Output\r\n\r\n- [ ] Test summary created\r\n- [ ] Tests saved to appropriate directories\r\n- [ ] Summary includes coverage metrics\r\n\r\n## Validation\r\n\r\nRun the tests using your project's test command.\r\n\r\n**Expected**: All tests pass ✅\r\n\r\n---\r\n\r\n**Need more comprehensive testing?** Install [Test Architect (TEA)](https://bmad-code-org.github.io/bmad-method-test-architecture-enterprise/) for advanced workflows.\r\n"
+    }
+  ],
+  "unresolved_refs": [
+    "{communication_language}",
+    "{default_output_file}",
+    "{implementation_artifacts}",
+    "{project-root}",
+    "{project-root}/_bmad/bmm/config.yaml",
+    "{project-root}/_bmad/custom/{skill-name}.toml",
+    "{project-root}/_bmad/custom/{skill-name}.user.toml",
+    "{project-root}/_bmad/scripts/resolve_customization.py",
+    "{skill-name}",
+    "{skill-root}",
+    "{user_name}",
+    "{workflow.activation_steps_append}",
+    "{workflow.activation_steps_prepend}",
+    "{workflow.persistent_facts}"
+  ],
+  "dropped_sections": [
+    "Conventions",
+    "On Activation",
+    "Paths"
+  ]
+}

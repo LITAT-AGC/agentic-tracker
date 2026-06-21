@@ -1,0 +1,110 @@
+{
+  "source": {
+    "repo": "github.com/bmad-code-org/BMAD-METHOD",
+    "tag": "v6.8.0",
+    "tag_object_sha": "c3769ab",
+    "commit_sha": "3bcd6c3",
+    "path": "src/bmm-skills/3-solutioning/bmad-create-epics-and-stories"
+  },
+  "kind": "workflow",
+  "key": "bmad-create-epics-and-stories",
+  "phase": "solutioning",
+  "frontmatter": {
+    "name": "bmad-create-epics-and-stories",
+    "description": "Break requirements into epics and user stories. Use when the user says \"create the epics and stories list\""
+  },
+  "dialect": "prose",
+  "entity": null,
+  "steps": [
+    {
+      "n": "0",
+      "goal": "Create Epics and Stories",
+      "tag": null,
+      "generative": {
+        "instruction_md": "**Goal:** Transform PRD requirements and Architecture decisions into comprehensive stories organized by user value, creating detailed, actionable stories with complete acceptance criteria for the Developer agent.\n\n**Your Role:** In addition to your name, communication_style, and persona, you are also a product strategist and technical specifications writer collaborating with a product owner. This is a partnership, not a client-vendor relationship. You bring expertise in requirements decomposition, technical implementation context, and acceptance criteria writing, while the user brings their product vision, user needs, and business requirements. Work together as equals.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "1",
+      "goal": "WORKFLOW ARCHITECTURE",
+      "tag": null,
+      "generative": {
+        "instruction_md": "This uses **step-file architecture** for disciplined execution:\n\n### Core Principles\n\n- **Micro-file Design**: Each step toward the overall goal is a self-contained instruction file; adhere to one file at a time, as directed\n- **Just-In-Time Loading**: Only 1 current step file will be loaded and followed to completion - never load future step files until told to do so\n- **Sequential Enforcement**: Sequence within the step files must be completed in order, no skipping or optimization allowed\n- **State Tracking**: Document progress in output file frontmatter using `stepsCompleted` array when a workflow produces a document\n- **Append-Only Building**: Build documents by appending content as directed to the output file\n\n### Step Processing Rules\n\n1. **READ COMPLETELY**: Always read the entire step file before taking any action\n2. **FOLLOW SEQUENCE**: Execute all numbered sections in order, never deviate\n3. **WAIT FOR INPUT**: If a menu is presented, halt and wait for user selection\n4. **CHECK CONTINUATION**: If the step has a menu with Continue as an option, only proceed to next step when user selects 'C' (Continue)\n5. **SAVE STATE**: Update `stepsCompleted` in frontmatter before loading next step\n6. **LOAD NEXT**: When directed, read fully and follow the next step file\n\n### Critical Rules (NO EXCEPTIONS)\n\n- 🛑 **NEVER** load multiple step files simultaneously\n- 📖 **ALWAYS** read entire step file before execution\n- 🚫 **NEVER** skip steps or optimize the sequence\n- 💾 **ALWAYS** update frontmatter of output files when writing the final output for a specific step\n- 🎯 **ALWAYS** follow the exact instructions in the step file\n- ⏸️ **ALWAYS** halt at menus and wait for user input\n- 📋 **NEVER** create mental todo lists from future steps",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "2",
+      "goal": "Execution",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Read fully and follow: `./steps/step-01-validate-prerequisites.md` to begin the workflow.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    }
+  ],
+  "routing": {
+    "preceded_by": [
+      "bmad-create-architecture"
+    ],
+    "followed_by": [],
+    "required": true,
+    "outputs": [
+      "epics and stories"
+    ],
+    "output_location": [
+      "planning_artifacts"
+    ],
+    "actions": [
+      {
+        "action": null,
+        "phase": "3-solutioning",
+        "preceded_by": [
+          "bmad-create-architecture"
+        ],
+        "followed_by": [],
+        "required": true,
+        "outputs": "epics and stories",
+        "output_location": "planning_artifacts"
+      }
+    ]
+  },
+  "templates": [
+    {
+      "name": "templates/epics-template.md",
+      "body_md": "---\r\nstepsCompleted: []\r\ninputDocuments: []\r\n---\r\n\r\n# {{project_name}} - Epic Breakdown\r\n\r\n## Overview\r\n\r\nThis document provides the complete epic and story breakdown for {{project_name}}, decomposing the requirements from the PRD, UX Design if it exists, and Architecture requirements into implementable stories.\r\n\r\n## Requirements Inventory\r\n\r\n### Functional Requirements\r\n\r\n{{fr_list}}\r\n\r\n### NonFunctional Requirements\r\n\r\n{{nfr_list}}\r\n\r\n### Additional Requirements\r\n\r\n{{additional_requirements}}\r\n\r\n### UX Design Requirements\r\n\r\n{{ux_design_requirements}}\r\n\r\n### FR Coverage Map\r\n\r\n{{requirements_coverage_map}}\r\n\r\n## Epic List\r\n\r\n{{epics_list}}\r\n\r\n<!-- Repeat for each epic in epics_list (N = 1, 2, 3...) -->\r\n\r\n## Epic {{N}}: {{epic_title_N}}\r\n\r\n{{epic_goal_N}}\r\n\r\n<!-- Repeat for each story (M = 1, 2, 3...) within epic N -->\r\n\r\n### Story {{N}}.{{M}}: {{story_title_N_M}}\r\n\r\nAs a {{user_type}},\r\nI want {{capability}},\r\nSo that {{value_benefit}}.\r\n\r\n**Acceptance Criteria:**\r\n\r\n<!-- for each AC on this story -->\r\n\r\n**Given** {{precondition}}\r\n**When** {{action}}\r\n**Then** {{expected_outcome}}\r\n**And** {{additional_criteria}}\r\n\r\n<!-- End story repeat -->\r\n"
+    }
+  ],
+  "checklists": [],
+  "unresolved_refs": [
+    "{communication_language}",
+    "{document_output_language}",
+    "{planning_artifacts}",
+    "{project-root}",
+    "{project-root}/_bmad/bmm/config.yaml",
+    "{project-root}/_bmad/custom/{skill-name}.toml",
+    "{project-root}/_bmad/custom/{skill-name}.user.toml",
+    "{project-root}/_bmad/scripts/resolve_customization.py",
+    "{project_knowledge}",
+    "{skill-name}",
+    "{skill-root}",
+    "{user_name}",
+    "{workflow.activation_steps_append}",
+    "{workflow.activation_steps_prepend}",
+    "{workflow.persistent_facts}"
+  ],
+  "dropped_sections": [
+    "Conventions",
+    "On Activation"
+  ]
+}

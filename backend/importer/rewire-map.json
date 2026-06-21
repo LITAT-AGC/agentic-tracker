@@ -1,0 +1,492 @@
+{
+  "source": "bmad:v6.8.0",
+  "generated_by": "backend/scripts/rewire-bmad.js",
+  "note": "Mapa declarativo BMAD→APTS. Aplicado en serve-time por el goteo (F3). El ADN almacenado queda verbatim.",
+  "distinct_refs": 79,
+  "by_class": {
+    "state": 18,
+    "server_resolved": 26,
+    "persona_field": 6,
+    "artifact_content": 7,
+    "config": 7,
+    "artifact_location": 11,
+    "template": 4
+  },
+  "uncovered": [],
+  "map": {
+    "{YYYY-MM-DD}": {
+      "class": "state",
+      "apts": "{apts:state}",
+      "note": "estado runtime / puntero / file-model BMAD; servidor-autoritativo en APTS (DB)",
+      "count": 1
+    },
+    "{agent.activation_steps_append}": {
+      "class": "server_resolved",
+      "apts": "",
+      "note": "pasos de activación / persistent_facts / hooks de finalize; el goteo APTS no los necesita",
+      "count": 6
+    },
+    "{agent.activation_steps_prepend}": {
+      "class": "server_resolved",
+      "apts": "",
+      "note": "pasos de activación / persistent_facts / hooks de finalize; el goteo APTS no los necesita",
+      "count": 6
+    },
+    "{agent.communication_style}": {
+      "class": "persona_field",
+      "apts": "{apts:entity.communication_style}",
+      "note": "campo de persona; servido desde la tabla entities",
+      "count": 6
+    },
+    "{agent.icon}": {
+      "class": "persona_field",
+      "apts": "{apts:entity.icon}",
+      "note": "campo de persona; servido desde la tabla entities",
+      "count": 6
+    },
+    "{agent.identity}": {
+      "class": "persona_field",
+      "apts": "{apts:entity.identity}",
+      "note": "campo de persona; servido desde la tabla entities",
+      "count": 6
+    },
+    "{agent.menu}": {
+      "class": "persona_field",
+      "apts": "{apts:entity.menu}",
+      "note": "campo de persona; servido desde la tabla entities",
+      "count": 6
+    },
+    "{agent.persistent_facts}": {
+      "class": "server_resolved",
+      "apts": "",
+      "note": "pasos de activación / persistent_facts / hooks de finalize; el goteo APTS no los necesita",
+      "count": 6
+    },
+    "{agent.principles}": {
+      "class": "persona_field",
+      "apts": "{apts:entity.principles}",
+      "note": "campo de persona; servido desde la tabla entities",
+      "count": 6
+    },
+    "{agent.role}": {
+      "class": "persona_field",
+      "apts": "{apts:entity.role}",
+      "note": "campo de persona; servido desde la tabla entities",
+      "count": 6
+    },
+    "{agent_roster}": {
+      "class": "artifact_content",
+      "apts": "{apts:artifact_content}",
+      "note": "contenido de artefacto previo; recuperación semántica APTS por doc_type",
+      "count": 1
+    },
+    "{architecture_content}": {
+      "class": "artifact_content",
+      "apts": "{apts:artifact_content}",
+      "note": "contenido de artefacto previo; recuperación semántica APTS por doc_type",
+      "count": 2
+    },
+    "{case_file}": {
+      "class": "state",
+      "apts": "{apts:state}",
+      "note": "estado runtime / puntero / file-model BMAD; servidor-autoritativo en APTS (DB)",
+      "count": 1
+    },
+    "{communication_language}": {
+      "class": "config",
+      "apts": "{apts:config.communication_language}",
+      "note": "valor de config de proyecto/sesión APTS",
+      "count": 30
+    },
+    "{concept_type}": {
+      "class": "state",
+      "apts": "{apts:state}",
+      "note": "estado runtime / puntero / file-model BMAD; servidor-autoritativo en APTS (DB)",
+      "count": 1
+    },
+    "{date}": {
+      "class": "config",
+      "apts": "{apts:config.date}",
+      "note": "valor de config de proyecto/sesión APTS",
+      "count": 6
+    },
+    "{default_output_file}": {
+      "class": "state",
+      "apts": "{apts:state}",
+      "note": "estado runtime / puntero / file-model BMAD; servidor-autoritativo en APTS (DB)",
+      "count": 3
+    },
+    "{doc_workspace}": {
+      "class": "artifact_location",
+      "apts": "{apts:artifacts}",
+      "note": "ubicación de artefactos de archivo BMAD; APTS usa su store de artefactos (sin FS)",
+      "count": 3
+    },
+    "{document_output_language}": {
+      "class": "config",
+      "apts": "{apts:config.document_output_language}",
+      "note": "valor de config de proyecto/sesión APTS",
+      "count": 26
+    },
+    "{document_project_content}": {
+      "class": "artifact_content",
+      "apts": "{apts:artifact_content}",
+      "note": "contenido de artefacto previo; recuperación semántica APTS por doc_type",
+      "count": 1
+    },
+    "{epics_content}": {
+      "class": "artifact_content",
+      "apts": "{apts:artifact_content}",
+      "note": "contenido de artefacto previo; recuperación semántica APTS por doc_type",
+      "count": 2
+    },
+    "{epics_location}": {
+      "class": "artifact_location",
+      "apts": "{apts:artifacts}",
+      "note": "ubicación de artefactos de archivo BMAD; APTS usa su store de artefactos (sin FS)",
+      "count": 1
+    },
+    "{epics_pattern}": {
+      "class": "state",
+      "apts": "{apts:state}",
+      "note": "estado runtime / puntero / file-model BMAD; servidor-autoritativo en APTS (DB)",
+      "count": 1
+    },
+    "{epic}": {
+      "class": "state",
+      "apts": "{apts:state}",
+      "note": "estado runtime / puntero / file-model BMAD; servidor-autoritativo en APTS (DB)",
+      "count": 1
+    },
+    "{file}": {
+      "class": "state",
+      "apts": "{apts:state}",
+      "note": "estado runtime / puntero / file-model BMAD; servidor-autoritativo en APTS (DB)",
+      "count": 1
+    },
+    "{implementation_artifacts}": {
+      "class": "artifact_location",
+      "apts": "{apts:artifacts}",
+      "note": "ubicación de artefactos de archivo BMAD; APTS usa su store de artefactos (sin FS)",
+      "count": 9
+    },
+    "{num}": {
+      "class": "state",
+      "apts": "{apts:state}",
+      "note": "estado runtime / puntero / file-model BMAD; servidor-autoritativo en APTS (DB)",
+      "count": 1
+    },
+    "{output_folder}": {
+      "class": "artifact_location",
+      "apts": "{apts:artifacts}",
+      "note": "ubicación de artefactos de archivo BMAD; APTS usa su store de artefactos (sin FS)",
+      "count": 1
+    },
+    "{path.to.token}": {
+      "class": "server_resolved",
+      "apts": "",
+      "note": "sistema de tracking externo de BMAD; APTS es el motor de método servidor-autoritativo",
+      "count": 1
+    },
+    "{planning_artifacts}": {
+      "class": "artifact_location",
+      "apts": "{apts:artifacts}",
+      "note": "ubicación de artefactos de archivo BMAD; APTS usa su store de artefactos (sin FS)",
+      "count": 22
+    },
+    "{prd_content}": {
+      "class": "artifact_content",
+      "apts": "{apts:artifact_content}",
+      "note": "contenido de artefacto previo; recuperación semántica APTS por doc_type",
+      "count": 2
+    },
+    "{project-root}": {
+      "class": "server_resolved",
+      "apts": "",
+      "note": "raíz de skill/proyecto BMAD; sin equivalente (APTS no instala skills en FS)",
+      "count": 31
+    },
+    "{project-root}/_bmad/_config/bmad-help.csv": {
+      "class": "server_resolved",
+      "apts": "",
+      "note": "config.yaml / custom toml / _config de BMAD; APTS guarda config en DB",
+      "count": 1
+    },
+    "{project-root}/_bmad/bmm/config.yaml": {
+      "class": "server_resolved",
+      "apts": "",
+      "note": "config.yaml / custom toml / _config de BMAD; APTS guarda config en DB",
+      "count": 29
+    },
+    "{project-root}/_bmad/custom/{skill-name}.toml": {
+      "class": "server_resolved",
+      "apts": "",
+      "note": "config.yaml / custom toml / _config de BMAD; APTS guarda config en DB",
+      "count": 25
+    },
+    "{project-root}/_bmad/custom/{skill-name}.user.toml": {
+      "class": "server_resolved",
+      "apts": "",
+      "note": "config.yaml / custom toml / _config de BMAD; APTS guarda config en DB",
+      "count": 25
+    },
+    "{project-root}/_bmad/scripts/resolve_config.py": {
+      "class": "server_resolved",
+      "apts": "",
+      "note": "script de resolución de customización BMAD; APTS resuelve la entity/workflow en servidor",
+      "count": 2
+    },
+    "{project-root}/_bmad/scripts/resolve_customization.py": {
+      "class": "server_resolved",
+      "apts": "",
+      "note": "script de resolución de customización BMAD; APTS resuelve la entity/workflow en servidor",
+      "count": 29
+    },
+    "{project_context}": {
+      "class": "artifact_content",
+      "apts": "{apts:artifact_content}",
+      "note": "contenido de artefacto previo; recuperación semántica APTS por doc_type",
+      "count": 3
+    },
+    "{project_key}": {
+      "class": "state",
+      "apts": "{apts:state}",
+      "note": "estado runtime / puntero / file-model BMAD; servidor-autoritativo en APTS (DB)",
+      "count": 1
+    },
+    "{project_knowledge}": {
+      "class": "config",
+      "apts": "{apts:config.project_knowledge}",
+      "note": "valor de config de proyecto/sesión APTS",
+      "count": 17
+    },
+    "{project_name}": {
+      "class": "config",
+      "apts": "{apts:config.project_name}",
+      "note": "valor de config de proyecto/sesión APTS",
+      "count": 5
+    },
+    "{skill-name}": {
+      "class": "server_resolved",
+      "apts": "",
+      "note": "raíz de skill/proyecto BMAD; sin equivalente (APTS no instala skills en FS)",
+      "count": 25
+    },
+    "{skill-root}": {
+      "class": "server_resolved",
+      "apts": "",
+      "note": "raíz de skill/proyecto BMAD; sin equivalente (APTS no instala skills en FS)",
+      "count": 29
+    },
+    "{slug}": {
+      "class": "state",
+      "apts": "{apts:state}",
+      "note": "estado runtime / puntero / file-model BMAD; servidor-autoritativo en APTS (DB)",
+      "count": 3
+    },
+    "{sprint_status_file}": {
+      "class": "state",
+      "apts": "{apts:state}",
+      "note": "estado runtime / puntero / file-model BMAD; servidor-autoritativo en APTS (DB)",
+      "count": 2
+    },
+    "{sprint_status}": {
+      "class": "state",
+      "apts": "{apts:state}",
+      "note": "estado runtime / puntero / file-model BMAD; servidor-autoritativo en APTS (DB)",
+      "count": 2
+    },
+    "{status_file}": {
+      "class": "state",
+      "apts": "{apts:state}",
+      "note": "estado runtime / puntero / file-model BMAD; servidor-autoritativo en APTS (DB)",
+      "count": 1
+    },
+    "{story-key}": {
+      "class": "state",
+      "apts": "{apts:state}",
+      "note": "estado runtime / puntero / file-model BMAD; servidor-autoritativo en APTS (DB)",
+      "count": 1
+    },
+    "{story_location_absolute}": {
+      "class": "state",
+      "apts": "{apts:state}",
+      "note": "estado runtime / puntero / file-model BMAD; servidor-autoritativo en APTS (DB)",
+      "count": 1
+    },
+    "{story_location}": {
+      "class": "artifact_location",
+      "apts": "{apts:artifacts}",
+      "note": "ubicación de artefactos de archivo BMAD; APTS usa su store de artefactos (sin FS)",
+      "count": 1
+    },
+    "{story}": {
+      "class": "state",
+      "apts": "{apts:state}",
+      "note": "estado runtime / puntero / file-model BMAD; servidor-autoritativo en APTS (DB)",
+      "count": 1
+    },
+    "{title}": {
+      "class": "state",
+      "apts": "{apts:state}",
+      "note": "estado runtime / puntero / file-model BMAD; servidor-autoritativo en APTS (DB)",
+      "count": 1
+    },
+    "{tracking_system}": {
+      "class": "server_resolved",
+      "apts": "",
+      "note": "sistema de tracking externo de BMAD; APTS es el motor de método servidor-autoritativo",
+      "count": 1
+    },
+    "{user_name}": {
+      "class": "config",
+      "apts": "{apts:config.user_name}",
+      "note": "valor de config de proyecto/sesión APTS",
+      "count": 28
+    },
+    "{user_skill_level}": {
+      "class": "config",
+      "apts": "{apts:config.user_skill_level}",
+      "note": "valor de config de proyecto/sesión APTS",
+      "count": 4
+    },
+    "{ux_content}": {
+      "class": "artifact_content",
+      "apts": "{apts:artifact_content}",
+      "note": "contenido de artefacto previo; recuperación semántica APTS por doc_type",
+      "count": 1
+    },
+    "{workflow.activation_steps_append}": {
+      "class": "server_resolved",
+      "apts": "",
+      "note": "pasos de activación / persistent_facts / hooks de finalize; el goteo APTS no los necesita",
+      "count": 23
+    },
+    "{workflow.activation_steps_prepend}": {
+      "class": "server_resolved",
+      "apts": "",
+      "note": "pasos de activación / persistent_facts / hooks de finalize; el goteo APTS no los necesita",
+      "count": 23
+    },
+    "{workflow.brief_output_path}": {
+      "class": "artifact_location",
+      "apts": "{apts:artifacts}",
+      "note": "ubicación de artefactos de archivo BMAD; APTS usa su store de artefactos (sin FS)",
+      "count": 1
+    },
+    "{workflow.brief_template}": {
+      "class": "template",
+      "apts": "{apts:template}",
+      "note": "template del artefacto; servido desde workflow_steps.template_slice / IR.templates",
+      "count": 1
+    },
+    "{workflow.case_file_filename}": {
+      "class": "state",
+      "apts": "{apts:state}",
+      "note": "estado runtime / puntero / file-model BMAD; servidor-autoritativo en APTS (DB)",
+      "count": 1
+    },
+    "{workflow.case_file_subdir}": {
+      "class": "artifact_location",
+      "apts": "{apts:artifacts}",
+      "note": "ubicación de artefactos de archivo BMAD; APTS usa su store de artefactos (sin FS)",
+      "count": 1
+    },
+    "{workflow.case_file_template}": {
+      "class": "template",
+      "apts": "{apts:template}",
+      "note": "template del artefacto; servido desde workflow_steps.template_slice / IR.templates",
+      "count": 1
+    },
+    "{workflow.creative_tools}": {
+      "class": "server_resolved",
+      "apts": "",
+      "note": "superficie de customización BMAD ({workflow.*}/{agent.*}); resuelta en servidor APTS",
+      "count": 1
+    },
+    "{workflow.design_handoffs}": {
+      "class": "server_resolved",
+      "apts": "",
+      "note": "superficie de customización BMAD ({workflow.*}/{agent.*}); resuelta en servidor APTS",
+      "count": 1
+    },
+    "{workflow.design_md_examples}": {
+      "class": "server_resolved",
+      "apts": "",
+      "note": "superficie de customización BMAD ({workflow.*}/{agent.*}); resuelta en servidor APTS",
+      "count": 1
+    },
+    "{workflow.doc_standards}": {
+      "class": "server_resolved",
+      "apts": "",
+      "note": "pasos de activación / persistent_facts / hooks de finalize; el goteo APTS no los necesita",
+      "count": 3
+    },
+    "{workflow.experience_md_examples}": {
+      "class": "server_resolved",
+      "apts": "",
+      "note": "superficie de customización BMAD ({workflow.*}/{agent.*}); resuelta en servidor APTS",
+      "count": 1
+    },
+    "{workflow.external_handoffs}": {
+      "class": "server_resolved",
+      "apts": "",
+      "note": "pasos de activación / persistent_facts / hooks de finalize; el goteo APTS no los necesita",
+      "count": 3
+    },
+    "{workflow.external_sources}": {
+      "class": "server_resolved",
+      "apts": "",
+      "note": "pasos de activación / persistent_facts / hooks de finalize; el goteo APTS no los necesita",
+      "count": 3
+    },
+    "{workflow.finalize_reviewers}": {
+      "class": "server_resolved",
+      "apts": "",
+      "note": "pasos de activación / persistent_facts / hooks de finalize; el goteo APTS no los necesita",
+      "count": 2
+    },
+    "{workflow.on_complete}": {
+      "class": "server_resolved",
+      "apts": "",
+      "note": "pasos de activación / persistent_facts / hooks de finalize; el goteo APTS no los necesita",
+      "count": 4
+    },
+    "{workflow.persistent_facts}": {
+      "class": "server_resolved",
+      "apts": "",
+      "note": "pasos de activación / persistent_facts / hooks de finalize; el goteo APTS no los necesita",
+      "count": 23
+    },
+    "{workflow.prd_output_path}": {
+      "class": "artifact_location",
+      "apts": "{apts:artifacts}",
+      "note": "ubicación de artefactos de archivo BMAD; APTS usa su store de artefactos (sin FS)",
+      "count": 1
+    },
+    "{workflow.prd_template}": {
+      "class": "template",
+      "apts": "{apts:template}",
+      "note": "template del artefacto; servido desde workflow_steps.template_slice / IR.templates",
+      "count": 1
+    },
+    "{workflow.run_folder_pattern}": {
+      "class": "artifact_location",
+      "apts": "{apts:artifacts}",
+      "note": "ubicación de artefactos de archivo BMAD; APTS usa su store de artefactos (sin FS)",
+      "count": 3
+    },
+    "{workflow.ux_output_path}": {
+      "class": "artifact_location",
+      "apts": "{apts:artifacts}",
+      "note": "ubicación de artefactos de archivo BMAD; APTS usa su store de artefactos (sin FS)",
+      "count": 1
+    },
+    "{workflow.validation_checklist_template}": {
+      "class": "template",
+      "apts": "{apts:template}",
+      "note": "template del artefacto; servido desde workflow_steps.template_slice / IR.templates",
+      "count": 1
+    }
+  }
+}

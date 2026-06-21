@@ -1,0 +1,181 @@
+{
+  "source": {
+    "repo": "github.com/bmad-code-org/BMAD-METHOD",
+    "tag": "v6.8.0",
+    "tag_object_sha": "c3769ab",
+    "commit_sha": "3bcd6c3",
+    "path": "src/bmm-skills/2-plan-workflows/bmad-ux"
+  },
+  "kind": "workflow",
+  "key": "bmad-ux",
+  "phase": "planning",
+  "frontmatter": {
+    "name": "bmad-ux",
+    "description": "Plan UX patterns and design specifications. Use when the user says \"lets create UX design\" or \"create UX specifications\" or \"help me plan the UX\""
+  },
+  "dialect": "prose",
+  "entity": null,
+  "steps": [
+    {
+      "n": "1",
+      "goal": "Overview",
+      "tag": null,
+      "generative": {
+        "instruction_md": "You are a master UX facilitator. **Elicit and capture** the user's vision, never impose yours. Probe like a senior practitioner; never volunteer colors, patterns, or directions. Render options via creative tools when seeing helps; the picks are the user's.\n\nProduce two peer contracts: **`DESIGN.md`** (visual identity per the [Google Labs spec](https://github.com/google-labs-code/design.md) — owns *how it looks*) and **`EXPERIENCE.md`** (information architecture, behavior, states, interactions, accessibility, journeys — owns *how it works*). EXPERIENCE.md cross-references DESIGN.md tokens by name using `{path.to.token}` syntax. Both spines win on conflict with any mock, wireframe, or import.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "2",
+      "goal": "The DESIGN.md spine",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Per the [Google Labs spec](https://github.com/google-labs-code/design.md). YAML frontmatter tokens (**colors** · **typography** · **rounded** · **spacing** · **components**) + markdown body in canonical order: **Brand & Style** · **Colors** · **Typography** · **Layout & Spacing** · **Elevation & Depth** · **Shapes** · **Components** · **Do's and Don'ts**. Sections omittable; order locked when present. Spec rules: `references/design-md-spec.md`. Shape: read every entry in `{workflow.design_md_examples}`.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "3",
+      "goal": "The EXPERIENCE.md spine",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Always: **Foundation** (form-factor, UI system when present; DESIGN.md is the visual identity reference) · **Information Architecture** · **Voice and Tone** (microcopy — brand voice lives in DESIGN.md.Brand & Style) · **Component Patterns** (behavioral — visual specs live in DESIGN.md.Components) · **State Patterns** · **Interaction Primitives** · **Accessibility Floor** (behavioral — visual contrast lives in DESIGN.md) · **Key Flows** (named-protagonist journeys with a climax beat).\n\nWhen triggered: **Inspiration & Anti-patterns** · **Responsive & Platform**.\n\nInvent sections for product-specific concerns. Shape: read every entry in `{workflow.experience_md_examples}`.\n\nWhen Foundation names a UI system (shadcn, MUI, native UIKit, Compose, internal design system), both spines inherit from it; DESIGN.md tokens reference or extend the system's defaults, EXPERIENCE.md specifies only the behavioral delta.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "4",
+      "goal": "Sources",
+      "tag": null,
+      "generative": {
+        "instruction_md": "UX may lead, follow, or stand alone. Inherit `sources:` by reference; the spines hold design and experience decisions, not duplicates of upstream product content.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "5",
+      "goal": "Modes",
+      "tag": null,
+      "generative": {
+        "instruction_md": "**Create.** Bind `{doc_workspace}` to `{workflow.ux_output_path}/{workflow.run_folder_pattern}/`. Create `.working/`, `imports/`, `.decision-log.md`, `DESIGN.md` (frontmatter only), and `EXPERIENCE.md` (frontmatter only). Run Discovery → Finalize.\n\n**Update.** Read spines + log + sources. Create the log if missing — this update is entry one. Surface conflicts with prior decisions. Run Finalize.\n\n**Validate.** See `references/validate.md`.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "6",
+      "goal": "Discovery",
+      "tag": null,
+      "generative": {
+        "instruction_md": "**Capture; do not author.** The spines are distilled at Finalize. Decisions → `.decision-log.md` (canonical). Creative-tool artifacts → `.working/`. User-supplied visuals (Figma, sketches, brand decks, image folders) → `imports/`, one log line per item. Spines win on conflict.\n\n**Source scan.** Glob `{planning_artifacts}/` for candidate input paths; surface paths only — never read content in the parent. User confirms which apply or adds others; subagent-extracts on confirm.\n\nBrain dump first — even when the user opens with paragraphs (that's intake). Subagent-extract big docs. One \"anything else?\" probe. Stakes: hobby / internal / consumer / regulated.\n\nWorking mode:\n\n- **Fast path** — batch gaps, draft both spines with `[ASSUMPTION]` tags, skip creative tools.\n- **Coaching path** — walk decisions; creative tools woven in.\n- **Design handoff** — assemble captured Discovery into a producer-shaped prompt; user runs the external tool and saves outputs to `{doc_workspace}` in whatever format the tool emits. Producer registry: `{workflow.design_handoffs}` (default: Google Stitch). EXPERIENCE.md can follow via Update mode when ready.\n\nCreative tools — scan `{workflow.creative_tools}`, invoke when seeing helps. Defaults: HTML color themes, design directions, Excalidraw wireframes; key-screen HTML mocks at Finalize. See `references/creative-tools.md`. Research subagents on demand; consult `{workflow.external_sources}` when entries match.\n\nConcern scan — name what the UX carries: accessibility, platforms, brand, regulated language, motion, i18n, dark mode, offline, content density, input modalities, notifications. Open list; drives invented sections.\n\nJourneys: user narrates a real session with a named protagonist (Mary, mom of three, kids asleep — not \"the user\"); structure into numbered steps with a climax beat. Mirror source-spec names verbatim when defined.\n\nForm-factor: mobile / web / desktop / multi-surface must resolve before IA closes. Named-protagonist journeys often derive it (Pary on iPad implies an iPad surface; Skeeter on Android adds a multi-surface need); when journeys don't disambiguate, probe.\n\nSurface closure: stated needs become screens through journeys. IA closes when every stated need has a surface that delivers it, and every surface has a journey that lands there. When closure fails, probe — never invent the missing piece.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "7",
+      "goal": "Reviewer Gate",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Used by Validate and Finalize. **Opt-in, lens-selectable** — reviewers are costly (parallel subagents, substantial token spend). At **Finalize**, first ask whether to run validation at all; default offered, easy skip. At **Validate** intent the user already opted in — skip that question. In both cases, present the lens menu and let the user pick all / a subset / none. Menu: rubric walker (`references/validate.md`) + `{workflow.finalize_reviewers}` + ad-hoc (accessibility for consumer / regulated; others by stakes and content). Picked lenses dispatch as parallel subagents → each writes `review-{slug}.md`, returns a compact summary. If any lens ran, run the synthesis pipeline in `references/validate.md`.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "8",
+      "goal": "Finalize",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Outcomes, in order:\n\n- **Spines distilled.** Subagent reads `.decision-log.md`, `.working/`, `imports/`, sources; produces `DESIGN.md` against `## The DESIGN.md spine` + `{workflow.design_md_examples}` and `EXPERIENCE.md` against `## The EXPERIENCE.md spine` + `{workflow.experience_md_examples}`. Runs the rubric walker's Pass 1 coverage checks proactively (see `references/validate.md`). Surface gaps; never invent.\n- **Inputs reconciled.** Subagent per user-supplied input → `reconcile-{slug}.md`. Surface dropped qualitative ideas.\n- **Reviewer Gate offered.** Ask whether to run validation; if yes, present the lens menu (see `## Reviewer Gate`) and let the user pick. If any lens ran, resolve findings before polish; otherwise proceed.\n- **Open items triaged.** Open Questions, `[ASSUMPTION]`, `[NOTE FOR UX]`. Phase-blockers one at a time; non-blockers → log.\n- **Key-screen mocks rendered.** Key-screens tool → `.working/` for surfaces where layout drives behavior or anchors visual language.\n- **Mock coverage confirmed.** Walk every IA surface; classify *mocked* vs *spine-only*. Ask: *\"These will be built from spine tables alone — any need a visual reference?\"* Render more if named; log spine-only choices.\n- **Layout extracted, artifacts promoted.** Distill subagent re-reads each `.working/` and `imports/` artifact; lifts visual decisions into DESIGN.md and behavioral decisions into EXPERIENCE.md. Promote `.working/` keepers to `mockups/` (HTML) or `wireframes/` (Excalidraw); imports stay. Inline relative links at relevant spine sections; state spines-win-on-conflict once.\n- **Polished, handed off, closed.** Apply `{workflow.doc_standards}` in order. Execute `{workflow.external_handoffs}`; surface URLs. Set both files' `status: final`, `updated: {date}`. Log finalization. Share paths. Common next: `bmad-create-architecture`, `bmad-create-epics-and-stories`, `bmad-dev-story`. Run `{workflow.on_complete}`.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    }
+  ],
+  "routing": {
+    "preceded_by": [
+      "bmad-prd"
+    ],
+    "followed_by": [],
+    "required": false,
+    "outputs": [
+      "ux design"
+    ],
+    "output_location": [
+      "planning_artifacts"
+    ],
+    "actions": [
+      {
+        "action": null,
+        "phase": "2-planning",
+        "preceded_by": [
+          "bmad-prd"
+        ],
+        "followed_by": [],
+        "required": false,
+        "outputs": "ux design",
+        "output_location": "planning_artifacts"
+      }
+    ]
+  },
+  "templates": [
+    {
+      "name": "assets/validation-report-template.html",
+      "body_md": "<!DOCTYPE html>\r\n<!--\r\n  UX Design Validation Report — skeleton template.\r\n\r\n  This file is a starter the synthesis pass fills in directly. There is no\r\n  substitution engine. The LLM:\r\n    1. Reads {doc_workspace}/review-rubric.md and every review-{slug}.md from\r\n       additional reviewers.\r\n    2. Copies this skeleton.\r\n    3. Replaces the placeholder content (everything between TEMPLATE markers)\r\n       with the consolidated review, preserving the structure and CSS.\r\n    4. Writes the result to {doc_workspace}/validation-report.html.\r\n    5. Writes a markdown twin to {doc_workspace}/validation-report.md.\r\n\r\n  Visual rules the LLM must preserve:\r\n    - The container width, the color tokens, the typography.\r\n    - One dimension = one collapsible <section class=\"dimension\">.\r\n    - Verdict pill uses the verdict-* class matching its judgment.\r\n    - Severity badge uses the badge-sev-* class matching its level.\r\n    - Each extra reviewer (accessibility, adversarial, etc.) gets its own\r\n      collapsible section below the rubric dimensions.\r\n    - The footer always shows the artifact paths and timestamp.\r\n-->\r\n<html lang=\"en\">\r\n<head>\r\n<meta charset=\"utf-8\">\r\n<title>UX Design Validation: TEMPLATE_UX_SPEC_NAME</title>\r\n<style>\r\n  :root {\r\n    --bg: #fafaf9;\r\n    --surface: #ffffff;\r\n    --border: #e7e5e4;\r\n    --text: #1c1917;\r\n    --muted: #78716c;\r\n\r\n    --verdict-strong: #16a34a;\r\n    --verdict-adequate: #65a30d;\r\n    --verdict-thin: #d97706;\r\n    --verdict-broken: #dc2626;\r\n\r\n    --sev-low: #64748b;\r\n    --sev-medium: #ca8a04;\r\n    --sev-high: #ea580c;\r\n    --sev-critical: #dc2626;\r\n  }\r\n  * { box-sizing: border-box; }\r\n  html, body { margin: 0; padding: 0; }\r\n  body {\r\n    font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Inter, system-ui, sans-serif;\r\n    background: var(--bg);\r\n    color: var(--text);\r\n    line-height: 1.6;\r\n    font-size: 15px;\r\n  }\r\n  .container { max-width: 960px; margin: 0 auto; padding: 32px 24px 64px; }\r\n\r\n  header.report-header {\r\n    display: flex;\r\n    align-items: flex-start;\r\n    justify-content: space-between;\r\n    gap: 24px;\r\n    padding-bottom: 16px;\r\n    border-bottom: 1px solid var(--border);\r\n    margin-bottom: 24px;\r\n  }\r\n  .title h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }\r\n  .title .subtitle { color: var(--muted); font-size: 13px; margin-top: 4px; font-family: ui-monospace, \"SF Mono\", Menlo, monospace; }\r\n\r\n  .synthesis {\r\n    background: var(--surface);\r\n    border: 1px solid var(--border);\r\n    border-left: 3px solid var(--muted);\r\n    border-radius: 8px;\r\n    padding: 18px 22px;\r\n    margin-bottom: 24px;\r\n    font-size: 15.5px;\r\n  }\r\n  .synthesis p { margin: 0 0 10px; }\r\n  .synthesis p:last-child { margin-bottom: 0; }\r\n\r\n  .dimension-summary {\r\n    display: grid;\r\n    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));\r\n    gap: 10px;\r\n    margin-bottom: 24px;\r\n  }\r\n  .dim-card {\r\n    background: var(--surface);\r\n    border: 1px solid var(--border);\r\n    border-radius: 8px;\r\n    padding: 12px 14px;\r\n  }\r\n  .dim-card .dim-name { font-size: 13px; color: var(--muted); margin-bottom: 6px; }\r\n  .dim-card .dim-verdict { font-size: 14px; font-weight: 600; }\r\n\r\n  section.dimension, section.reviewer-section { margin-bottom: 14px; }\r\n  section.dimension details, section.reviewer-section details {\r\n    background: var(--surface);\r\n    border: 1px solid var(--border);\r\n    border-radius: 8px;\r\n    overflow: hidden;\r\n  }\r\n  section summary {\r\n    padding: 14px 20px;\r\n    cursor: pointer;\r\n    user-select: none;\r\n    list-style: none;\r\n    display: flex;\r\n    align-items: center;\r\n    gap: 12px;\r\n  }\r\n  section summary::-webkit-details-marker { display: none; }\r\n  section summary::before {\r\n    content: \"▸\";\r\n    display: inline-block;\r\n    color: var(--muted);\r\n    transition: transform 0.15s ease;\r\n  }\r\n  section details[open] summary::before { transform: rotate(90deg); }\r\n  section summary h2 {\r\n    display: inline;\r\n    margin: 0;\r\n    font-size: 16px;\r\n    font-weight: 600;\r\n    letter-spacing: -0.005em;\r\n    flex: 1;\r\n  }\r\n  .verdict-pill {\r\n    font-size: 11px;\r\n    padding: 3px 10px;\r\n    border-radius: 999px;\r\n    font-weight: 600;\r\n    text-transform: uppercase;\r\n    letter-spacing: 0.04em;\r\n    color: white;\r\n  }\r\n  .verdict-strong { background: var(--verdict-strong); }\r\n  .verdict-adequate { background: var(--verdict-adequate); }\r\n  .verdict-thin { background: var(--verdict-thin); }\r\n  .verdict-broken { background: var(--verdict-broken); }\r\n\r\n  .dim-body { padding: 4px 20px 18px; }\r\n  .dim-judgment { color: var(--text); font-size: 14.5px; }\r\n  .dim-judgment p { margin: 0 0 10px; }\r\n\r\n  .findings-list { padding: 0 20px 4px; }\r\n  article.finding {\r\n    padding: 14px 0;\r\n    border-top: 1px solid var(--border);\r\n  }\r\n  article.finding:first-child { border-top: none; }\r\n  article.finding header {\r\n    display: flex;\r\n    align-items: center;\r\n    gap: 10px;\r\n    flex-wrap: wrap;\r\n    margin-bottom: 6px;\r\n  }\r\n  .badge {\r\n    font-size: 10.5px;\r\n    padding: 3px 8px;\r\n    border-radius: 4px;\r\n    font-weight: 600;\r\n    text-transform: uppercase;\r\n    letter-spacing: 0.04em;\r\n    line-height: 1.4;\r\n  }\r\n  .badge-sev-low { background: rgba(100, 116, 139, 0.12); color: var(--sev-low); }\r\n  .badge-sev-medium { background: rgba(202, 138, 4, 0.14); color: var(--sev-medium); }\r\n  .badge-sev-high { background: rgba(234, 88, 12, 0.14); color: var(--sev-high); }\r\n  .badge-sev-critical { background: rgba(220, 38, 38, 0.14); color: var(--sev-critical); }\r\n  .finding-title { margin: 0; font-size: 15px; font-weight: 500; flex: 1; min-width: 200px; }\r\n  .finding-location { font-family: ui-monospace, \"SF Mono\", Menlo, monospace; font-size: 12.5px; color: var(--muted); }\r\n  .finding-note, .finding-fix { margin-top: 6px; font-size: 14px; }\r\n  .finding-fix strong { color: var(--muted); font-weight: 500; }\r\n\r\n  .reviewer-source {\r\n    font-size: 12px;\r\n    color: var(--muted);\r\n    font-family: ui-monospace, \"SF Mono\", Menlo, monospace;\r\n  }\r\n\r\n  .mechanical {\r\n    background: var(--surface);\r\n    border: 1px solid var(--border);\r\n    border-radius: 8px;\r\n    padding: 16px 20px;\r\n    margin-top: 24px;\r\n    font-size: 14px;\r\n  }\r\n  .mechanical h3 { margin: 0 0 10px; font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }\r\n  .mechanical ul { margin: 0; padding-left: 20px; }\r\n  .mechanical li { margin-bottom: 4px; color: var(--text); }\r\n\r\n  footer.report-footer {\r\n    margin-top: 40px;\r\n    padding-top: 16px;\r\n    border-top: 1px solid var(--border);\r\n    font-size: 12px;\r\n    color: var(--muted);\r\n    font-family: ui-monospace, \"SF Mono\", Menlo, monospace;\r\n  }\r\n  footer .meta { display: flex; gap: 24px; flex-wrap: wrap; }\r\n</style>\r\n</head>\r\n<body>\r\n  <div class=\"container\">\r\n\r\n    <!-- TEMPLATE: header. Fill ux spec name and ux spec path. No overall grade —\r\n         per-category verdicts and severity counts below carry the picture. -->\r\n    <header class=\"report-header\">\r\n      <div class=\"title\">\r\n        <h1>TEMPLATE_UX_SPEC_NAME — UX Design Validation Report</h1>\r\n        <div class=\"subtitle\">TEMPLATE_UX_SPEC_PATH</div>\r\n      </div>\r\n    </header>\r\n\r\n    <!-- TEMPLATE: overall synthesis paragraphs. Lift directly from\r\n         review-rubric.md \"Overall verdict\" section; expand if extra reviewers\r\n         (accessibility, adversarial, etc.) materially shift the picture.\r\n         Wrap each paragraph in <p>. -->\r\n    <div class=\"synthesis\">\r\n      <p>TEMPLATE_SYNTHESIS_PARAGRAPH</p>\r\n    </div>\r\n\r\n    <!-- TEMPLATE: dimension summary cards. One per rubric category, in this\r\n         canonical order (from references/validate.md):\r\n           1. Flow coverage\r\n           2. Token completeness\r\n           3. Component coverage\r\n           4. State coverage\r\n           5. Visual reference coverage\r\n           6. Bloat & overspecification\r\n           7. Inheritance discipline\r\n           8. Shape fit\r\n         The dim-verdict text uses one of: strong | adequate | thin | broken. -->\r\n    <div class=\"dimension-summary\">\r\n      <div class=\"dim-card\">\r\n        <div class=\"dim-name\">TEMPLATE_CATEGORY_NAME</div>\r\n        <div class=\"dim-verdict\" style=\"color: var(--verdict-TEMPLATE_VERDICT)\">TEMPLATE_VERDICT_TEXT</div>\r\n      </div>\r\n      <!-- repeat for each of the eight rubric categories -->\r\n    </div>\r\n\r\n    <!-- TEMPLATE: one section per rubric category, same canonical order as the\r\n         summary cards above. Skip a category entirely if the rubric review\r\n         marked it n/a for this UX spec. Open the section by default if verdict\r\n         is thin or broken. -->\r\n    <section class=\"dimension\">\r\n      <details open>\r\n        <summary>\r\n          <h2>TEMPLATE_CATEGORY_NAME</h2>\r\n          <span class=\"verdict-pill verdict-TEMPLATE_VERDICT\">TEMPLATE_VERDICT_TEXT</span>\r\n        </summary>\r\n        <div class=\"dim-body\">\r\n          <div class=\"dim-judgment\">\r\n            <p>TEMPLATE_DIMENSION_JUDGMENT</p>\r\n          </div>\r\n        </div>\r\n        <div class=\"findings-list\">\r\n          <!-- TEMPLATE: zero or more findings -->\r\n          <article class=\"finding\">\r\n            <header>\r\n              <span class=\"badge badge-sev-TEMPLATE_SEVERITY\">TEMPLATE_SEVERITY</span>\r\n              <h3 class=\"finding-title\">TEMPLATE_FINDING_TITLE</h3>\r\n              <span class=\"finding-location\">TEMPLATE_LOCATION</span>\r\n            </header>\r\n            <div class=\"finding-note\">TEMPLATE_FINDING_NOTE</div>\r\n            <div class=\"finding-fix\"><strong>Fix:</strong> TEMPLATE_SUGGESTED_FIX</div>\r\n          </article>\r\n        </div>\r\n      </details>\r\n    </section>\r\n\r\n    <!-- TEMPLATE: one section per extra reviewer that ran (accessibility,\r\n         adversarial, brand-conformance, etc.). Skip this block entirely if\r\n         only the rubric walker ran. -->\r\n    <section class=\"reviewer-section\">\r\n      <details>\r\n        <summary>\r\n          <h2>Accessibility review</h2>\r\n          <span class=\"reviewer-source\">TEMPLATE_REVIEWER_SOURCE_FILE</span>\r\n        </summary>\r\n        <div class=\"dim-body\">\r\n          <div class=\"dim-judgment\">\r\n            <p>TEMPLATE_REVIEWER_PREAMBLE</p>\r\n          </div>\r\n        </div>\r\n        <div class=\"findings-list\">\r\n          <article class=\"finding\">\r\n            <header>\r\n              <span class=\"badge badge-sev-TEMPLATE_SEVERITY\">TEMPLATE_SEVERITY</span>\r\n              <h3 class=\"finding-title\">TEMPLATE_FINDING_TITLE</h3>\r\n              <span class=\"finding-location\">TEMPLATE_LOCATION</span>\r\n            </header>\r\n            <div class=\"finding-note\">TEMPLATE_FINDING_NOTE</div>\r\n            <div class=\"finding-fix\"><strong>Fix:</strong> TEMPLATE_SUGGESTED_FIX</div>\r\n          </article>\r\n        </div>\r\n      </details>\r\n    </section>\r\n\r\n    <!-- TEMPLATE: mechanical notes — short, bulleted. Skip if there are none. -->\r\n    <div class=\"mechanical\">\r\n      <h3>Mechanical notes</h3>\r\n      <ul>\r\n        <li>TEMPLATE_MECHANICAL_NOTE</li>\r\n      </ul>\r\n    </div>\r\n\r\n    <footer class=\"report-footer\">\r\n      <div class=\"meta\">\r\n        <span>Rubric: TEMPLATE_RUBRIC_PATH</span>\r\n        <span>Generated: TEMPLATE_TIMESTAMP</span>\r\n      </div>\r\n    </footer>\r\n  </div>\r\n</body>\r\n</html>\r\n"
+    }
+  ],
+  "checklists": [],
+  "unresolved_refs": [
+    "{communication_language}",
+    "{date}",
+    "{doc_workspace}",
+    "{document_output_language}",
+    "{path.to.token}",
+    "{planning_artifacts}",
+    "{project-root}",
+    "{project-root}/_bmad/bmm/config.yaml",
+    "{project-root}/_bmad/scripts/resolve_customization.py",
+    "{project_name}",
+    "{skill-root}",
+    "{slug}",
+    "{user_name}",
+    "{workflow.activation_steps_append}",
+    "{workflow.activation_steps_prepend}",
+    "{workflow.creative_tools}",
+    "{workflow.design_handoffs}",
+    "{workflow.design_md_examples}",
+    "{workflow.doc_standards}",
+    "{workflow.experience_md_examples}",
+    "{workflow.external_handoffs}",
+    "{workflow.external_sources}",
+    "{workflow.finalize_reviewers}",
+    "{workflow.on_complete}",
+    "{workflow.persistent_facts}",
+    "{workflow.run_folder_pattern}",
+    "{workflow.ux_output_path}"
+  ],
+  "dropped_sections": [
+    "On Activation"
+  ]
+}

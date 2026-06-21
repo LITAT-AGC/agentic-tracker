@@ -1,0 +1,147 @@
+{
+  "source": {
+    "repo": "github.com/bmad-code-org/BMAD-METHOD",
+    "tag": "v6.8.0",
+    "tag_object_sha": "c3769ab",
+    "commit_sha": "3bcd6c3",
+    "path": "src/bmm-skills/4-implementation/bmad-sprint-planning"
+  },
+  "kind": "workflow",
+  "key": "bmad-sprint-planning",
+  "phase": "implementation",
+  "frontmatter": {
+    "name": "bmad-sprint-planning",
+    "description": "Generate sprint status tracking from epics. Use when the user says \"run sprint planning\" or \"generate sprint plan\""
+  },
+  "dialect": "structured",
+  "entity": null,
+  "steps": [
+    {
+      "n": "1",
+      "goal": "Parse epic files and extract all work items",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Load {project_context} for project-wide patterns and conventions (if exists)\n\r\n\nCommunicate in {communication_language} with {user_name}\n\r\n\nLook for all files matching `{epics_pattern}` in {epics_location}\n\r\n\nCould be a single `epics.md` file or multiple `epic-1.md`, `epic-2.md` files\n\r\n\r\n\nFor each epic file found, extract:\n\r\n\r\n- Epic numbers from headers like `## Epic 1:` or `## Epic 2:`\r\n- Story IDs and titles from patterns like `### Story 1.1: User Authentication`\r\n- Convert story format from `Epic.Story: Title` to kebab-case key: `epic-story-title`\r\n\r\n**Story ID Conversion Rules:**\r\n\r\n- Original: `### Story 1.1: User Authentication`\r\n- Replace period with dash: `1-1`\r\n- Convert title to kebab-case: `user-authentication`\r\n- Final key: `1-1-user-authentication`\r\n\r\n\nBuild complete inventory of all epics and stories from all epic files",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "2",
+      "goal": "Build sprint status structure",
+      "tag": null,
+      "generative": {
+        "instruction_md": "For each epic found, create entries in this order:\n\r\n\r\n1. **Epic entry** - Key: `epic-{num}`, Default status: `backlog`\r\n2. **Story entries** - Key: `{epic}-{story}-{title}`, Default status: `backlog`\r\n3. **Retrospective entry** - Key: `epic-{num}-retrospective`, Default status: `optional`\r\n\r\n**Example structure:**\r\n\r\n```yaml\r\ndevelopment_status:\r\n  epic-1: backlog\r\n  1-1-user-authentication: backlog\r\n  1-2-account-management: backlog\r\n  epic-1-retrospective: optional\r\n```",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "3",
+      "goal": "Apply intelligent status detection",
+      "tag": null,
+      "generative": {
+        "instruction_md": "For each story, detect current status by checking files:\n\r\n\r\n**Story file detection:**\r\n\r\n- Check: `{story_location_absolute}/{story-key}.md` (e.g., `stories/1-1-user-authentication.md`)\r\n- If exists → upgrade status to at least `ready-for-dev`\r\n\r\n**Preservation rule:**\r\n\r\n- If existing `{status_file}` exists and has more advanced status, preserve it\r\n- Never downgrade status (e.g., don't change `done` to `ready-for-dev`)\r\n\r\n**Status Flow Reference:**\r\n\r\n- Epic: `backlog` → `in-progress` → `done`\r\n- Story: `backlog` → `ready-for-dev` → `in-progress` → `review` → `done`\r\n- Retrospective: `optional` ↔ `done`",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "4",
+      "goal": "Generate sprint status file",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Create or update {status_file} with:\n\r\n\r\n**File Structure:**\r\n\r\n```yaml\r\n# generated: {date}\r\n# last_updated: {date}\r\n# project: {project_name}\r\n# project_key: {project_key}\r\n# tracking_system: {tracking_system}\r\n# story_location: {story_location}\r\n\r\n# STATUS DEFINITIONS:\r\n# ==================\r\n# Epic Status:\r\n#   - backlog: Epic not yet started\r\n#   - in-progress: Epic actively being worked on\r\n#   - done: All stories in epic completed\r\n#\r\n# Epic Status Transitions:\r\n#   - backlog → in-progress: Automatically when first story is created (via create-story)\r\n#   - in-progress → done: Manually when all stories reach 'done' status\r\n#\r\n# Story Status:\r\n#   - backlog: Story only exists in epic file\r\n#   - ready-for-dev: Story file created in stories folder\r\n#   - in-progress: Developer actively working on implementation\r\n#   - review: Ready for code review (via Dev's code-review workflow)\r\n#   - done: Story completed\r\n#\r\n# Retrospective Status:\r\n#   - optional: Can be completed but not required\r\n#   - done: Retrospective has been completed\r\n#\r\n# WORKFLOW NOTES:\r\n# ===============\r\n# - Epic transitions to 'in-progress' automatically when first story is created\r\n# - Stories can be worked in parallel if team capacity allows\r\n# - Developer typically creates next story after previous one is 'done' to incorporate learnings\r\n# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)\r\n\r\ngenerated: { date }\r\nlast_updated: { date }\r\nproject: { project_name }\r\nproject_key: { project_key }\r\ntracking_system: { tracking_system }\r\nstory_location: { story_location }\r\n\r\ndevelopment_status:\r\n  # All epics, stories, and retrospectives in order\r\n```\r\n\r\n\nWrite the complete sprint status YAML to {status_file}\n\r\n\nCRITICAL: Metadata appears TWICE - once as comments (#) for documentation, once as YAML key:value fields for parsing\n\r\n\nEnsure all items are ordered: epic, its stories, its retrospective, next epic...",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "5",
+      "goal": "Validate and report",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Perform validation checks:\n\r\n\r\n- [ ] Every epic in epic files appears in {status_file}\r\n- [ ] Every story in epic files appears in {status_file}\r\n- [ ] Every epic has a corresponding retrospective entry\r\n- [ ] No items in {status_file} that don't exist in epic files\r\n- [ ] All status values are legal (match state machine definitions)\r\n- [ ] File is valid YAML syntax\r\n\r\n\nCount totals:\n\r\n\r\n- Total epics: {{epic_count}}\r\n- Total stories: {{story_count}}\r\n- Epics in-progress: {{in_progress_count}}\r\n- Stories done: {{done_count}}\r\n\r\n\nDisplay completion summary to {user_name} in {communication_language}:\n\r\n\r\n**Sprint Status Generated Successfully**\r\n\r\n- **File Location:** {status_file}\r\n- **Total Epics:** {{epic_count}}\r\n- **Total Stories:** {{story_count}}\r\n- **Epics In Progress:** {{in_progress_count}}\r\n- **Stories Completed:** {{done_count}}\r\n\r\n**Next Steps:**\r\n\r\n1. Review the generated {status_file}\r\n2. Use this file to track development progress\r\n3. Agents will update statuses as they work\r\n4. Re-run this workflow to refresh auto-detected statuses\r\n\r\n\nRun: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --key workflow.on_complete` — if the resolved value is non-empty, follow it as the final terminal instruction before exiting.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    }
+  ],
+  "routing": {
+    "preceded_by": [],
+    "followed_by": [],
+    "required": true,
+    "outputs": [
+      "sprint status"
+    ],
+    "output_location": [
+      "implementation_artifacts"
+    ],
+    "actions": [
+      {
+        "action": null,
+        "phase": "4-implementation",
+        "preceded_by": [],
+        "followed_by": [],
+        "required": true,
+        "outputs": "sprint status",
+        "output_location": "implementation_artifacts"
+      }
+    ]
+  },
+  "templates": [
+    {
+      "name": "sprint-status-template.yaml",
+      "body_md": "# Sprint Status Template\r\n# This is an EXAMPLE showing the expected format\r\n# The actual file will be generated with all epics/stories from your epic files\r\n\r\n# generated: {date}\r\n# project: {project_name}\r\n# project_key: {project_key}\r\n# tracking_system: {tracking_system}\r\n# story_location: {story_location}\r\n\r\n# STATUS DEFINITIONS:\r\n# ==================\r\n# Epic Status:\r\n#   - backlog: Epic not yet started\r\n#   - in-progress: Epic actively being worked on\r\n#   - done: All stories in epic completed\r\n#\r\n# Story Status:\r\n#   - backlog: Story only exists in epic file\r\n#   - ready-for-dev: Story file created, ready for development\r\n#   - in-progress: Developer actively working on implementation\r\n#   - review: Implementation complete, ready for review\r\n#   - done: Story completed\r\n#\r\n# Retrospective Status:\r\n#   - optional: Can be completed but not required\r\n#   - done: Retrospective has been completed\r\n#\r\n# WORKFLOW NOTES:\r\n# ===============\r\n# - Mark epic as 'in-progress' when starting work on its first story\r\n# - Developer typically creates next story ONLY after previous one is 'done' to incorporate learnings\r\n# - Dev moves story to 'review', then Dev runs code-review (fresh context, ideally different LLM)\r\n\r\n# EXAMPLE STRUCTURE (your actual epics/stories will replace these):\r\n\r\ngenerated: 05-06-2-2025 21:30\r\nlast_updated: 05-06-2-2025 21:30\r\nproject: My Awesome Project\r\nproject_key: NOKEY\r\ntracking_system: file-system\r\nstory_location: \"{story_location}\"\r\n\r\ndevelopment_status:\r\n  epic-1: backlog\r\n  1-1-user-authentication: done\r\n  1-2-account-management: ready-for-dev\r\n  1-3-plant-data-model: backlog\r\n  1-4-add-plant-manual: backlog\r\n  epic-1-retrospective: optional\r\n\r\n  epic-2: backlog\r\n  2-1-personality-system: backlog\r\n  2-2-chat-interface: backlog\r\n  2-3-llm-integration: backlog\r\n  epic-2-retrospective: optional\r\n"
+    }
+  ],
+  "checklists": [
+    {
+      "name": "checklist.md",
+      "body_md": "# Sprint Planning Validation Checklist\r\n\r\n## Core Validation\r\n\r\n### Complete Coverage Check\r\n\r\n- [ ] Every epic found in epic\\*.md files appears in sprint-status.yaml\r\n- [ ] Every story found in epic\\*.md files appears in sprint-status.yaml\r\n- [ ] Every epic has a corresponding retrospective entry\r\n- [ ] No items in sprint-status.yaml that don't exist in epic files\r\n\r\n### Parsing Verification\r\n\r\nCompare epic files against generated sprint-status.yaml:\r\n\r\n```\r\nEpic Files Contains:                Sprint Status Contains:\r\n✓ Epic 1                            ✓ epic-1: [status]\r\n  ✓ Story 1.1: User Auth              ✓ 1-1-user-auth: [status]\r\n  ✓ Story 1.2: Account Mgmt           ✓ 1-2-account-mgmt: [status]\r\n  ✓ Story 1.3: Plant Naming           ✓ 1-3-plant-naming: [status]\r\n                                      ✓ epic-1-retrospective: [status]\r\n✓ Epic 2                            ✓ epic-2: [status]\r\n  ✓ Story 2.1: Personality Model      ✓ 2-1-personality-model: [status]\r\n  ✓ Story 2.2: Chat Interface         ✓ 2-2-chat-interface: [status]\r\n                                      ✓ epic-2-retrospective: [status]\r\n```\r\n\r\n### Final Check\r\n\r\n- [ ] Total count of epics matches\r\n- [ ] Total count of stories matches\r\n- [ ] All items are in the expected order (epic, stories, retrospective)\r\n"
+    }
+  ],
+  "unresolved_refs": [
+    "{communication_language}",
+    "{date}",
+    "{document_output_language}",
+    "{epics_location}",
+    "{epics_pattern}",
+    "{epic}",
+    "{implementation_artifacts}",
+    "{num}",
+    "{planning_artifacts}",
+    "{project-root}",
+    "{project-root}/_bmad/bmm/config.yaml",
+    "{project-root}/_bmad/custom/{skill-name}.toml",
+    "{project-root}/_bmad/custom/{skill-name}.user.toml",
+    "{project-root}/_bmad/scripts/resolve_customization.py",
+    "{project_context}",
+    "{project_key}",
+    "{project_name}",
+    "{skill-name}",
+    "{skill-root}",
+    "{status_file}",
+    "{story-key}",
+    "{story_location_absolute}",
+    "{story_location}",
+    "{story}",
+    "{title}",
+    "{tracking_system}",
+    "{user_name}",
+    "{workflow.activation_steps_append}",
+    "{workflow.activation_steps_prepend}",
+    "{workflow.persistent_facts}"
+  ],
+  "workflow_critical": []
+}

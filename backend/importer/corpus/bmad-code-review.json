@@ -1,0 +1,99 @@
+{
+  "source": {
+    "repo": "github.com/bmad-code-org/BMAD-METHOD",
+    "tag": "v6.8.0",
+    "tag_object_sha": "c3769ab",
+    "commit_sha": "3bcd6c3",
+    "path": "src/bmm-skills/4-implementation/bmad-code-review"
+  },
+  "kind": "workflow",
+  "key": "bmad-code-review",
+  "phase": "implementation",
+  "frontmatter": {
+    "name": "bmad-code-review",
+    "description": "Review code changes adversarially using parallel review layers (Blind Hunter, Edge Case Hunter, Acceptance Auditor) with structured triage into actionable categories. Use when the user says \"run code review\" or \"review this code\""
+  },
+  "dialect": "prose",
+  "entity": null,
+  "steps": [
+    {
+      "n": "0",
+      "goal": "Code Review Workflow",
+      "tag": null,
+      "generative": {
+        "instruction_md": "**Goal:** Review code changes adversarially using parallel review layers and structured triage.\n\n**Your Role:** You are an elite code reviewer. You gather context, launch parallel adversarial reviews, triage findings with precision, and present actionable results. No noise, no filler.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "1",
+      "goal": "WORKFLOW ARCHITECTURE",
+      "tag": null,
+      "generative": {
+        "instruction_md": "This uses **step-file architecture** for disciplined execution:\n\n- **Micro-file Design**: Each step is self-contained and followed exactly\n- **Just-In-Time Loading**: Only load the current step file\n- **Sequential Enforcement**: Complete steps in order, no skipping\n- **State Tracking**: Persist progress via in-memory variables\n- **Append-Only Building**: Build artifacts incrementally\n\n### Step Processing Rules\n\n1. **READ COMPLETELY**: Read the entire step file before acting\n2. **FOLLOW SEQUENCE**: Execute sections in order\n3. **WAIT FOR INPUT**: Halt at checkpoints and wait for human\n4. **LOAD NEXT**: When directed, read fully and follow the next step file\n\n### Critical Rules (NO EXCEPTIONS)\n\n- **NEVER** load multiple step files simultaneously\n- **ALWAYS** read entire step file before execution\n- **NEVER** skip steps or optimize the sequence\n- **ALWAYS** follow the exact instructions in the step file\n- **ALWAYS** halt at checkpoints and wait for human input",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "2",
+      "goal": "FIRST STEP",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Read fully and follow: `./steps/step-01-gather-context.md`",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    }
+  ],
+  "routing": {
+    "preceded_by": [
+      "bmad-dev-story"
+    ],
+    "followed_by": [],
+    "required": false,
+    "outputs": [],
+    "output_location": [],
+    "actions": [
+      {
+        "action": null,
+        "phase": "4-implementation",
+        "preceded_by": [
+          "bmad-dev-story"
+        ],
+        "followed_by": [],
+        "required": false,
+        "outputs": null,
+        "output_location": null
+      }
+    ]
+  },
+  "templates": [],
+  "checklists": [],
+  "unresolved_refs": [
+    "{communication_language}",
+    "{implementation_artifacts}",
+    "{project-root}",
+    "{project-root}/_bmad/bmm/config.yaml",
+    "{project-root}/_bmad/custom/{skill-name}.toml",
+    "{project-root}/_bmad/custom/{skill-name}.user.toml",
+    "{project-root}/_bmad/scripts/resolve_customization.py",
+    "{skill-name}",
+    "{skill-root}",
+    "{user_name}",
+    "{workflow.activation_steps_append}",
+    "{workflow.activation_steps_prepend}",
+    "{workflow.persistent_facts}"
+  ],
+  "dropped_sections": [
+    "Conventions",
+    "On Activation"
+  ]
+}

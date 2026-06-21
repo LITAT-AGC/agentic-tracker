@@ -1,0 +1,353 @@
+{
+  "source": {
+    "repo": "github.com/bmad-code-org/BMAD-METHOD",
+    "tag": "v6.8.0",
+    "tag_object_sha": "c3769ab",
+    "commit_sha": "3bcd6c3",
+    "path": "src/bmm-skills/4-implementation/bmad-sprint-status"
+  },
+  "kind": "workflow",
+  "key": "bmad-sprint-status",
+  "phase": "implementation",
+  "frontmatter": {
+    "name": "bmad-sprint-status",
+    "description": "Summarize sprint status and surface risks. Use when the user says \"check sprint status\" or \"show sprint status\""
+  },
+  "dialect": "structured",
+  "entity": null,
+  "steps": [
+    {
+      "n": "0",
+      "goal": "Determine execution mode",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Set mode = {{mode}} if provided by caller; otherwise mode = \"interactive\"",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [
+        {
+          "condition_text": "mode == data",
+          "true": null,
+          "false": null,
+          "raw": "<action>Jump to Step 20</action>"
+        },
+        {
+          "condition_text": "mode == validate",
+          "true": null,
+          "false": null,
+          "raw": "<action>Jump to Step 30</action>"
+        },
+        {
+          "condition_text": "mode == interactive",
+          "true": null,
+          "false": null,
+          "raw": "<action>Continue to Step 1</action>"
+        }
+      ],
+      "control": []
+    },
+    {
+      "n": "1",
+      "goal": "Locate sprint status file",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Load {project_context} for project-wide patterns and conventions (if exists)\n\r\n  \nTry {sprint_status_file}\n\r\n  \r\n  \nContinue to Step 2",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [
+        {
+          "condition_text": "file not found",
+          "true": null,
+          "false": null,
+          "raw": "<output>sprint-status.yaml not found.\nRun `/bmad:bmm:workflows:sprint-planning` to generate it, then rerun sprint-status.</output>\n    <action>Exit workflow</action>"
+        }
+      ],
+      "control": []
+    },
+    {
+      "n": "2",
+      "goal": "Read and parse sprint-status.yaml",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Read the FULL file: {sprint_status_file}\n\r\n  \nParse fields: generated, last_updated, project, project_key, tracking_system, story_location\n\r\n  \nParse development_status map. Classify keys:\n\r\n- Epics: keys starting with \"epic-\" (and not ending with \"-retrospective\")\r\n- Retrospectives: keys ending with \"-retrospective\"\r\n- Stories: everything else (e.g., 1-2-login-form)\r\n  \nMap legacy story status \"drafted\" → \"ready-for-dev\"\n\r\n  \nCount story statuses: backlog, ready-for-dev, in-progress, review, done\n\r\n  \nMap legacy epic status \"contexted\" → \"in-progress\"\n\r\n  \nCount epic statuses: backlog, in-progress, done\n\r\n  \nCount retrospective statuses: optional, done\n\r\n\r\n\nValidate all statuses against known values:\n\r\n\r\n- Valid story statuses: backlog, ready-for-dev, in-progress, review, done, drafted (legacy)\r\n- Valid epic statuses: backlog, in-progress, done, contexted (legacy)\r\n- Valid retrospective statuses: optional, done\r\n\r\n  \r\n\r\n\nDetect risks:\n\r\n\r\n- IF any story has status \"review\": suggest `/bmad:bmm:workflows:code-review`\r\n- IF any story has status \"in-progress\" AND no stories have status \"ready-for-dev\": recommend staying focused on active story\r\n- IF all epics have status \"backlog\" AND no stories have status \"ready-for-dev\": prompt `/bmad:bmm:workflows:create-story`\r\n- IF `last_updated` timestamp is more than 7 days old (or `last_updated` is missing, fall back to `generated`): warn \"sprint-status.yaml may be stale\"\r\n- IF any story key doesn't match an epic pattern (e.g., story \"5-1-...\" but no \"epic-5\"): warn \"orphaned story detected\"\r\n- IF any epic has status in-progress but has no associated stories: warn \"in-progress epic has no stories\"",
+        "asks": [
+          "How should these be corrected?\n  {{#each invalid_entries}}\n  {{@index}}. {{key}}: \"{{status}}\" → [select valid status]\n  {{/each}}\n\nEnter corrections (e.g., \"1=in-progress, 2=backlog\") or \"skip\" to continue without fixing:"
+        ],
+        "template_outputs": []
+      },
+      "checks": [
+        {
+          "condition_text": "any status is unrecognized",
+          "true": null,
+          "false": null,
+          "raw": "<output>\n**Unknown status detected:**\n{{#each invalid_entries}}\n\n- `{{key}}`: \"{{status}}\" (not recognized)\n  {{/each}}\n\n**Valid statuses:**\n\n- Stories: backlog, ready-for-dev, in-progress, review, done\n- Epics: backlog, in-progress, done\n- Retrospectives: optional, done\n  </output>\n  <ask>How should these be corrected?\n  {{#each invalid_entries}}\n  {{@index}}. {{key}}: \"{{status}}\" → [select valid status]\n  {{/each}}\n\nEnter corrections (e.g., \"1=in-progress, 2=backlog\") or \"skip\" to continue without fixing:</ask>\n<check if=\"user provided corrections\">\n<action>Update sprint-status.yaml with corrected values</action>\n<action>Re-parse the file with corrected statuses</action>\n</check>"
+        },
+        {
+          "condition_text": "user provided corrections",
+          "true": null,
+          "false": null,
+          "raw": "<action>Update sprint-status.yaml with corrected values</action>\n<action>Re-parse the file with corrected statuses</action>"
+        }
+      ],
+      "control": []
+    },
+    {
+      "n": "3",
+      "goal": "Select next action recommendation",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Pick the next recommended workflow using priority:\n\r\n  When selecting \"first\" story: sort by epic number, then story number (e.g., 1-1 before 1-2 before 2-1)\r\n  1. If any story status == in-progress → recommend `dev-story` for the first in-progress story\r\n  2. Else if any story status == review → recommend `code-review` for the first review story\r\n  3. Else if any story status == ready-for-dev → recommend `dev-story`\r\n  4. Else if any story status == backlog → recommend `create-story`\r\n  5. Else if any retrospective status == optional → recommend `retrospective`\r\n  6. Else → All implementation items done; congratulate the user - you both did amazing work together!\r\n  \nStore selected recommendation as: next_story_id, next_workflow_id, next_agent (DEV)",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "4",
+      "goal": "Display summary",
+      "tag": null,
+      "generative": {
+        "instruction_md": "## Sprint Status\r\n\r\n- Project: {{project}} ({{project_key}})\r\n- Tracking: {{tracking_system}}\r\n- Status file: {sprint_status_file}\r\n\r\n**Stories:** backlog {{count_backlog}}, ready-for-dev {{count_ready}}, in-progress {{count_in_progress}}, review {{count_review}}, done {{count_done}}\r\n\r\n**Epics:** backlog {{epic_backlog}}, in-progress {{epic_in_progress}}, done {{epic_done}}\r\n\r\n**Next Recommendation:** /bmad:bmm:workflows:{{next_workflow_id}} ({{next_story_id}})\r\n\r\n{{#if risks}}\r\n**Risks:**\r\n{{#each risks}}\r\n\r\n- {{this}}\r\n  {{/each}}\r\n  {{/if}}",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "5",
+      "goal": "Offer actions",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Pick an option:\r\n1) Run recommended workflow now\r\n2) Show all stories grouped by status\r\n3) Show raw sprint-status.yaml\r\n4) Exit\r\nChoice:",
+        "asks": [
+          "Pick an option:\n1) Run recommended workflow now\n2) Show all stories grouped by status\n3) Show raw sprint-status.yaml\n4) Exit\nChoice:"
+        ],
+        "template_outputs": []
+      },
+      "checks": [
+        {
+          "condition_text": "choice == 1",
+          "true": null,
+          "false": null,
+          "raw": "<output>Run `/bmad:bmm:workflows:{{next_workflow_id}}`.\nIf the command targets a story, set `story_key={{next_story_id}}` when prompted.</output>"
+        },
+        {
+          "condition_text": "choice == 2",
+          "true": null,
+          "false": null,
+          "raw": "<output>\n### Stories by Status\n- In Progress: {{stories_in_progress}}\n- Review: {{stories_in_review}}\n- Ready for Dev: {{stories_ready_for_dev}}\n- Backlog: {{stories_backlog}}\n- Done: {{stories_done}}\n    </output>"
+        },
+        {
+          "condition_text": "choice == 3",
+          "true": null,
+          "false": null,
+          "raw": "<action>Display the full contents of {sprint_status_file}</action>"
+        },
+        {
+          "condition_text": "choice == 4",
+          "true": null,
+          "false": null,
+          "raw": "<action>Run: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --key workflow.on_complete` — if the resolved value is non-empty, follow it as the final terminal instruction before exiting.</action>\n<action>Exit workflow</action>"
+        }
+      ],
+      "control": []
+    },
+    {
+      "n": "20",
+      "goal": "Data mode output",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Load and parse {sprint_status_file} same as Step 2\n\r\n  \nCompute recommendation same as Step 3\n\r\n  next_workflow_id = {{next_workflow_id}}\r\n  next_story_id = {{next_story_id}}\r\n  count_backlog = {{count_backlog}}\r\n  count_ready = {{count_ready}}\r\n  count_in_progress = {{count_in_progress}}\r\n  count_review = {{count_review}}\r\n  count_done = {{count_done}}\r\n  epic_backlog = {{epic_backlog}}\r\n  epic_in_progress = {{epic_in_progress}}\r\n  epic_done = {{epic_done}}\r\n  risks = {{risks}}\r\n  \nReturn to caller",
+        "asks": [],
+        "template_outputs": [
+          {
+            "attrs": {},
+            "text": "next_workflow_id = {{next_workflow_id}}"
+          },
+          {
+            "attrs": {},
+            "text": "next_story_id = {{next_story_id}}"
+          },
+          {
+            "attrs": {},
+            "text": "count_backlog = {{count_backlog}}"
+          },
+          {
+            "attrs": {},
+            "text": "count_ready = {{count_ready}}"
+          },
+          {
+            "attrs": {},
+            "text": "count_in_progress = {{count_in_progress}}"
+          },
+          {
+            "attrs": {},
+            "text": "count_review = {{count_review}}"
+          },
+          {
+            "attrs": {},
+            "text": "count_done = {{count_done}}"
+          },
+          {
+            "attrs": {},
+            "text": "epic_backlog = {{epic_backlog}}"
+          },
+          {
+            "attrs": {},
+            "text": "epic_in_progress = {{epic_in_progress}}"
+          },
+          {
+            "attrs": {},
+            "text": "epic_done = {{epic_done}}"
+          },
+          {
+            "attrs": {},
+            "text": "risks = {{risks}}"
+          }
+        ]
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "30",
+      "goal": "Validate sprint-status file",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Check that {sprint_status_file} exists\n\r\n  \r\n\r\n\nRead and parse {sprint_status_file}\n\r\n\r\n\nValidate required metadata fields exist: generated, project, project_key, tracking_system, story_location (last_updated is optional for backward compatibility)\n\r\n\r\n\r\n\nVerify development_status section exists with at least one entry\n\r\n\r\n\r\n\nValidate all status values against known valid statuses:\n\r\n\r\n- Stories: backlog, ready-for-dev, in-progress, review, done (legacy: drafted)\r\n- Epics: backlog, in-progress, done (legacy: contexted)\r\n- Retrospectives: optional, done\r\n  \r\n\r\nis_valid = true\r\nmessage = \"sprint-status.yaml valid: metadata complete, all statuses recognized\"\r\n\nRun: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --key workflow.on_complete` — if the resolved value is non-empty, follow it as the final terminal instruction before exiting.",
+        "asks": [],
+        "template_outputs": [
+          {
+            "attrs": {},
+            "text": "is_valid = false"
+          },
+          {
+            "attrs": {},
+            "text": "error = \"sprint-status.yaml missing\""
+          },
+          {
+            "attrs": {},
+            "text": "suggestion = \"Run sprint-planning to create it\""
+          },
+          {
+            "attrs": {},
+            "text": "is_valid = false"
+          },
+          {
+            "attrs": {},
+            "text": "error = \"Missing required field(s): {{missing_fields}}\""
+          },
+          {
+            "attrs": {},
+            "text": "suggestion = \"Re-run sprint-planning or add missing fields manually\""
+          },
+          {
+            "attrs": {},
+            "text": "is_valid = false"
+          },
+          {
+            "attrs": {},
+            "text": "error = \"development_status missing or empty\""
+          },
+          {
+            "attrs": {},
+            "text": "suggestion = \"Re-run sprint-planning or repair the file manually\""
+          },
+          {
+            "attrs": {},
+            "text": "is_valid = false"
+          },
+          {
+            "attrs": {},
+            "text": "error = \"Invalid status values: {{invalid_entries}}\""
+          },
+          {
+            "attrs": {},
+            "text": "suggestion = \"Fix invalid statuses in sprint-status.yaml\""
+          },
+          {
+            "attrs": {},
+            "text": "is_valid = true"
+          },
+          {
+            "attrs": {},
+            "text": "message = \"sprint-status.yaml valid: metadata complete, all statuses recognized\""
+          }
+        ]
+      },
+      "checks": [
+        {
+          "condition_text": "missing",
+          "true": null,
+          "false": null,
+          "raw": "<template-output>is_valid = false</template-output>\n<template-output>error = \"sprint-status.yaml missing\"</template-output>\n<template-output>suggestion = \"Run sprint-planning to create it\"</template-output>\n<action>Return</action>"
+        },
+        {
+          "condition_text": "any required field missing",
+          "true": null,
+          "false": null,
+          "raw": "<template-output>is_valid = false</template-output>\n<template-output>error = \"Missing required field(s): {{missing_fields}}\"</template-output>\n<template-output>suggestion = \"Re-run sprint-planning or add missing fields manually\"</template-output>\n<action>Return</action>"
+        },
+        {
+          "condition_text": "development_status missing or empty",
+          "true": null,
+          "false": null,
+          "raw": "<template-output>is_valid = false</template-output>\n<template-output>error = \"development_status missing or empty\"</template-output>\n<template-output>suggestion = \"Re-run sprint-planning or repair the file manually\"</template-output>\n<action>Return</action>"
+        },
+        {
+          "condition_text": "any invalid status found",
+          "true": null,
+          "false": null,
+          "raw": "<template-output>is_valid = false</template-output>\n<template-output>error = \"Invalid status values: {{invalid_entries}}\"</template-output>\n<template-output>suggestion = \"Fix invalid statuses in sprint-status.yaml\"</template-output>\n<action>Return</action>"
+        }
+      ],
+      "control": []
+    }
+  ],
+  "routing": {
+    "preceded_by": [
+      "bmad-sprint-planning"
+    ],
+    "followed_by": [],
+    "required": false,
+    "outputs": [],
+    "output_location": [],
+    "actions": [
+      {
+        "action": null,
+        "phase": "4-implementation",
+        "preceded_by": [
+          "bmad-sprint-planning"
+        ],
+        "followed_by": [],
+        "required": false,
+        "outputs": null,
+        "output_location": null
+      }
+    ]
+  },
+  "templates": [],
+  "checklists": [],
+  "unresolved_refs": [
+    "{communication_language}",
+    "{implementation_artifacts}",
+    "{project-root}",
+    "{project-root}/_bmad/bmm/config.yaml",
+    "{project-root}/_bmad/custom/{skill-name}.toml",
+    "{project-root}/_bmad/custom/{skill-name}.user.toml",
+    "{project-root}/_bmad/scripts/resolve_customization.py",
+    "{project_context}",
+    "{skill-name}",
+    "{skill-root}",
+    "{sprint_status_file}",
+    "{user_name}",
+    "{workflow.activation_steps_append}",
+    "{workflow.activation_steps_prepend}",
+    "{workflow.persistent_facts}"
+  ],
+  "workflow_critical": []
+}

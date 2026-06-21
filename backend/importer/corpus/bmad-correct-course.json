@@ -1,0 +1,195 @@
+{
+  "source": {
+    "repo": "github.com/bmad-code-org/BMAD-METHOD",
+    "tag": "v6.8.0",
+    "tag_object_sha": "c3769ab",
+    "commit_sha": "3bcd6c3",
+    "path": "src/bmm-skills/4-implementation/bmad-correct-course"
+  },
+  "kind": "workflow",
+  "key": "bmad-correct-course",
+  "phase": "anytime",
+  "frontmatter": {
+    "name": "bmad-correct-course",
+    "description": "Manage significant changes during sprint execution. Use when the user says \"correct course\" or \"propose sprint change\""
+  },
+  "dialect": "structured",
+  "entity": null,
+  "steps": [
+    {
+      "n": "1",
+      "goal": "Initialize Change Navigation",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Confirm change trigger and gather user description of the issue\n\r\n  \nAsk: \"What specific issue or change has been identified that requires navigation?\"\n\r\n  \nVerify access to project documents:\n\r\n    - PRD (Product Requirements Document) — required\r\n    - Current Epics and Stories — required\r\n    - Architecture documentation — optional, load if available\r\n    - UI/UX specifications — optional, load if available\r\n  \nAsk user for mode preference:\n\r\n    - **Incremental** (recommended): Refine each edit collaboratively\r\n    - **Batch**: Present all changes at once for review\r\n  \nStore mode selection for use throughout workflow\n\r\n\r\n\nHALT: \"Cannot navigate change without clear understanding of the triggering issue. Please provide specific details about what needs to change and why.\"\n\r\n\r\n\nHALT: \"Need access to PRD and Epics to assess change impact. Please ensure these documents are accessible. Architecture and UI/UX will be used if available.\"",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": [
+        "HALT"
+      ]
+    },
+    {
+      "n": "2",
+      "goal": "Execute Change Analysis Checklist",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Read fully and follow the systematic analysis from: checklist.md\n\r\n  \nWork through each checklist section interactively with the user\n\r\n  \nRecord status for each checklist item:\n\r\n    - [x] Done - Item completed successfully\r\n    - [N/A] Skip - Item not applicable to this change\r\n    - [!] Action-needed - Item requires attention or follow-up\r\n  \nMaintain running notes of findings and impacts discovered\n\r\n  \nPresent checklist progress after each major section\n\r\n\r\n\nIdentify blocking issues and work with user to resolve before continuing",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "3",
+      "goal": "Draft Specific Change Proposals",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Based on checklist findings, create explicit edit proposals for each identified artifact\n\r\n\r\n\nFor Story changes:\n\r\n\r\n- Show old → new text format\r\n- Include story ID and section being modified\r\n- Provide rationale for each change\r\n- Example format:\r\n\r\n  ```\r\n  Story: [STORY-123] User Authentication\r\n  Section: Acceptance Criteria\r\n\r\n  OLD:\r\n  - User can log in with email/password\r\n\r\n  NEW:\r\n  - User can log in with email/password\r\n  - User can enable 2FA via authenticator app\r\n\r\n  Rationale: Security requirement identified during implementation\r\n  ```\r\n\r\n\nFor PRD modifications:\n\r\n\r\n- Specify exact sections to update\r\n- Show current content and proposed changes\r\n- Explain impact on MVP scope and requirements\r\n\r\n\nFor Architecture changes:\n\r\n\r\n- Identify affected components, patterns, or technology choices\r\n- Describe diagram updates needed\r\n- Note any ripple effects on other components\r\n\r\n\nFor UI/UX specification updates:\n\r\n\r\n- Reference specific screens or components\r\n- Show wireframe or flow changes needed\r\n- Connect changes to user experience impact\r\n\r\n\r\n\r\n\nCollect all edit proposals and present together at end of step",
+        "asks": [
+          "Review and refine this change? Options: Approve [a], Edit [e], Skip [s]"
+        ],
+        "template_outputs": []
+      },
+      "checks": [
+        {
+          "condition_text": "mode is Incremental",
+          "true": null,
+          "false": null,
+          "raw": "<action>Present each edit proposal individually</action>\n<ask>Review and refine this change? Options: Approve [a], Edit [e], Skip [s]</ask>\n<action>Iterate on each proposal based on user feedback</action>"
+        }
+      ],
+      "control": []
+    },
+    {
+      "n": "4",
+      "goal": "Generate Sprint Change Proposal",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Compile comprehensive Sprint Change Proposal document with following sections:\n\r\n\r\n\nSection 1: Issue Summary\n\r\n\r\n- Clear problem statement describing what triggered the change\r\n- Context about when/how the issue was discovered\r\n- Evidence or examples demonstrating the issue\r\n\r\n\nSection 2: Impact Analysis\n\r\n\r\n- Epic Impact: Which epics are affected and how\r\n- Story Impact: Current and future stories requiring changes\r\n- Artifact Conflicts: PRD, Architecture, UI/UX documents needing updates\r\n- Technical Impact: Code, infrastructure, or deployment implications\r\n\r\n\nSection 3: Recommended Approach\n\r\n\r\n- Present chosen path forward from checklist evaluation:\r\n  - Direct Adjustment: Modify/add stories within existing plan\r\n  - Potential Rollback: Revert completed work to simplify resolution\r\n  - MVP Review: Reduce scope or modify goals\r\n- Provide clear rationale for recommendation\r\n- Include effort estimate, risk assessment, and timeline impact\r\n\r\n\nSection 4: Detailed Change Proposals\n\r\n\r\n- Include all refined edit proposals from Step 3\r\n- Group by artifact type (Stories, PRD, Architecture, UI/UX)\r\n- Ensure each change includes before/after and justification\r\n\r\n\nSection 5: Implementation Handoff\n\r\n\r\n- Categorize change scope:\r\n  - Minor: Direct implementation by Developer agent\r\n  - Moderate: Backlog reorganization needed (PO/DEV)\r\n  - Major: Fundamental replan required (PM/Architect)\r\n- Specify handoff recipients and their responsibilities\r\n- Define success criteria for implementation\r\n\r\n\nPresent complete Sprint Change Proposal to user\n\r\n\nWrite Sprint Change Proposal document to {default_output_file}\n\r\nReview complete proposal. Continue [c] or Edit [e]?",
+        "asks": [
+          "Review complete proposal. Continue [c] or Edit [e]?"
+        ],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "5",
+      "goal": "Finalize and Route for Implementation",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Get explicit user approval for complete proposal\n\r\nDo you approve this Sprint Change Proposal for implementation? (yes/no/revise)",
+        "asks": [
+          "Do you approve this Sprint Change Proposal for implementation? (yes/no/revise)"
+        ],
+        "template_outputs": []
+      },
+      "checks": [
+        {
+          "condition_text": "no or revise",
+          "true": null,
+          "false": null,
+          "raw": "<action>Gather specific feedback on what needs adjustment</action>\n<action>Return to appropriate step to address concerns</action>\n<goto step=\"3\">If changes needed to edit proposals</goto>\n<goto step=\"4\">If changes needed to overall proposal structure</goto>"
+        },
+        {
+          "condition_text": "yes the proposal is approved by the user",
+          "true": null,
+          "false": null,
+          "raw": "<action>Finalize Sprint Change Proposal document</action>\n  <action>Determine change scope classification:</action>\n\n- **Minor**: Can be implemented directly by Developer agent\n- **Moderate**: Requires backlog reorganization and PO/DEV coordination\n- **Major**: Needs fundamental replan with PM/Architect involvement\n\n<action>Provide appropriate handoff based on scope:</action>"
+        },
+        {
+          "condition_text": "Minor scope",
+          "true": null,
+          "false": null,
+          "raw": "<action>Route to: Developer agent for direct implementation</action>\n<action>Deliverables: Finalized edit proposals and implementation tasks</action>"
+        },
+        {
+          "condition_text": "Moderate scope",
+          "true": null,
+          "false": null,
+          "raw": "<action>Route to: Product Owner / Developer agents</action>\n<action>Deliverables: Sprint Change Proposal + backlog reorganization plan</action>"
+        },
+        {
+          "condition_text": "Major scope",
+          "true": null,
+          "false": null,
+          "raw": "<action>Route to: Product Manager / Solution Architect</action>\n  <action>Deliverables: Complete Sprint Change Proposal + escalation notice</action>\n\n<action>Confirm handoff completion and next steps with user</action>\n<action>Document handoff in workflow execution log</action>"
+        }
+      ],
+      "control": [
+        {
+          "goto": "step:3"
+        },
+        {
+          "goto": "step:4"
+        }
+      ]
+    },
+    {
+      "n": "6",
+      "goal": "Workflow Completion",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Summarize workflow execution:\n\r\n  - Issue addressed: {{change_trigger}}\r\n  - Change scope: {{scope_classification}}\r\n  - Artifacts modified: {{list_of_artifacts}}\r\n  - Routed to: {{handoff_recipients}}\r\n\r\n\nConfirm all deliverables produced:\n\r\n\r\n- Sprint Change Proposal document\r\n- Specific edit proposals with before/after\r\n- Implementation handoff plan\r\n\r\n\nReport workflow completion to user with personalized message: \"Correct Course workflow complete, {user_name}!\"\n\r\n\nRemind user of success criteria and next steps for Developer agent\n\r\n\nRun: `python3 {project-root}/_bmad/scripts/resolve_customization.py --skill {skill-root} --key workflow.on_complete` — if the resolved value is non-empty, follow it as the final terminal instruction before exiting.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    }
+  ],
+  "routing": {
+    "preceded_by": [],
+    "followed_by": [],
+    "required": false,
+    "outputs": [
+      "change proposal"
+    ],
+    "output_location": [
+      "planning_artifacts"
+    ],
+    "actions": [
+      {
+        "action": null,
+        "phase": "anytime",
+        "preceded_by": [],
+        "followed_by": [],
+        "required": false,
+        "outputs": "change proposal",
+        "output_location": "planning_artifacts"
+      }
+    ]
+  },
+  "templates": [],
+  "checklists": [
+    {
+      "name": "checklist.md",
+      "body_md": "# Change Navigation Checklist\r\n\r\n<critical>This checklist is executed as part of: ./workflow.md</critical>\r\n<critical>Work through each section systematically with the user, recording findings and impacts</critical>\r\n\r\n<checklist>\r\n\r\n<section n=\"1\" title=\"Understand the Trigger and Context\">\r\n\r\n<check-item id=\"1.1\">\r\n<prompt>Identify the triggering story that revealed this issue</prompt>\r\n<action>Document story ID and brief description</action>\r\n<status>[ ] Done / [ ] N/A / [ ] Action-needed</status>\r\n</check-item>\r\n\r\n<check-item id=\"1.2\">\r\n<prompt>Define the core problem precisely</prompt>\r\n<action>Categorize issue type:</action>\r\n  - Technical limitation discovered during implementation\r\n  - New requirement emerged from stakeholders\r\n  - Misunderstanding of original requirements\r\n  - Strategic pivot or market change\r\n  - Failed approach requiring different solution\r\n<action>Write clear problem statement</action>\r\n<status>[ ] Done / [ ] N/A / [ ] Action-needed</status>\r\n</check-item>\r\n\r\n<check-item id=\"1.3\">\r\n<prompt>Assess initial impact and gather supporting evidence</prompt>\r\n<action>Collect concrete examples, error messages, stakeholder feedback, or technical constraints</action>\r\n<action>Document evidence for later reference</action>\r\n<status>[ ] Done / [ ] N/A / [ ] Action-needed</status>\r\n</check-item>\r\n\r\n<halt-condition>\r\n<action if=\"trigger is unclear\">HALT: \"Cannot proceed without understanding what caused the need for change\"</action>\r\n<action if=\"no evidence provided\">HALT: \"Need concrete evidence or examples of the issue before analyzing impact\"</action>\r\n</halt-condition>\r\n\r\n</section>\r\n\r\n<section n=\"2\" title=\"Epic Impact Assessment\">\r\n\r\n<check-item id=\"2.1\">\r\n<prompt>Evaluate current epic containing the trigger story</prompt>\r\n<action>Can this epic still be completed as originally planned?</action>\r\n<action>If no, what modifications are needed?</action>\r\n<status>[ ] Done / [ ] N/A / [ ] Action-needed</status>\r\n</check-item>\r\n\r\n<check-item id=\"2.2\">\r\n<prompt>Determine required epic-level changes</prompt>\r\n<action>Check each scenario:</action>\r\n  - Modify existing epic scope or acceptance criteria\r\n  - Add new epic to address the issue\r\n  - Remove or defer epic that's no longer viable\r\n  - Completely redefine epic based on new understanding\r\n<action>Document specific epic changes needed</action>\r\n<status>[ ] Done / [ ] N/A / [ ] Action-needed</status>\r\n</check-item>\r\n\r\n<check-item id=\"2.3\">\r\n<prompt>Review all remaining planned epics for required changes</prompt>\r\n<action>Check each future epic for impact</action>\r\n<action>Identify dependencies that may be affected</action>\r\n<status>[ ] Done / [ ] N/A / [ ] Action-needed</status>\r\n</check-item>\r\n\r\n<check-item id=\"2.4\">\r\n<prompt>Check if issue invalidates future epics or necessitates new ones</prompt>\r\n<action>Does this change make any planned epics obsolete?</action>\r\n<action>Are new epics needed to address gaps created by this change?</action>\r\n<status>[ ] Done / [ ] N/A / [ ] Action-needed</status>\r\n</check-item>\r\n\r\n<check-item id=\"2.5\">\r\n<prompt>Consider if epic order or priority should change</prompt>\r\n<action>Should epics be resequenced based on this issue?</action>\r\n<action>Do priorities need adjustment?</action>\r\n<status>[ ] Done / [ ] N/A / [ ] Action-needed</status>\r\n</check-item>\r\n\r\n</section>\r\n\r\n<section n=\"3\" title=\"Artifact Conflict and Impact Analysis\">\r\n\r\n<check-item id=\"3.1\">\r\n<prompt>Check PRD for conflicts</prompt>\r\n<action>Does issue conflict with core PRD goals or objectives?</action>\r\n<action>Do requirements need modification, addition, or removal?</action>\r\n<action>Is the defined MVP still achievable or does scope need adjustment?</action>\r\n<status>[ ] Done / [ ] N/A / [ ] Action-needed</status>\r\n</check-item>\r\n\r\n<check-item id=\"3.2\">\r\n<prompt>Review Architecture document for conflicts</prompt>\r\n<action>Check each area for impact:</action>\r\n  - System components and their interactions\r\n  - Architectural patterns and design decisions\r\n  - Technology stack choices\r\n  - Data models and schemas\r\n  - API designs and contracts\r\n  - Integration points\r\n<action>Document specific architecture sections requiring updates</action>\r\n<status>[ ] Done / [ ] N/A / [ ] Action-needed</status>\r\n</check-item>\r\n\r\n<check-item id=\"3.3\">\r\n<prompt>Examine UI/UX specifications for conflicts</prompt>\r\n<action>Check for impact on:</action>\r\n  - User interface components\r\n  - User flows and journeys\r\n  - Wireframes or mockups\r\n  - Interaction patterns\r\n  - Accessibility considerations\r\n<action>Note specific UI/UX sections needing revision</action>\r\n<status>[ ] Done / [ ] N/A / [ ] Action-needed</status>\r\n</check-item>\r\n\r\n<check-item id=\"3.4\">\r\n<prompt>Consider impact on other artifacts</prompt>\r\n<action>Review additional artifacts for impact:</action>\r\n  - Deployment scripts\r\n  - Infrastructure as Code (IaC)\r\n  - Monitoring and observability setup\r\n  - Testing strategies\r\n  - Documentation\r\n  - CI/CD pipelines\r\n<action>Document any secondary artifacts requiring updates</action>\r\n<status>[ ] Done / [ ] N/A / [ ] Action-needed</status>\r\n</check-item>\r\n\r\n</section>\r\n\r\n<section n=\"4\" title=\"Path Forward Evaluation\">\r\n\r\n<check-item id=\"4.1\">\r\n<prompt>Evaluate Option 1: Direct Adjustment</prompt>\r\n<action>Can the issue be addressed by modifying existing stories?</action>\r\n<action>Can new stories be added within the current epic structure?</action>\r\n<action>Would this approach maintain project timeline and scope?</action>\r\n<action>Effort estimate: [High/Medium/Low]</action>\r\n<action>Risk level: [High/Medium/Low]</action>\r\n<status>[ ] Viable / [ ] Not viable</status>\r\n</check-item>\r\n\r\n<check-item id=\"4.2\">\r\n<prompt>Evaluate Option 2: Potential Rollback</prompt>\r\n<action>Would reverting recently completed stories simplify addressing this issue?</action>\r\n<action>Which stories would need to be rolled back?</action>\r\n<action>Is the rollback effort justified by the simplification gained?</action>\r\n<action>Effort estimate: [High/Medium/Low]</action>\r\n<action>Risk level: [High/Medium/Low]</action>\r\n<status>[ ] Viable / [ ] Not viable</status>\r\n</check-item>\r\n\r\n<check-item id=\"4.3\">\r\n<prompt>Evaluate Option 3: PRD MVP Review</prompt>\r\n<action>Is the original PRD MVP still achievable with this issue?</action>\r\n<action>Does MVP scope need to be reduced or redefined?</action>\r\n<action>Do core goals need modification based on new constraints?</action>\r\n<action>What would be deferred to post-MVP if scope is reduced?</action>\r\n<action>Effort estimate: [High/Medium/Low]</action>\r\n<action>Risk level: [High/Medium/Low]</action>\r\n<status>[ ] Viable / [ ] Not viable</status>\r\n</check-item>\r\n\r\n<check-item id=\"4.4\">\r\n<prompt>Select recommended path forward</prompt>\r\n<action>Based on analysis of all options, choose the best path</action>\r\n<action>Provide clear rationale considering:</action>\r\n  - Implementation effort and timeline impact\r\n  - Technical risk and complexity\r\n  - Impact on team morale and momentum\r\n  - Long-term sustainability and maintainability\r\n  - Stakeholder expectations and business value\r\n<action>Selected approach: [Option 1 / Option 2 / Option 3 / Hybrid]</action>\r\n<action>Justification: [Document reasoning]</action>\r\n<status>[ ] Done / [ ] N/A / [ ] Action-needed</status>\r\n</check-item>\r\n\r\n</section>\r\n\r\n<section n=\"5\" title=\"Sprint Change Proposal Components\">\r\n\r\n<check-item id=\"5.1\">\r\n<prompt>Create identified issue summary</prompt>\r\n<action>Write clear, concise problem statement</action>\r\n<action>Include context about discovery and impact</action>\r\n<status>[ ] Done / [ ] N/A / [ ] Action-needed</status>\r\n</check-item>\r\n\r\n<check-item id=\"5.2\">\r\n<prompt>Document epic impact and artifact adjustment needs</prompt>\r\n<action>Summarize findings from Epic Impact Assessment (Section 2)</action>\r\n<action>Summarize findings from Artifact Conflict Analysis (Section 3)</action>\r\n<action>Be specific about what changes are needed and why</action>\r\n<status>[ ] Done / [ ] N/A / [ ] Action-needed</status>\r\n</check-item>\r\n\r\n<check-item id=\"5.3\">\r\n<prompt>Present recommended path forward with rationale</prompt>\r\n<action>Include selected approach from Section 4</action>\r\n<action>Provide complete justification for recommendation</action>\r\n<action>Address trade-offs and alternatives considered</action>\r\n<status>[ ] Done / [ ] N/A / [ ] Action-needed</status>\r\n</check-item>\r\n\r\n<check-item id=\"5.4\">\r\n<prompt>Define PRD MVP impact and high-level action plan</prompt>\r\n<action>State clearly if MVP is affected</action>\r\n<action>Outline major action items needed for implementation</action>\r\n<action>Identify dependencies and sequencing</action>\r\n<status>[ ] Done / [ ] N/A / [ ] Action-needed</status>\r\n</check-item>\r\n\r\n<check-item id=\"5.5\">\r\n<prompt>Establish agent handoff plan</prompt>\r\n<action>Identify which roles/agents will execute the changes:</action>\r\n  - Developer agent (for implementation)\r\n  - Product Owner / Developer (for backlog changes)\r\n  - Product Manager / Architect (for strategic changes)\r\n<action>Define responsibilities for each role</action>\r\n<status>[ ] Done / [ ] N/A / [ ] Action-needed</status>\r\n</check-item>\r\n\r\n</section>\r\n\r\n<section n=\"6\" title=\"Final Review and Handoff\">\r\n\r\n<check-item id=\"6.1\">\r\n<prompt>Review checklist completion</prompt>\r\n<action>Verify all applicable sections have been addressed</action>\r\n<action>Confirm all [Action-needed] items have been documented</action>\r\n<action>Ensure analysis is comprehensive and actionable</action>\r\n<status>[ ] Done / [ ] N/A / [ ] Action-needed</status>\r\n</check-item>\r\n\r\n<check-item id=\"6.2\">\r\n<prompt>Verify Sprint Change Proposal accuracy</prompt>\r\n<action>Review complete proposal for consistency and clarity</action>\r\n<action>Ensure all recommendations are well-supported by analysis</action>\r\n<action>Check that proposal is actionable and specific</action>\r\n<status>[ ] Done / [ ] N/A / [ ] Action-needed</status>\r\n</check-item>\r\n\r\n<check-item id=\"6.3\">\r\n<prompt>Obtain explicit user approval</prompt>\r\n<action>Present complete proposal to user</action>\r\n<action>Get clear yes/no approval for proceeding</action>\r\n<action>Document approval and any conditions</action>\r\n<status>[ ] Done / [ ] N/A / [ ] Action-needed</status>\r\n</check-item>\r\n\r\n<check-item id=\"6.4\">\r\n<prompt>Update sprint-status.yaml to reflect approved epic changes</prompt>\r\n<action>If epics were added: Add new epic entries with status 'backlog'</action>\r\n<action>If epics were removed: Remove corresponding entries</action>\r\n<action>If epics were renumbered: Update epic IDs and story references</action>\r\n<action>If stories were added/removed: Update story entries within affected epics</action>\r\n<status>[ ] Done / [ ] N/A / [ ] Action-needed</status>\r\n</check-item>\r\n\r\n<check-item id=\"6.5\">\r\n<prompt>Confirm next steps and handoff plan</prompt>\r\n<action>Review handoff responsibilities with user</action>\r\n<action>Ensure all stakeholders understand their roles</action>\r\n<action>Confirm timeline and success criteria</action>\r\n<status>[ ] Done / [ ] N/A / [ ] Action-needed</status>\r\n</check-item>\r\n\r\n<halt-condition>\r\n<action if=\"any critical section cannot be completed\">HALT: \"Cannot proceed to proposal without complete impact analysis\"</action>\r\n<action if=\"user approval not obtained\">HALT: \"Must have explicit approval before implementing changes\"</action>\r\n<action if=\"handoff responsibilities unclear\">HALT: \"Must clearly define who will execute the proposed changes\"</action>\r\n</halt-condition>\r\n\r\n</section>\r\n\r\n</checklist>\r\n\r\n<execution-notes>\r\n<note>This checklist is for SIGNIFICANT changes affecting project direction</note>\r\n<note>Work interactively with user - they make final decisions</note>\r\n<note>Be factual, not blame-oriented when analyzing issues</note>\r\n<note>Handle changes professionally as opportunities to improve the project</note>\r\n<note>Maintain conversation context throughout - this is collaborative work</note>\r\n</execution-notes>\r\n"
+    }
+  ],
+  "unresolved_refs": [
+    "{communication_language}",
+    "{date}",
+    "{default_output_file}",
+    "{document_output_language}",
+    "{planning_artifacts}",
+    "{project-root}",
+    "{project-root}/_bmad/bmm/config.yaml",
+    "{project-root}/_bmad/custom/{skill-name}.toml",
+    "{project-root}/_bmad/custom/{skill-name}.user.toml",
+    "{project-root}/_bmad/scripts/resolve_customization.py",
+    "{project_knowledge}",
+    "{skill-name}",
+    "{skill-root}",
+    "{user_name}",
+    "{user_skill_level}",
+    "{workflow.activation_steps_append}",
+    "{workflow.activation_steps_prepend}",
+    "{workflow.persistent_facts}"
+  ],
+  "workflow_critical": []
+}

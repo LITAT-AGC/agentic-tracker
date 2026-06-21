@@ -1,0 +1,130 @@
+{
+  "source": {
+    "repo": "github.com/bmad-code-org/BMAD-METHOD",
+    "tag": "v6.8.0",
+    "tag_object_sha": "c3769ab",
+    "commit_sha": "3bcd6c3",
+    "path": "src/bmm-skills/4-implementation/bmad-quick-dev"
+  },
+  "kind": "workflow",
+  "key": "bmad-quick-dev",
+  "phase": "anytime",
+  "frontmatter": {
+    "name": "bmad-quick-dev",
+    "description": "Implements any user intent, requirement, story, bug fix or change request by producing clean working code artifacts that follow the project''s existing architecture, patterns and conventions. Use when the user wants to build, fix, tweak, refactor, add or modify any code, component or feature."
+  },
+  "dialect": "prose",
+  "entity": null,
+  "steps": [
+    {
+      "n": "0",
+      "goal": "Quick Dev New Preview Workflow",
+      "tag": null,
+      "generative": {
+        "instruction_md": "**Goal:** Turn user intent into a hardened, reviewable artifact.\n\n**CRITICAL:** If a step says \"read fully and follow step-XX\", you read and follow step-XX. No exceptions.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "1",
+      "goal": "READY FOR DEVELOPMENT STANDARD",
+      "tag": null,
+      "generative": {
+        "instruction_md": "A specification is \"Ready for Development\" when:\n\n- **Actionable**: Every task has a file path and specific action.\n- **Logical**: Tasks ordered by dependency.\n- **Testable**: All ACs use Given/When/Then.\n- **Complete**: No placeholders or TBDs.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "2",
+      "goal": "SCOPE STANDARD",
+      "tag": null,
+      "generative": {
+        "instruction_md": "A specification should target a **single user-facing goal** within **900–1600 tokens**:\n\n- **Single goal**: One cohesive feature, even if it spans multiple layers/files. Multi-goal means >=2 **top-level independent shippable deliverables** — each could be reviewed, tested, and merged as a separate PR without breaking the others. Never count surface verbs, \"and\" conjunctions, or noun phrases. Never split cross-layer implementation details inside one user goal.\n  - Split: \"add dark mode toggle AND refactor auth to JWT AND build admin dashboard\"\n  - Don't split: \"add validation and display errors\" / \"support drag-and-drop AND paste AND retry\"\n- **900–1600 tokens**: Optimal range for LLM consumption. Below 900 risks ambiguity; above 1600 risks context-rot in implementation agents.\n- **Neither limit is a gate.** Both are proposals with user override.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "3",
+      "goal": "WORKFLOW ARCHITECTURE",
+      "tag": null,
+      "generative": {
+        "instruction_md": "This uses **step-file architecture** for disciplined execution:\n\n- **Micro-file Design**: Each step is self-contained and followed exactly\n- **Just-In-Time Loading**: Only load the current step file\n- **Sequential Enforcement**: Complete steps in order, no skipping\n- **State Tracking**: Persist progress via spec frontmatter and in-memory variables\n- **Append-Only Building**: Build artifacts incrementally\n\n### Step Processing Rules\n\n1. **READ COMPLETELY**: Read the entire step file before acting\n2. **FOLLOW SEQUENCE**: Execute sections in order\n3. **WAIT FOR INPUT**: Halt at checkpoints and wait for human\n4. **LOAD NEXT**: When directed, read fully and follow the next step file\n\n### Critical Rules (NO EXCEPTIONS)\n\n- **NEVER** load multiple step files simultaneously\n- **ALWAYS** read entire step file before execution\n- **NEVER** skip steps or optimize the sequence\n- **ALWAYS** follow the exact instructions in the step file\n- **ALWAYS** halt at checkpoints and wait for human input",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "4",
+      "goal": "FIRST STEP",
+      "tag": null,
+      "generative": {
+        "instruction_md": "Read fully and follow: `./step-01-clarify-and-route.md` to begin the workflow.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    }
+  ],
+  "routing": {
+    "preceded_by": [],
+    "followed_by": [],
+    "required": false,
+    "outputs": [
+      "spec and project implementation"
+    ],
+    "output_location": [
+      "implementation_artifacts"
+    ],
+    "actions": [
+      {
+        "action": null,
+        "phase": "anytime",
+        "preceded_by": [],
+        "followed_by": [],
+        "required": false,
+        "outputs": "spec and project implementation",
+        "output_location": "implementation_artifacts"
+      }
+    ]
+  },
+  "templates": [
+    {
+      "name": "spec-template.md",
+      "body_md": "---\r\ntitle: '{title}'\r\ntype: 'feature' # feature | bugfix | refactor | chore\r\ncreated: '{date}'\r\nstatus: 'draft' # draft | ready-for-dev | in-progress | in-review | done\r\ncontext: [] # optional: `{project-root}/`-prefixed paths to project-wide standards/docs the implementation agent should load. Keep short — only what isn't already distilled into the spec body.\r\n---\r\n\r\n<!-- Target: 900–1300 tokens. Above 1600 = high risk of context rot.\r\n     Never over-specify \"how\" — use boundaries + examples instead.\r\n     Cohesive cross-layer stories (DB+BE+UI) stay in ONE file.\r\n     IMPORTANT: Remove all HTML comments when filling this template. -->\r\n\r\n<frozen-after-approval reason=\"human-owned intent — do not modify unless human renegotiates\">\r\n\r\n## Intent\r\n\r\n<!-- What is broken or missing, and why it matters. Then the high-level approach — the \"what\", not the \"how\". -->\r\n\r\n**Problem:** ONE_TO_TWO_SENTENCES\r\n\r\n**Approach:** ONE_TO_TWO_SENTENCES\r\n\r\n## Boundaries & Constraints\r\n\r\n<!-- Three tiers: Always = invariant rules. Ask First = human-gated decisions. Never = out of scope + forbidden approaches. -->\r\n\r\n**Always:** INVARIANT_RULES\r\n\r\n**Ask First:** DECISIONS_REQUIRING_HUMAN_APPROVAL\r\n<!-- Agent: if any of these trigger during execution, HALT and ask the user before proceeding. -->\r\n\r\n**Never:** NON_GOALS_AND_FORBIDDEN_APPROACHES\r\n\r\n## I/O & Edge-Case Matrix\r\n\r\n<!-- If no meaningful I/O scenarios exist, DELETE THIS ENTIRE SECTION. Do not write \"N/A\" or \"None\". -->\r\n\r\n| Scenario | Input / State | Expected Output / Behavior | Error Handling |\r\n|----------|--------------|---------------------------|----------------|\r\n| HAPPY_PATH | INPUT | OUTCOME | N/A |\r\n| ERROR_CASE | INPUT | OUTCOME | ERROR_HANDLING |\r\n\r\n</frozen-after-approval>\r\n\r\n## Code Map\r\n\r\n<!-- Agent-populated during planning. Annotated paths prevent blind codebase searching. -->\r\n\r\n- `FILE` -- ROLE_OR_RELEVANCE\r\n- `FILE` -- ROLE_OR_RELEVANCE\r\n\r\n## Tasks & Acceptance\r\n\r\n<!-- Tasks: backtick-quoted file path -- action -- rationale. Prefer one task per file; group tightly-coupled changes when splitting would be artificial. -->\r\n<!-- If an I/O Matrix is present, include a task to unit-test its edge cases. -->\r\n<!-- AC covers system-level behaviors not captured by the I/O Matrix. Do not duplicate I/O scenarios here. -->\r\n\r\n**Execution:**\r\n- [ ] `FILE` -- ACTION -- RATIONALE\r\n\r\n**Acceptance Criteria:**\r\n- Given PRECONDITION, when ACTION, then EXPECTED_RESULT\r\n\r\n## Spec Change Log\r\n\r\n<!-- Append-only. Populated by step-04 during review loops. Do not modify or delete existing entries.\r\n     Each entry records: what finding triggered the change, what was amended, what known-bad state\r\n     the amendment avoids, and any KEEP instructions (what worked well and must survive re-derivation).\r\n     Empty until the first bad_spec loopback. -->\r\n\r\n## Design Notes\r\n\r\n<!-- If the approach is straightforward, DELETE THIS ENTIRE SECTION. Do not write \"N/A\" or \"None\". -->\r\n<!-- Design rationale and golden examples only when non-obvious. Keep examples to 5–10 lines. -->\r\n\r\nDESIGN_RATIONALE_AND_EXAMPLES\r\n\r\n## Verification\r\n\r\n<!-- If no build, test, or lint commands apply, DELETE THIS ENTIRE SECTION. Do not write \"N/A\" or \"None\". -->\r\n<!-- How the agent confirms its own work. Prefer CLI commands. When no CLI check applies, state what to inspect manually. -->\r\n\r\n**Commands:**\r\n- `COMMAND` -- expected: SUCCESS_CRITERIA\r\n\r\n**Manual checks (if no CLI):**\r\n- WHAT_TO_INSPECT_AND_EXPECTED_STATE\r\n"
+    }
+  ],
+  "checklists": [],
+  "unresolved_refs": [
+    "{communication_language}",
+    "{document_output_language}",
+    "{implementation_artifacts}",
+    "{project-root}",
+    "{project-root}/_bmad/bmm/config.yaml",
+    "{project-root}/_bmad/custom/{skill-name}.toml",
+    "{project-root}/_bmad/custom/{skill-name}.user.toml",
+    "{project-root}/_bmad/scripts/resolve_customization.py",
+    "{skill-name}",
+    "{skill-root}",
+    "{user_name}",
+    "{user_skill_level}",
+    "{workflow.activation_steps_append}",
+    "{workflow.activation_steps_prepend}",
+    "{workflow.persistent_facts}"
+  ],
+  "dropped_sections": [
+    "Conventions",
+    "On Activation"
+  ]
+}

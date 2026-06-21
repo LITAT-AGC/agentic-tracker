@@ -1,0 +1,108 @@
+{
+  "source": {
+    "repo": "github.com/bmad-code-org/BMAD-METHOD",
+    "tag": "v6.8.0",
+    "tag_object_sha": "c3769ab",
+    "commit_sha": "3bcd6c3",
+    "path": "src/bmm-skills/3-solutioning/bmad-generate-project-context"
+  },
+  "kind": "workflow",
+  "key": "bmad-generate-project-context",
+  "phase": "anytime",
+  "frontmatter": {
+    "name": "bmad-generate-project-context",
+    "description": "Create project-context.md with AI rules. Use when the user says \"generate project context\" or \"create project context\""
+  },
+  "dialect": "prose",
+  "entity": null,
+  "steps": [
+    {
+      "n": "0",
+      "goal": "Generate Project Context Workflow",
+      "tag": null,
+      "generative": {
+        "instruction_md": "**Goal:** Create a concise, optimized `project-context.md` file containing critical rules, patterns, and guidelines that AI agents must follow when implementing code. This file focuses on unobvious details that LLMs need to be reminded of.\n\n**Your Role:** You are a technical facilitator working with a peer to capture the essential implementation rules that will ensure consistent, high-quality code generation across all AI agents working on the project.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "1",
+      "goal": "WORKFLOW ARCHITECTURE",
+      "tag": null,
+      "generative": {
+        "instruction_md": "This uses **micro-file architecture** for disciplined execution:\n\n- Each step is a self-contained file with embedded rules\n- Sequential progression with user control at each step\n- Document state tracked in frontmatter\n- Focus on lean, LLM-optimized content generation\n- You NEVER proceed to a step file if the current step file indicates the user must approve and indicate continuation.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    },
+    {
+      "n": "2",
+      "goal": "Execution",
+      "tag": null,
+      "generative": {
+        "instruction_md": "- ✅ YOU MUST ALWAYS SPEAK OUTPUT In your Agent communication style with the config `{communication_language}`\n- ✅ YOU MUST ALWAYS WRITE all artifact and document content in `{document_output_language}`\n\nLoad and execute `./steps/step-01-discover.md` to begin the workflow.\n\n**Note:** Input document discovery and initialization protocols are handled in step-01-discover.md.",
+        "asks": [],
+        "template_outputs": []
+      },
+      "checks": [],
+      "control": []
+    }
+  ],
+  "routing": {
+    "preceded_by": [],
+    "followed_by": [],
+    "required": false,
+    "outputs": [
+      "project context"
+    ],
+    "output_location": [
+      "output_folder"
+    ],
+    "actions": [
+      {
+        "action": null,
+        "phase": "anytime",
+        "preceded_by": [],
+        "followed_by": [],
+        "required": false,
+        "outputs": "project context",
+        "output_location": "output_folder"
+      }
+    ]
+  },
+  "templates": [
+    {
+      "name": "project-context-template.md",
+      "body_md": "---\r\nproject_name: '{{project_name}}'\r\nuser_name: '{{user_name}}'\r\ndate: '{{date}}'\r\nsections_completed: ['technology_stack']\r\nexisting_patterns_found: { { number_of_patterns_discovered } }\r\n---\r\n\r\n# Project Context for AI Agents\r\n\r\n_This file contains critical rules and patterns that AI agents must follow when implementing code in this project. Focus on unobvious details that agents might otherwise miss._\r\n\r\n---\r\n\r\n## Technology Stack & Versions\r\n\r\n_Documented after discovery phase_\r\n\r\n## Critical Implementation Rules\r\n\r\n_Documented after discovery phase_\r\n"
+    }
+  ],
+  "checklists": [],
+  "unresolved_refs": [
+    "{communication_language}",
+    "{document_output_language}",
+    "{output_folder}",
+    "{planning_artifacts}",
+    "{project-root}",
+    "{project-root}/_bmad/bmm/config.yaml",
+    "{project-root}/_bmad/custom/{skill-name}.toml",
+    "{project-root}/_bmad/custom/{skill-name}.user.toml",
+    "{project-root}/_bmad/scripts/resolve_customization.py",
+    "{project_knowledge}",
+    "{skill-name}",
+    "{skill-root}",
+    "{user_name}",
+    "{workflow.activation_steps_append}",
+    "{workflow.activation_steps_prepend}",
+    "{workflow.persistent_facts}"
+  ],
+  "dropped_sections": [
+    "Conventions",
+    "On Activation",
+    "Paths"
+  ]
+}
