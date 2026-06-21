@@ -203,6 +203,17 @@ const DEFAULT_RESPONSE_VIEW = 'compact';
 const PROJECT_CONTEXT_INCLUDE_SECTIONS = ['tasks', 'backlog', 'logs'];
 const DEFAULT_TASK_DETAIL_LOG_LIMIT = 20;
 const MAX_TASK_DETAIL_LOG_LIMIT = 100;
+// read_project_context paginates the tasks and backlog sections so a project with
+// dozens of epics cannot blow up an agent's context window in a single call. The
+// caller controls the window via {tasks,backlog}_limit/_offset; these are the
+// applied defaults and the hard ceiling per section.
+const DEFAULT_PROJECT_CONTEXT_SECTION_LIMIT = 50;
+const MAX_PROJECT_CONTEXT_SECTION_LIMIT = 200;
+// list_backlog_items is the regla-7 listing path agents are told to use, so it
+// gets the same safe-default page size and hard ceiling: an unbounded `limit`
+// would return an entire project's backlog in a single call.
+const DEFAULT_BACKLOG_LIST_LIMIT = 50;
+const MAX_BACKLOG_LIST_LIMIT = 200;
 const COMPACT_TEXT_EXCERPT_LIMIT = 240;
 const PROJECT_CONSTRAINTS_CONFIG_PREFIX = 'project_constraints:';
 const BACKLOG_COMPACT_SELECT_COLUMNS = [
@@ -3114,6 +3125,12 @@ app.get('/api/projects/context', apiLimiter, authenticateAgent, async (req, res)
     const view = validateResponseView(req.query.view);
     const includeSections = parseProjectContextInclude(req.query.include);
     const limit = parseOptionalNonNegativeInteger(req.query.limit, 'limit', { max: MAX_TASK_DETAIL_LOG_LIMIT }) ?? 5;
+    const tasksLimit = parseOptionalNonNegativeInteger(req.query.tasks_limit, 'tasks_limit', { max: MAX_PROJECT_CONTEXT_SECTION_LIMIT })
+      ?? DEFAULT_PROJECT_CONTEXT_SECTION_LIMIT;
+    const tasksOffset = parseOptionalNonNegativeInteger(req.query.tasks_offset, 'tasks_offset') ?? 0;
+    const backlogLimit = parseOptionalNonNegativeInteger(req.query.backlog_limit, 'backlog_limit', { max: MAX_PROJECT_CONTEXT_SECTION_LIMIT })
+      ?? DEFAULT_PROJECT_CONTEXT_SECTION_LIMIT;
+    const backlogOffset = parseOptionalNonNegativeInteger(req.query.backlog_offset, 'backlog_offset') ?? 0;
     const backlogStatus = normalizeInputString(req.query.backlog_status, { unwrapQuotes: true, lowercase: true }) || null;
 
     if (!url) {
@@ -3127,7 +3144,11 @@ app.get('/api/projects/context', apiLimiter, authenticateAgent, async (req, res)
     const responsePayload = {};
 
     if (includeSections.has('tasks')) {
-      const tasksQuery = db('tasks').where({ project_url: url });
+      const tasksQuery = db('tasks')
+        .where({ project_url: url })
+        .orderBy('updated_at', 'desc')
+        .offset(tasksOffset)
+        .limit(tasksLimit);
       const tasks = (view === 'compact'
         ? await tasksQuery.select(TASK_COMPACT_SELECT_COLUMNS)
         : await tasksQuery.select('*'))
@@ -3136,7 +3157,11 @@ app.get('/api/projects/context', apiLimiter, authenticateAgent, async (req, res)
     }
 
     if (includeSections.has('backlog')) {
-      const backlog = await listBacklogItems(url, backlogStatus, { view });
+      const backlog = await listBacklogItems(url, backlogStatus, {
+        view,
+        limit: backlogLimit,
+        offset: backlogOffset
+      });
       responsePayload.backlog = backlog;
     }
 
@@ -3214,8 +3239,9 @@ app.get('/api/projects/backlog', apiLimiter, authenticateAgent, async (req, res)
     const view = validateResponseView(req.query.view);
     const id = normalizeInputString(req.query.id, { unwrapQuotes: true }) || null;
     const ids = parseCommaSeparatedUuidList(req.query.ids, 'ids');
-    const limit = parseOptionalNonNegativeInteger(req.query.limit, 'limit');
-    const offset = parseOptionalNonNegativeInteger(req.query.offset, 'offset');
+    const limit = parseOptionalNonNegativeInteger(req.query.limit, 'limit', { max: MAX_BACKLOG_LIST_LIMIT })
+      ?? DEFAULT_BACKLOG_LIST_LIMIT;
+    const offset = parseOptionalNonNegativeInteger(req.query.offset, 'offset') ?? 0;
 
     if (!url) {
       return res.status(400).json({ error: 'Project url is required' });

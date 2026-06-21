@@ -832,6 +832,10 @@ function validateReadProjectContextInput(urlOrOptions, limitOrOptions = 5) {
     return {
       url: requiredString(payload, 'url', operation, { unwrapQuotes: true }),
       limit: optionalNonNegativeInteger(payload, 'limit', operation) ?? 5,
+      tasks_limit: optionalNonNegativeInteger(payload, 'tasks_limit', operation),
+      tasks_offset: optionalNonNegativeInteger(payload, 'tasks_offset', operation),
+      backlog_limit: optionalNonNegativeInteger(payload, 'backlog_limit', operation),
+      backlog_offset: optionalNonNegativeInteger(payload, 'backlog_offset', operation),
       backlog_status: optionalEnum(payload, 'backlog_status', BACKLOG_STATUSES, operation),
       view: optionalEnum(payload, 'view', RESPONSE_VIEWS, operation) ?? DEFAULT_RESPONSE_VIEW,
       include: Array.isArray(include) && include.length ? include : undefined,
@@ -854,6 +858,26 @@ function validateReadProjectContextInput(urlOrOptions, limitOrOptions = 5) {
   return {
     url: requiredString(payload, 'url', operation, { unwrapQuotes: true }),
     limit: optionalNonNegativeInteger(options, 'limit', operation) ?? 5,
+    tasks_limit: optionalNonNegativeInteger(
+      { tasks_limit: options.tasks_limit ?? options.tasksLimit },
+      'tasks_limit',
+      operation
+    ),
+    tasks_offset: optionalNonNegativeInteger(
+      { tasks_offset: options.tasks_offset ?? options.tasksOffset },
+      'tasks_offset',
+      operation
+    ),
+    backlog_limit: optionalNonNegativeInteger(
+      { backlog_limit: options.backlog_limit ?? options.backlogLimit },
+      'backlog_limit',
+      operation
+    ),
+    backlog_offset: optionalNonNegativeInteger(
+      { backlog_offset: options.backlog_offset ?? options.backlogOffset },
+      'backlog_offset',
+      operation
+    ),
     backlog_status: optionalEnum(
       {
         backlog_status: options.backlog_status ?? options.backlogStatus,
@@ -1296,6 +1320,22 @@ async function readProjectContext(urlOrOptions, limitOrOptions = 5) {
     url: options.url,
     limit: String(options.limit ?? 5),
   });
+
+  if (typeof options.tasks_limit === 'number') {
+    params.set('tasks_limit', String(options.tasks_limit));
+  }
+
+  if (typeof options.tasks_offset === 'number') {
+    params.set('tasks_offset', String(options.tasks_offset));
+  }
+
+  if (typeof options.backlog_limit === 'number') {
+    params.set('backlog_limit', String(options.backlog_limit));
+  }
+
+  if (typeof options.backlog_offset === 'number') {
+    params.set('backlog_offset', String(options.backlog_offset));
+  }
 
   if (options.backlog_status) {
     params.set('backlog_status', options.backlog_status);
