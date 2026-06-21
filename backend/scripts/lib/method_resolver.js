@@ -528,7 +528,7 @@ const aptsSubmitStep = (db, { project_url, agent_name, output }) =>
       return { ok: false, why: `el agente '${agent_name}' no tiene un paso activo` };
     }
     if (caller.step_status === 'await_input') {
-      return { ok: false, why: 'paso en espera-input; usá apts_resume_input antes de submit' };
+      return { ok: false, why: 'paso en espera-input; reanudá con apts_workflow_step (answers) antes de submit' };
     }
     const step = await trx('workflow_steps').where({ id: caller.current_step_id }).first();
     const workflow = await trx('workflow_definitions').where({ id: caller.current_workflow_id }).first();
@@ -550,8 +550,33 @@ const aptsSubmitStep = (db, { project_url, agent_name, output }) =>
           await trx('initiatives').where({ id: initiative.id }).update({ prd_artifact_id: res.id, updated_at: trx.fn.now() });
         }
       } else if (decl.kind === 'backlog_items') {
-        // Las historias se crean con las tools de backlog existentes; submit reconoce.
-        captured.push({ kind: 'backlog_items', note: 'creadas vía tools de backlog (update_backlog_item)' });
+        // F4-T1: el motor crea las stories (server-authoritative). El agente genera
+        // el CONTENIDO (out.stories: lista de {title, description?, acceptance_criteria?}
+        // o strings); el motor las liga a la jerarquía (epic/initiative) con el status
+        // canónico del método ('ready_for_dev'). Determinista = estructura; generativo
+        // = contenido. Idempotente: no duplica por título bajo la iniciativa.
+        const epic = await loadEpic(trx, initiative.id);
+        const proposed = Array.isArray(out.stories) ? out.stories : [];
+        const existing = await trx('backlog_items')
+          .where({ initiative_id: initiative.id }).whereNull('deleted_at').select('title');
+        const seen = new Set(existing.map((r) => r.title));
+        const createdIds = [];
+        let order = existing.length;
+        for (const s of proposed) {
+          const title = typeof s === 'string' ? s : (s && s.title);
+          if (!title || seen.has(title)) continue;
+          seen.add(title);
+          const [row] = await trx('backlog_items').insert({
+            project_url, title,
+            description: (typeof s === 'object' && s.description) || null,
+            acceptance_criteria: (typeof s === 'object' && s.acceptance_criteria) || null,
+            item_type: 'feature', status: 'ready_for_dev',
+            initiative_id: initiative.id, epic_id: epic ? epic.id : null,
+            priority: 100, sort_order: order++,
+          }).returning(['id']);
+          createdIds.push(row.id);
+        }
+        captured.push({ kind: 'backlog_items', created: createdIds.length, ids: createdIds });
       } else if (decl.kind === 'status') {
         // Iterable (dev-story): actualiza la story reclamada + registra code_ref.
         if (cursor.story_id) {

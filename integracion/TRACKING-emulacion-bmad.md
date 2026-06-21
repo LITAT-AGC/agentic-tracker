@@ -28,20 +28,22 @@ una decisión del ledger estaba mal, **se detiene y se replantea**, no se improv
 | F1 Motor determinista + `apts_next` (costo A) | ✅ Hecho | **GATE APROBADO 2026-06-20** | T1–T5 hechos. T4: 3 tools por contrato (17 ops), adaptadores idempotentes, ejercitadas vía CLI real. T5: reducción de contexto **6.8×–18.7×** (números reales). Gate aprobado por el operador |
 | F2 Importador seed (BMAD v6.8 → datos) | ✅ Hecho | **GATE APROBADO 2026-06-21** | T1–T5 hechos. Cobertura balde 1–2 100%; catálogo balde 3 (104 checks→3 primitivas nuevas); 31 IR válidas; `apts_next` sobre 4 flujos reales role-aware; re-cableado 100%; idempotente. Gate aprobado por el operador. Hallazgo: resolver multi-skill-por-fase → F3-T1.5 |
 | F3 Driver de goteo (costo B) | ✅ Hecho | **GATE APROBADO 2026-06-21** | T1–T5 hechos (31/31, 10/10, 27/27, 16/16, 26/26; contract-check 19 ops; schema 2.3.0). bmad-prd por goteo vía CLI real; ctx/paso constante bajo escala (5.8×–41.1×); elicitación OK. Gate aprobado por el operador |
-| F4 Validación end-to-end (proyecto real) | 🟡 En curso | proyecto gestionado de punta a punta; métricas A y B vs BMAD; informe | F3-GATE aprobado. Siguiente: F4-T1 |
+| F4 Validación end-to-end (proyecto real) | ✅ Hecho | **GATE APROBADO 2026-06-21 — v1 CERRADO** | T1–T3 hechos. Acortador de URLs corre analysis→…→implementation→`done` vía CLI real, multi-agente sin colisión; costo-A 13.4×, costo-B hasta 48.3× a escala. Informe de cierre v1 escrito. Gate aprobado por el operador; verificación final limpia (migración up/down, re-seeds, módulos). **v1 cerrado** |
 
 Leyenda: ⬜ Pendiente · 🟡 En curso · ✅ Hecho · ⛔ Bloqueado · 🛑 En gate (espera operador)
 
-**Próxima acción:** 🟡 **F4 en curso.** F3-GATE **aprobado 2026-06-21** (commiteado). Toda la
-maquinaria del motor está lista: `apts_next` (DAG role-aware), goteo modelo B (`apts_workflow_step` +
-`apts_submit_step`), elicitación (await_input), 6 primitivas, 19 ops en el contrato (schema 2.3.0).
-**Siguiente: F4-T1** — definir un proyecto real de prueba y correrlo de punta a punta
-(analysis→planning→solutioning→implementation) con `apts_next` guiando y el goteo sirviendo, multi-agente.
-Luego F4-T2 (ciclo de implementación create-story→dev-story→code-review→retrospective por goteo) y
-F4-T3 (métricas costo A y B vs BMAD nativo sobre el MISMO proyecto). 🛑 F4-GATE = proyecto gestionado
-end-to-end + informe de cierre v1. Estado de `APTS_test`: fixture toy + corpus bmad (wiring per-step)
-prístinos, 6 primitivas implemented. Re-seed: `cd backend` → `node seeds/f1_toy_fixture.js` +
-`node seeds/bmad_seed.js`.
+**Próxima acción:** ✅ **v1 CERRADO — F4-GATE APROBADO por el operador (2026-06-21).** Las 5 fases
+(F0–F4) están hechas y aprobadas. El proyecto real (**Acortador de URLs**,
+`backend/seeds/f4_url_shortener.js`) corrió de punta a punta vía la CLI real → HTTP (`NODE_ENV=test`):
+analysis→planning→solutioning→implementation→`done`, multi-agente (analyst/pm/architect/2×dev),
+no-colisión de `dev-story` demostrada, 7 artefactos tipados, 4 stories `done` ligadas al epic (creación
+server-authoritative). Métricas: **costo-A 13.4× (−92.6%)**, **costo-B 2.2× actual / hasta 48.3× a
+escala** (APTS acotado por `SLICE_CHARS`, BMAD-nativo crece lineal). Informe de cierre v1 en
+`integracion/INFORME-cierre-v1.md`. Verificación final al cierre limpia (migración `20260621000015`
+up/down, re-seeds idempotentes toy+bmad+f4, módulos cargan). `APTS_test` prístino (toy + bmad +
+instancia f4 re-seedeable). Re-seed: `cd backend` → `NODE_ENV=test node seeds/f1_toy_fixture.js` +
+`node seeds/bmad_seed.js` + `node seeds/f4_url_shortener.js`. **Follow-ups no-v1** (informe §4–§5, solo
+si el operador los pide): alinear el contrato de las tools de backlog (bump aditivo 2.3.0→2.4.0).
 
 ---
 
@@ -476,14 +478,77 @@ sigue siendo la autoridad, decisión F1).
 
 ## F4 — Validación end-to-end: gestionar un proyecto real
 
-- [ ] **F4-T1** Definir un proyecto real de prueba y correrlo: analysis → planning → solutioning →
-  implementation, con entidades+flujos importados y `apts_next` guiando.
-- [ ] **F4-T2** Ejecutar el ciclo de implementación (create-story → dev-story → code-review →
-  retrospective) por goteo, multi-agente.
-- [ ] **F4-T3** Métricas: consumo de contexto A y B en APTS **vs BMAD nativo** sobre el mismo
-  proyecto.
-- [ ] **F4-GATE** 🛑 Proyecto gestionado de punta a punta; informe de cierre v1 con métricas y
-  divergencias respecto a BMAD.
+- [x] **F4-T1** Definir un proyecto real de prueba y correrlo: analysis → planning → solutioning →
+  implementation, con entidades+flujos importados y `apts_next` guiando. **Hecho 2026-06-21.**
+  - *Acordado con el operador antes de codear:* proyecto = **Acortador de URLs** (greenfield);
+    roster = **1 analyst + 1 pm + 1 architect + 2 dev** (BMAD v6.8 no tiene agente `sm`: `dev` posee
+    todo implementation → `sm→dev` subsumido); instancia = **seed committeado idempotente**.
+  - *Hecho:* `backend/seeds/f4_url_shortener.js` (project + initiative `source_ref bmad:v6.8.0`
+    phase=analysis + 1 epic pre-creado vacío + 5 punteros `project_state`; idempotente, no toca la
+    librería ni la fixture toy). Lifecycle corrido **vía la CLI real → HTTP** (`NODE_ENV=test`):
+    analysis→planning→solutioning→implementation→`done`, `apts_next` guiando role-aware + goteo sirviendo.
+  - *⚠️ Hallazgo de diseño (regla 2, replanteado con el operador):* el modelo de completitud Opción-A
+    (existe-el-output) **no expresa workflows de proceso/validación** → solutioning se trababa en
+    `bmad-check-implementation-readiness` (loop infinito; su completitud provisional `count-threshold
+    epic>=1` exige stories que no existen hasta implementation). **Decisión del operador: artefactos
+    tipados** — los 3 provisionales producen doc tipado (`readiness`/`sprint_plan`/`story_spec`),
+    completitud por `artifact-exists`, uniforme. Migración aditiva `20260621000015` (enum `doc_type`
+    +`readiness`+`sprint_plan`; `story_spec` ya existía). **0 completitudes provisionales restantes.**
+  - *Aceptación:* lifecycle cierra a `done`; 7 artefactos tipados; migración up/down limpia en `APTS_test`.
+- [x] **F4-T2** Ejecutar el ciclo de implementación (create-story → dev-story → code-review →
+  retrospective) por goteo, multi-agente. **Hecho 2026-06-21.**
+  - *⚠️ 2º hallazgo de diseño (regla 2, replanteado con el operador):* las stories creadas por
+    `create_backlog_item` quedan sin `epic_id`/`initiative_id` (la tool legacy no los expone) y el
+    enum carece de `ready_for_dev` → `dev-story` no podía reclamarlas. **Decisión del operador: el
+    motor crea las stories (server-authoritative)** — el agente genera el CONTENIDO (`out.stories`),
+    `apts_submit_step` (de `create-epics-and-stories`) las crea ligadas al epic/initiative con status
+    canónico `ready_for_dev`. Partición fiel a la tesis (generativo=contenido, determinista=estructura).
+  - *Hecho:* `method_outputs.js` (`create-epics-and-stories` gana `extra:[{backlog_items}]`),
+    `wiring.js` (el paso terminal lleva output primario + `extra`), `method_resolver.js`
+    (`aptsSubmitStep` branch `backlog_items` crea stories ligadas, idempotente por título). Ciclo de
+    implementation por goteo: `sprint-planning`→`create-story`→`dev-story`×4. **No-colisión demostrada
+    vía CLI real:** `dev-1` y `dev-2` reclamaron stories distintas (`distintas=true`) y completaron
+    concurrentemente. 4 stories `done` ligadas al epic; punteros liberados.
+  - *Nota de alcance:* `code-review`/`retrospective` NO son `required` en el DAG bmm (req=-) → la fase
+    cierra tras `dev-story` (all-children-status done). Están en la librería y se sirven por goteo si
+    se invocan, pero no gatean el cierre de implementation (fiel al CSV de routing de BMAD).
+- [x] **F4-T3** Métricas: consumo de contexto A y B en APTS **vs BMAD nativo** sobre el mismo
+  proyecto. **Hecho 2026-06-21.**
+  - *Método:* medición throwaway (no en repo) sobre el corpus real + los artefactos del proyecto en
+    `APTS_test`. `tokens=ceil(chars/4)`, chars exactos. Números APTS reales de la corrida (payloads
+    `apts_next`/`apts_workflow_step` capturados). Cálculo BMAD-nativo **conservador** (sólo upstream
+    inmediato declarado, no todo el contexto acumulado → brecha real mayor).
+  - *Costo-A (routing):* APTS `apts_next` ~215 chars (~54 tok) vs BMAD-nativo (routing DAG required +
+    estado) ~2 888 chars (~722 tok) = **13.4× (−92.6%)**.
+  - *Costo-B (goteo):* corrida real (artefactos ~579 chars) = **2.2× (−54.2%)** total. Escalado (el
+    valor estructural; APTS acotado por `SLICE_CHARS=1200`, BMAD-nativo crece lineal):
+    | escala artefacto prom | APTS ~tok | BMAD-nativo ~tok | reducción |
+    |---|---|---|---|
+    | 1× (579) | 17 298 | 72 832 | 4.2× |
+    | 10× (5 787) | 22 420 | 118 538 | 5.3× |
+    | 50× (28 936) | 22 420 | 321 678 | 14.3× |
+    | 200× (115 743) | 22 420 | 1 083 453 | **48.3×** |
+    APTS se aplana en ~22 420 tok; BMAD-nativo crece sin techo. Consistente con el gate F3 (5.8×–41.1×).
+- [x] **F4-GATE** ✅ **APROBADO 2026-06-21 — v1 CERRADO.** Proyecto gestionado de punta a punta;
+  informe de cierre v1 con métricas y divergencias respecto a BMAD. El operador aprobó el gate.
+  Verificación final al cierre: migración `20260621000015` rollback + re-latest limpios (batch 7);
+  re-seeds idempotentes (toy 11 entities/6 primitivas, bmad 6 entities/31 defs/137 steps + fixture
+  intacta, f4 1 initiative/1 epic/5 punteros); módulos cargan (`method_outputs`/`method_resolver`/
+  `method_primitives`/`wiring`). `APTS_test` prístino y re-seedeable.
+  - *Evidencia (toda en `APTS_test` + artefactos committeados):*
+    - **End-to-end vía la CLI real → HTTP** (`NODE_ENV=test`, 172 llamadas): analysis→planning→
+      solutioning→implementation→`done`; 7 artefactos tipados (`brief, prd, architecture, epics,
+      readiness, sprint_plan, story_spec`); 4 stories `done` ligadas al epic; `prd_artifact_id` cerrado.
+    - **Multi-agente sin colisión:** `dev-1`/`dev-2` reclaman stories distintas (`distintas=true`),
+      completan concurrentemente; claim transaccional (`FOR UPDATE`, `unique(initiative_id,agent_name)`).
+    - **Métricas:** costo-A **13.4×**; costo-B **2.2× actual / hasta 48.3× a escala** (números arriba).
+    - **Deuda provisional resuelta:** 0 completitudes provisionales (artefactos tipados); solutioning
+      ya no se traba.
+    - **Informe de cierre v1:** `integracion/INFORME-cierre-v1.md` (objetivo, resultado, métricas,
+      divergencias, deuda resuelta, conclusión).
+  - *Divergencias documentadas (informe §5):* multi-agente (`sm→dev`), estado servidor-autoritativo
+    (`<ask>` file-model MOOT), creación de stories server-side, tools de backlog legacy (gap rodeado;
+    follow-up sugerido no-v1), goteo vs máquina de estados manual.
 
 ---
 
@@ -556,6 +621,13 @@ sigue siendo la autoridad, decisión F1).
 | 2026-06-21 | (F3-T5) 2 tools nuevas (`apts_workflow_step`/`apts_submit_step`); CLI/MCP no se editan (contract-driven); bump 2.2.0→2.3.0 | El PLAN §7 define 2 tools de goteo (el resume va como `answers` de workflow_step, no una 3ª). CLI/MCP derivan las ops del contrato → solo se editan contrato + cliente + rutas. Bump minor aditivo + nota append-only; contract_check corrige 17→19 ops sin bump (criterio T4-C) |
 | 2026-06-21 | (F3-GATE) Elicitación estructurada (await_input) se demuestra sobre workflows con `<ask>` (implementation), NO dentro de bmad-prd | bmad-prd (prosa) no trae asks en el corpus v6.8; importarlos sería fabricar ADN (viola "verbatim"). Su elicitación viaja en el instruction_chunk servido. **Operador aprobó esta lectura fiel en el gate** |
 | 2026-06-21 | **F3-GATE aprobado** por el operador | bmad-prd corre por goteo end-to-end vía la CLI real; contexto por paso constante bajo escala (5.8×–41.1×, plateau 5 096↔5 097 chars entre brief 20k y 200k); elicitación await_input→resume OK; contract-check 19 ops, adaptadores idempotentes. Habilita F4 (validación end-to-end con un proyecto real) |
+| 2026-06-21 | (F4-T1) Proyecto real = **Acortador de URLs** (greenfield); roster **analyst+pm+architect+2×dev** | Decisión del operador. Greenfield chico/autocontenido → métricas reproducibles y acotadas. `sm` del toy NO existe en BMAD v6.8 (el agente `dev` posee todo implementation: sprint-planning/create-story/dev-story/code-review/retrospective) → `sm→dev` subsumido (divergencia toy→bmad documentada) |
+| 2026-06-21 | (F4-T1) Instancia = **seed committeado idempotente** (`f4_url_shortener.js`) | Decisión del operador. Reproducibilidad de las métricas T3 (como toy/bmad); scopeada por project_url; no toca la librería bmad ni la fixture. Epic pre-creado vacío (no hay tool para crear epics); stories creadas durante el flujo |
+| 2026-06-21 | (F4-T1) **Completitud de workflows de proceso/validación = artefacto tipado** (resuelve la deuda PROVISIONAL) | Hallazgo de F4 (regla 2): el modelo Opción-A no expresa workflows que no producen artefacto re-chequeable → solutioning se trababa en `check-implementation-readiness` (loop). Decisión del operador: `check-implementation-readiness`/`sprint-planning`/`create-story` producen doc tipado (`readiness`/`sprint_plan`/`story_spec`), completitud por `artifact-exists`. Fiel a BMAD (escribe esos `.md`). Migración aditiva `20260621000015`. 0 provisionales restantes |
+| 2026-06-21 | (F4-T2) **El motor crea las stories (server-authoritative)**, no las tools de backlog | Hallazgo de F4 (regla 2): `create_backlog_item` no liga stories a epic/initiative ni acepta `ready_for_dev` → `dev-story` no podía reclamarlas. Decisión del operador: el agente genera el contenido (`out.stories`), `apts_submit_step` (de `create-epics-and-stories`) crea los `backlog_items` ligados con status canónico `ready_for_dev`. Alinea con la tesis (generativo=contenido, determinista=estructura). No toca el contrato público; las tools de backlog quedan para backlog libre/externo (alinearlas = follow-up no-v1) |
+| 2026-06-21 | (F4-T2) `code-review`/`retrospective` NO gatean el cierre de implementation | Son `required=-` en el DAG bmm (CSV de routing). La fase cierra tras `dev-story` (all-children-status done). Están en la librería y se sirven por goteo si se invocan; no son parte de la espina de cierre. Fiel a BMAD |
+| 2026-06-21 | (F4-T3) Métricas reales: costo-A **13.4×**, costo-B **2.2× actual / hasta 48.3× a escala** | `tokens=ceil(chars/4)`, chars exactos, sobre el corpus real + artefactos del proyecto. APTS acotado por `SLICE_CHARS=1200` (se aplana); BMAD-nativo crece lineal. Cálculo BMAD conservador (sólo upstream inmediato). Objetivo central del proyecto demostrado con números |
+| 2026-06-21 | **F4-GATE aprobado por el operador → v1 CERRADO** | Proyecto real (Acortador de URLs) gestionado de punta a punta vía CLI real, multi-agente sin colisión, 7 artefactos tipados, métricas costo-A 13.4× / costo-B hasta 48.3× a escala, informe de cierre v1. Verificación final limpia antes de commitear (migración up/down, re-seeds idempotentes, módulos cargan). Cierra la emulación de BMAD dentro de APTS (5/5 fases). Follow-ups documentados quedan fuera de v1 (informe §4–§5) |
 
 ## Log de cambios (archivos tocados)
 
@@ -583,11 +655,25 @@ sigue siendo la autoridad, decisión F1).
 | 2026-06-21 | F3-T4 | `backend/scripts/lib/method_resolver.js` (`aptsSubmitStep` + `upsertArtifact`; require `crypto`; exports). Harness throwaway 26/26 (goteo bmad-prd end-to-end); `APTS_test` prístino |
 | 2026-06-21 | F3-T5 | `integracion/paquete-apts/apts_skills.json` (+2 tools); `integracion/paquete-apts/apts-client.js` (+`aptsWorkflowStep`/`aptsSubmitStep` + AUTO_FILL + exports); `backend/index.js` (+2 rutas, imports del resolver, `schema_version` 2.2.0→2.3.0 + nota append-only + bumps skills_json/js_client/js_cli/mcp_server, contract_check 17→19 ops); `integracion/paquete-apts/runtime-adapters/claude/.claude/settings.json` (regenerado, +2 mcp tools). `contract-check` 19 ops; `generate-adapters` 2× idéntico |
 | 2026-06-21 | F3-GATE | Demostración vía CLI real (→HTTP backend NODE_ENV=test) + medición costo-B throwaway (no en repo). Instancia gate persistente creada y limpiada (`APTS_test` prístino: 31 bmad / 4 toy). Sin cambios de código committeado en el gate |
+| 2026-06-21 | F4-T1 | `backend/seeds/f4_url_shortener.js` (NUEVO, instancia Acortador de URLs, idempotente); `backend/migrations/20260621000015_artifact_doc_types_f4.js` (NUEVO, enum `doc_type` +`readiness`+`sprint_plan`); `backend/scripts/lib/method_outputs.js` (3 provisionales → artefactos tipados, 0 provisionales); `backend/scripts/lib/method_resolver.js` (fix mensaje obsoleto `apts_resume_input`). Walk exploratorio + corrida CLI throwaway (no en repo). Migración up/down limpia; `APTS_test` prístino |
+| 2026-06-21 | F4-T2 | `backend/scripts/lib/method_outputs.js` (`create-epics-and-stories` gana `extra:[{backlog_items}]`); `backend/scripts/importer/wiring.js` (paso terminal = output primario + `extra`); `backend/scripts/lib/method_resolver.js` (`aptsSubmitStep` branch `backlog_items` crea stories server-side ligadas al epic/initiative, idempotente). Re-seed bmad (wiring) + f4. Corrida CLI end-to-end throwaway (no en repo); no-colisión demostrada |
+| 2026-06-21 | F4-T3 | Medición de contexto throwaway (no en repo) sobre corpus + artefactos del proyecto en `APTS_test`. Sin cambios de código. Números costo-A 13.4× / costo-B 2.2×–48.3× registrados arriba |
+| 2026-06-21 | F4-GATE | `integracion/INFORME-cierre-v1.md` (NUEVO, informe de cierre v1). Backend test levantado/bajado; `.apts/` local limpiado; `APTS_test` prístino (toy + bmad + f4 re-seedeable). **Espera aprobación del operador** |
+| 2026-06-21 | F4-GATE aprobado | **Operador aprobó el gate → v1 cerrado.** Registro de aprobación en `integracion/TRACKING-emulacion-bmad.md` (Estado global, Próxima acción, checkbox F4-GATE, Log de decisiones) + `integracion/INFORME-cierre-v1.md` (estado → aprobado/cerrado). Verificación final contra `APTS_test`: migración `20260621000015` rollback+re-latest limpios; re-seeds idempotentes (toy/bmad/f4); módulos cargan. Sin cambios de código en el gate. Commit del trabajo de F4 (7 archivos) |
 
 ## Mapa de archivos clave (se irá llenando)
 
 - Plan: `integracion/PLAN-emulacion-bmad.md`
 - Tracking: este archivo
+- Informe de cierre v1 (F4-GATE): `integracion/INFORME-cierre-v1.md`
+- Instancia de validación F4: `backend/seeds/f4_url_shortener.js` (Acortador de URLs, idempotente,
+  `source_ref bmad:v6.8.0`, roster analyst+pm+architect+2×dev). Re-seed: `node seeds/f4_url_shortener.js`
+- Completitud por artefacto tipado (F4-T1): `backend/scripts/lib/method_outputs.js`
+  (`WORKFLOW_OUTPUTS`, 0 provisionales; `extra` = efectos del motor como crear `backlog_items`);
+  enum `doc_type` +`readiness`+`sprint_plan` en `backend/migrations/20260621000015_artifact_doc_types_f4.js`
+- Creación de stories server-authoritative (F4-T2): `backend/scripts/lib/method_resolver.js`
+  (`aptsSubmitStep` branch `backlog_items` → crea stories ligadas al epic/initiative); wiring del paso
+  terminal en `backend/scripts/importer/wiring.js`
 - Backend (migraciones): `backend/migrations/` (F0 + 013 de F1)
 - Fixture toy (F1-T1): `backend/seeds/f1_toy_fixture.js` (idempotente, contra `APTS_test`)
 - Motor — primitivas + cascada (F1-T2; +3 primitivas balde 3 en F3-T1): `backend/scripts/lib/method_primitives.js`

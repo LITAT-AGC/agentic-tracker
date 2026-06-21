@@ -41,7 +41,10 @@ const deriveWiring = (ir) => {
   const needs = deriveNeeds(ir);
   const iterable = Boolean(spec && spec.iterable);
   const n = ir.steps.length;
-  const outputsByIndex = ir.steps.map((_step, i) => (spec && i === n - 1 ? [spec.output] : []));
+  // El paso terminal lleva el output primario + los `extra` (efectos del motor que
+  // submit captura pero que NO gatean completitud, p.ej. crear backlog_items).
+  const terminalOutputs = spec ? [spec.output, ...(spec.extra || [])] : [];
+  const outputsByIndex = ir.steps.map((_step, i) => (i === n - 1 ? terminalOutputs : []));
   return { needs, iterable, outputsByIndex };
 };
 
