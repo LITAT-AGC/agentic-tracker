@@ -52,6 +52,20 @@
           </span>
         </router-link>
       </nav>
+
+      <div class="p-4 border-t border-surface-200">
+        <Button
+          icon="pi pi-sign-out"
+          :label="isSidebarCollapsed ? null : 'Cerrar sesión'"
+          severity="secondary"
+          text
+          class="w-full"
+          :class="isSidebarCollapsed ? 'lg:justify-center' : ''"
+          :loading="isLoggingOut"
+          @click="handleLogout"
+          title="Cerrar sesión"
+        />
+      </div>
     </aside>
 
     <div class="flex-1 min-w-0 flex flex-col lg:ml-0">
@@ -74,12 +88,15 @@
 
 <script setup>
 import { ref } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
+import { apiFetch } from '../config/api'
 
 const route = useRoute()
+const router = useRouter()
 
 const isSidebarCollapsed = ref(false)
 const isMobileMenuOpen = ref(false)
+const isLoggingOut = ref(false)
 
 const navItems = [
   { to: '/dashboard/overview', label: 'Resumen', icon: 'pi pi-th-large', match: '/dashboard/overview' },
@@ -104,5 +121,23 @@ const toggleMobileMenu = () => {
 
 const closeMobileMenu = () => {
   isMobileMenuOpen.value = false
+}
+
+const handleLogout = async () => {
+  isLoggingOut.value = true
+
+  try {
+    await apiFetch('/logout', {
+      method: 'POST',
+      credentials: 'include',
+      skipUnauthorizedRedirect: true
+    })
+  } catch (_error) {
+    // Un fallo de red no debe dejar al operador atrapado en el panel: se sale igual.
+  } finally {
+    isLoggingOut.value = false
+    closeMobileMenu()
+    router.replace('/login')
+  }
 }
 </script>

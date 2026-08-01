@@ -4037,6 +4037,23 @@ app.post('/api/login', loginLimiter, (req, res) => {
   }
 });
 
+app.post('/api/logout', (req, res) => {
+  if (!req.session) {
+    res.clearCookie('connect.sid', { path: '/' });
+    return res.json({ success: true });
+  }
+
+  req.session.destroy((destroyError) => {
+    if (destroyError) {
+      logger.error({ err: destroyError }, 'Logout failed');
+      return res.status(500).json({ error: 'Failed to close session' });
+    }
+
+    res.clearCookie('connect.sid', { path: '/' });
+    res.json({ success: true });
+  });
+});
+
 const requireAuth = (req, res, next) => {
   if (req.session.authenticated) next();
   else res.status(401).json({ error: 'Unauthorized' });
