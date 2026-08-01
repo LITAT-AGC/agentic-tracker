@@ -13,8 +13,16 @@
 // stdout stays a clean message stream. Startup runs checkMcpContract() in strict
 // mode, so a drift between the contract and the exposed tool list aborts with a
 // non-zero exit code before any client connects.
+//
+// Transport-agnostic core (F6-1): dispatch() *returns* the JSON-RPC response
+// object (or null for notifications) instead of writing it anywhere. The stdio
+// loop below serializes what it returns; the remote HTTP surface reuses the same
+// dispatch(). The stdio entrypoint only runs when this file is executed directly,
+// so importing the module (from the backend) does not read stdin.
 
 import readline from 'node:readline';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { contractOperations, checkMcpContract } from './contract-check.js';
 
 const SERVER_NAME = 'apts-mcp';
@@ -52,16 +60,16 @@ function send(message) {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 }
 
-function sendResult(id, result) {
-  send({ jsonrpc: '2.0', id, result });
+function buildResult(id, result) {
+  return { jsonrpc: '2.0', id, result };
 }
 
-function sendError(id, code, message, data) {
-  send({
+function buildError(id, code, message, data) {
+  return {
     jsonrpc: '2.0',
     id,
     error: { code, message, ...(data !== undefined ? { data } : {}) },
-  });
+  };
 }
 
 function buildToolErrorPayload(error) {
@@ -82,21 +90,23 @@ async function handleInitialize(message, client) {
   // Touch the client so a broken import surfaces during initialize, not mid-call.
   void client;
   const requested = message.params?.protocolVersion;
-  sendResult(message.id, {
+  return buildResult(message.id, {
     protocolVersion: typeof requested === 'string' && requested ? requested : PROTOCOL_VERSION,
     capabilities: { tools: { listChanged: false } },
     serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
   });
 }
 
+function listTools() {
+  return TOOLS.map((tool) => ({
+    name: tool.name,
+    description: tool.description,
+    inputSchema: tool.inputSchema,
+  }));
+}
+
 function handleToolsList(message) {
-  sendResult(message.id, {
-    tools: TOOLS.map((tool) => ({
-      name: tool.name,
-      description: tool.description,
-      inputSchema: tool.inputSchema,
-    })),
-  });
+  return buildResult(message.id, { tools: listTools() });
 }
 
 async function handleToolsCall(message, client) {
@@ -104,10 +114,9 @@ async function handleToolsCall(message, client) {
   const tool = TOOL_BY_NAME.get(toolName);
 
   if (!tool) {
-    sendError(message.id, -32602, `Unknown tool: ${toolName}`, {
+    return buildError(message.id, -32602, `Unknown tool: ${toolName}`, {
       available_tools: TOOLS.map((entry) => entry.name),
     });
-    return;
   }
 
   const args = message.params?.arguments;
@@ -116,13 +125,13 @@ async function handleToolsCall(message, client) {
   try {
     // The client autofills identity and validates against the contract internally.
     const data = await client[tool.clientExport](payload);
-    sendResult(message.id, {
+    return buildResult(message.id, {
       content: [{ type: 'text', text: JSON.stringify(data) }],
       structuredContent: { ok: true, data },
     });
   } catch (error) {
     const errorPayload = buildToolErrorPayload(error);
-    sendResult(message.id, {
+    return buildResult(message.id, {
       content: [{ type: 'text', text: JSON.stringify(errorPayload) }],
       structuredContent: errorPayload,
       isError: true,
@@ -130,27 +139,25 @@ async function handleToolsCall(message, client) {
   }
 }
 
+// Returns the JSON-RPC response object, or null when there is nothing to answer
+// (notifications). Never writes to any transport.
 async function dispatch(message, client) {
   const { method, id } = message;
   const isRequest = id !== undefined && id !== null;
 
   switch (method) {
     case 'initialize':
-      await handleInitialize(message, client);
-      return;
+      return handleInitialize(message, client);
     case 'tools/list':
-      handleToolsList(message);
-      return;
+      return handleToolsList(message);
     case 'tools/call':
-      await handleToolsCall(message, client);
-      return;
+      return handleToolsCall(message, client);
     case 'ping':
-      if (isRequest) sendResult(id, {});
-      return;
+      return isRequest ? buildResult(id, {}) : null;
     default:
       // Notifications (no id), e.g. notifications/initialized: acknowledge silently.
-      if (!isRequest) return;
-      sendError(id, -32601, `Method not found: ${method}`);
+      if (!isRequest) return null;
+      return buildError(id, -32601, `Method not found: ${method}`);
   }
 }
 
@@ -171,21 +178,26 @@ async function main() {
     try {
       message = JSON.parse(text);
     } catch {
-      sendError(null, -32700, 'Parse error: invalid JSON');
+      send(buildError(null, -32700, 'Parse error: invalid JSON'));
       return;
     }
 
     if (!message || typeof message !== 'object' || message.jsonrpc !== '2.0' || typeof message.method !== 'string') {
-      sendError(message?.id ?? null, -32600, 'Invalid Request');
+      send(buildError(message?.id ?? null, -32600, 'Invalid Request'));
       return;
     }
 
-    queue = queue.then(() => dispatch(message, client)).catch((error) => {
-      log(`unhandled dispatch error: ${error?.message || error}`);
-      if (message.id !== undefined && message.id !== null) {
-        sendError(message.id, -32603, 'Internal error', { message: error?.message || String(error) });
-      }
-    });
+    queue = queue
+      .then(async () => {
+        const response = await dispatch(message, client);
+        if (response) send(response);
+      })
+      .catch((error) => {
+        log(`unhandled dispatch error: ${error?.message || error}`);
+        if (message.id !== undefined && message.id !== null) {
+          send(buildError(message.id, -32603, 'Internal error', { message: error?.message || String(error) }));
+        }
+      });
   });
 
   rl.on('close', () => {
@@ -193,7 +205,25 @@ async function main() {
   });
 }
 
-main().catch((error) => {
-  log(`fatal: ${error?.message || error}`);
-  process.exit(error?.exitCode || 1);
-});
+// Only run the stdio loop when executed directly. Imported (remote HTTP surface),
+// the module exposes dispatch()/listTools() without touching stdin or stdout.
+const isDirectRun = process.argv[1]
+  && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+
+if (isDirectRun) {
+  main().catch((error) => {
+    log(`fatal: ${error?.message || error}`);
+    process.exit(error?.exitCode || 1);
+  });
+}
+
+export {
+  PROTOCOL_VERSION,
+  SERVER_NAME,
+  SERVER_VERSION,
+  buildError,
+  buildResult,
+  buildToolErrorPayload,
+  dispatch,
+  listTools,
+};

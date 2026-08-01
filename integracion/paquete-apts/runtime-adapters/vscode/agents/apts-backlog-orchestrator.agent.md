@@ -46,7 +46,7 @@ Run a linear execution cycle over the APTS backlog, one item at a time:
 
 ## Task Creation Rule
 For each selected backlog item:
-1. Build a minimal `register_task` payload and let the client auto-fill identity.
+1. Build a minimal `register_task` payload; the integration layer supplies the identity fields.
 2. Call `register_task` with:
    - item title as task title
    - meaningful execution context

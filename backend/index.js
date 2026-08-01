@@ -1,6 +1,7 @@
 require('dotenv').config();
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 const createKnex = require('knex');
 const express = require('express');
 const cors = require('cors');
@@ -106,7 +107,19 @@ app.use(pinoHttp({
   autoLogging: false
 }));
 
-app.use(express.json());
+// Remote MCP surface (F6-1). Kept out of the /api tree on purpose: it is agent
+// surface, not dashboard API. Its own body parser runs inside the route with a
+// 4 MB cap (decision #6); every other route keeps the express default (100 kb).
+const MCP_ROUTE_PATH = '/mcp';
+const MCP_MAX_MESSAGE_SIZE = '4mb';
+
+const defaultJsonParser = express.json();
+const mcpJsonParser = express.json({ limit: MCP_MAX_MESSAGE_SIZE });
+
+app.use((req, res, next) => {
+  if ((req.path || req.url) === MCP_ROUTE_PATH) return next();
+  return defaultJsonParser(req, res, next);
+});
 app.use((req, res, next) => {
   res.on('finish', () => {
     if (shouldIgnoreHttpLog(req)) return;
@@ -154,7 +167,10 @@ app.use(session({
 }));
 
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 5 });
-const apiLimiter = rateLimit({ windowMs: 60 * 1000, max: 100 });
+// Single global counter shared by agent surface and dashboard (decision #6):
+// raised from 100 to 600/min because on the remote surface every operation is
+// its own HTTP request, plus initialize + tools/list on connect.
+const apiLimiter = rateLimit({ windowMs: 60 * 1000, max: 600 });
 
 const authenticateAgent = (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -171,6 +187,11 @@ const authenticateAgent = (req, res, next) => {
 const BACKLOG_ITEM_TYPES = ['feature', 'bug', 'chore', 'research'];
 const BACKLOG_STATUSES = ['draft', 'needs_details', 'ready', 'in_progress', 'review', 'blocked', 'done', 'archived'];
 const TASK_STATUSES = ['todo', 'in_progress', 'review', 'done', 'stalled'];
+// F6-2-T2: mismos valores que declara la migración `20260620000010_bmad_hierarchy.js`
+// para las columnas `initiatives.track` y `initiatives.phase`. Sin comprobarlos en la
+// ruta, un valor inválido llegaba a la base y salía como 500 con el detalle interno.
+const INITIATIVE_TRACKS = ['quick', 'method', 'enterprise'];
+const INITIATIVE_PHASES = ['analysis', 'planning', 'solutioning', 'implementation', 'done'];
 const TASK_RESUMABLE_STATUSES = new Set(['todo', 'in_progress', 'stalled']);
 const TASK_STATUS_TRANSITIONS = {
   todo: new Set(['in_progress', 'stalled']),
@@ -184,6 +205,19 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-
 const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
 const OPENROUTER_CHAT_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_EMBEDDINGS_URL = 'https://openrouter.ai/api/v1/embeddings';
+// F6-2-T4: plazos de espera para las llamadas externas que alcanzan las 21
+// operaciones. Sin ellos, un proveedor que no responde deja al que llama esperando
+// sin límite, y en modo lote se multiplica por elemento.
+const OPENROUTER_EMBEDDING_TIMEOUT_MS = (() => {
+  const configured = Number.parseInt(process.env.OPENROUTER_EMBEDDING_TIMEOUT_MS || '', 10);
+  return Number.isInteger(configured) && configured > 0 ? configured : 10000;
+})();
+// El webhook es un servicio de terceros y su entrega ya tolera fallos, así que el
+// plazo es más corto: nadie debería esperar por él.
+const WEBHOOK_DELIVERY_TIMEOUT_MS = (() => {
+  const configured = Number.parseInt(process.env.WEBHOOK_DELIVERY_TIMEOUT_MS || '', 10);
+  return Number.isInteger(configured) && configured > 0 ? configured : 5000;
+})();
 const DEFAULT_OPENROUTER_MODEL = process.env.OPENROUTER_DEFAULT_MODEL || 'google/gemini-2.0-flash-lite-001';
 const DEFAULT_OPENROUTER_EMBEDDING_MODEL = process.env.OPENROUTER_DEFAULT_EMBEDDING_MODEL || 'openai/text-embedding-3-small';
 const CONFIG_KEYS = {
@@ -511,10 +545,11 @@ const serializeErrorForLog = (error) => ({
   stack: error?.stack || null
 });
 
-const sendApiError = (res, error, {
+// F6-2: la construcción del cuerpo de error se separa del envío por la respuesta
+// HTTP, porque la superficie MCP remota ejecuta en proceso y necesita el mismo
+// cuerpo exacto (sin `res`) para traducirlo al error que devolvía el cliente.
+const buildApiErrorPayload = (error, {
   fallbackMessage = 'Internal server error',
-  logMessage = 'Request failed',
-  logContext = {},
   responseBody = {}
 } = {}) => {
   const statusCode = getErrorStatusCode(error);
@@ -534,6 +569,17 @@ const sendApiError = (res, error, {
   if (error?.details && statusCode < 500) {
     payload.details = error.details;
   }
+
+  return { statusCode, payload };
+};
+
+const sendApiError = (res, error, {
+  fallbackMessage = 'Internal server error',
+  logMessage = 'Request failed',
+  logContext = {},
+  responseBody = {}
+} = {}) => {
+  const { statusCode, payload } = buildApiErrorPayload(error, { fallbackMessage, responseBody });
 
   const logPayload = {
     ...logContext,
@@ -704,18 +750,52 @@ const shouldUseStrictBatchMode = (req, isBatch) => {
   return parseBooleanFlag(req.query.strict);
 };
 
-const sendBatchOperationResponse = (res, results, { successStatus = 200 } = {}) => {
+// F6-2: valida los elementos de un lote con el mismo mensaje indexado que usaban
+// las rutas. Lo comparten las rutas express y la superficie MCP remota.
+const parseBatchItems = (items, schema) => {
+  const parsedItems = [];
+
+  for (let index = 0; index < items.length; index += 1) {
+    const parsed = schema.safeParse(items[index] || {});
+    if (!parsed.success) {
+      throw createHttpError(400, `Invalid payload at index ${index}: ${zodErrorMessage(parsed.error)}`);
+    }
+    parsedItems.push(parsed.data);
+  }
+
+  return parsedItems;
+};
+
+// F6-2: igual que arriba, el cuerpo de la respuesta de lote se construye aparte
+// del envío para que la superficie remota devuelva exactamente lo mismo.
+const buildBatchOperationResponse = (results, { successStatus = 200 } = {}) => {
   const failed = results.filter((item) => !item.success).length;
   const succeeded = results.length - failed;
 
-  return res.status(failed > 0 ? 207 : successStatus).json({
-    success: failed === 0,
-    processed: results.length,
-    succeeded,
-    failed,
-    results
-  });
+  return {
+    statusCode: failed > 0 ? 207 : successStatus,
+    payload: {
+      success: failed === 0,
+      processed: results.length,
+      succeeded,
+      failed,
+      results
+    }
+  };
 };
+
+const sendBatchOperationResponse = (res, results, { successStatus = 200 } = {}) => {
+  const { statusCode, payload } = buildBatchOperationResponse(results, { successStatus });
+  return res.status(statusCode).json(payload);
+};
+
+// F6-2-T2: zod 4 ignora `invalid_type_error` —la clave es `error`—, así que hasta
+// ahora un campo ausente daba "Invalid input: expected string, received undefined"
+// sin decir cuál. Con `error` como función se distingue "falta el campo" de "el
+// tipo es otro"; el mensaje de un check concreto (.min, .regex) sigue mandando.
+const missingOrInvalidTypeMessage = (requiredMessage, invalidTypeMessage) => (issue) => (
+  issue?.input === undefined || issue?.input === null ? requiredMessage : invalidTypeMessage
+);
 
 const nonEmptyStringSchema = (
   requiredMessage,
@@ -723,7 +803,7 @@ const nonEmptyStringSchema = (
   options = {}
 ) => z.preprocess(
   (value) => normalizeSchemaInputString(value, options),
-  z.string({ invalid_type_error: invalidTypeMessage }).min(1, requiredMessage)
+  z.string({ error: missingOrInvalidTypeMessage(requiredMessage, invalidTypeMessage) }).min(1, requiredMessage)
 );
 
 const optionalStringSchema = (invalidTypeMessage, options = {}) => z.preprocess(
@@ -731,7 +811,7 @@ const optionalStringSchema = (invalidTypeMessage, options = {}) => z.preprocess(
     if (value === undefined) return undefined;
     return normalizeSchemaInputString(value, options);
   },
-  z.string({ invalid_type_error: invalidTypeMessage }).optional()
+  z.string({ error: invalidTypeMessage }).optional()
 );
 
 const optionalNullableStringSchema = (invalidTypeMessage, options = {}) => z.preprocess(
@@ -740,7 +820,7 @@ const optionalNullableStringSchema = (invalidTypeMessage, options = {}) => z.pre
     if (value === null || value === '') return null;
     return normalizeSchemaInputString(value, options);
   },
-  z.string({ invalid_type_error: invalidTypeMessage }).nullable().optional()
+  z.string({ error: invalidTypeMessage }).nullable().optional()
 );
 
 const enumFieldSchema = (
@@ -754,14 +834,14 @@ const enumFieldSchema = (
       if (optional && value === undefined) return undefined;
       return normalizeSchemaInputString(value, { unwrapQuotes: true, lowercase: true });
     },
-    z.string({ invalid_type_error: invalidTypeMessage })
+    z.string({ error: invalidTypeMessage })
       .refine((value) => allowedValues.includes(value), { message: invalidValueMessage })
   );
 
   return optional ? schema.optional() : schema;
 };
 
-const integerFieldSchema = (invalidMessage, { optional = false } = {}) => {
+const integerFieldSchema = (invalidMessage, { optional = false, min, max } = {}) => {
   const schema = z.preprocess(
     (value) => {
       if (optional && value === undefined) return undefined;
@@ -774,14 +854,19 @@ const integerFieldSchema = (invalidMessage, { optional = false } = {}) => {
       }
       return value;
     },
-    z.number({ invalid_type_error: invalidMessage }).int(invalidMessage)
+    (() => {
+      let integerSchema = z.number({ error: invalidMessage }).int(invalidMessage);
+      if (typeof min === 'number') integerSchema = integerSchema.min(min, invalidMessage);
+      if (typeof max === 'number') integerSchema = integerSchema.max(max, invalidMessage);
+      return integerSchema;
+    })()
   );
 
   return optional ? schema.optional() : schema;
 };
 
 const numberFieldSchema = (invalidMessage, { optional = false, min, max } = {}) => {
-  let numberSchema = z.number({ invalid_type_error: invalidMessage });
+  let numberSchema = z.number({ error: invalidMessage });
 
   if (typeof min === 'number') {
     numberSchema = numberSchema.min(min, invalidMessage);
@@ -819,7 +904,7 @@ const uuidFieldSchema = (
       if (nullable && (value === null || value === '')) return null;
       return normalizeSchemaInputString(value, { unwrapQuotes: true });
     },
-    z.string({ invalid_type_error: invalidMessage }).regex(UUID_REGEX, invalidMessage)
+    z.string({ error: invalidMessage }).regex(UUID_REGEX, invalidMessage)
   );
 
   if (nullable) {
@@ -844,22 +929,27 @@ const backlogIdParamSchema = z.object({
 const registerTaskBodySchema = z.object({
   project_url: nonEmptyStringSchema('Project url is required', 'Project url is required', { unwrapQuotes: true }),
   title: nonEmptyStringSchema('Title is required', 'Title must be a string'),
-  agent_name: optionalStringSchema('Agent name must be a string'),
-  agent_email: optionalStringSchema('Agent email must be a string'),
+  // F6-2-T2: obligatorios en el servidor. El cliente ya los exigía; sin él en el
+  // camino remoto, dejarlos opcionales era perder el rastro de quién hizo qué.
+  agent_name: nonEmptyStringSchema('Agent name is required', 'Agent name must be a string'),
+  agent_email: nonEmptyStringSchema('Agent email is required', 'Agent email must be a string'),
   context: z.preprocess(
     (value) => {
       if (value === undefined || value === null) return undefined;
       return normalizeSchemaInputString(value);
     },
-    z.string({ invalid_type_error: 'Context must be a string' }).optional()
+    z.string({ error: 'Context must be a string' }).optional()
   ),
   backlog_item_id: uuidFieldSchema('Backlog item id must be a valid UUID', { optional: true })
 });
 
 const taskStatusUpdateBodySchema = z.object({
   status: enumFieldSchema(TASK_STATUSES, 'Invalid task status', 'Invalid task status'),
-  project_url: optionalStringSchema('Project url must be a string', { unwrapQuotes: true }),
-  agent_name: optionalStringSchema('Agent name must be a string')
+  // F6-2-T2: los tres pasan a obligatorios; `agent_email` ni siquiera existía en el
+  // esquema, así que el servidor lo descartaba en silencio.
+  project_url: nonEmptyStringSchema('Project url is required', 'Project url must be a string', { unwrapQuotes: true }),
+  agent_name: nonEmptyStringSchema('Agent name is required', 'Agent name must be a string'),
+  agent_email: nonEmptyStringSchema('Agent email is required', 'Agent email must be a string')
 });
 
 const taskStatusUpdateBatchBodySchema = taskStatusUpdateBodySchema.extend({
@@ -867,7 +957,10 @@ const taskStatusUpdateBatchBodySchema = taskStatusUpdateBodySchema.extend({
 });
 
 const logAgentProgressBodySchema = z.object({
-  agent_name: optionalStringSchema('Agent name must be a string'),
+  // F6-2-T2: `agent_name` pasa a obligatorio. `branch` NO: la rama cambia durante
+  // la sesión y el servidor no ve el repositorio del cliente, así que queda
+  // opcional de verdad, como preveía la decisión #1.
+  agent_name: nonEmptyStringSchema('Agent name is required', 'Agent name must be a string'),
   branch: optionalStringSchema('Branch must be a string', { unwrapQuotes: true }),
   message: nonEmptyStringSchema('Message is required', 'Message must be a string'),
   technical_details: z.unknown().optional()
@@ -881,7 +974,8 @@ const reportBlockerBodySchema = z.object({
   project_url: nonEmptyStringSchema('Project url is required', 'Project url is required', { unwrapQuotes: true }),
   task_id: uuidFieldSchema('Task id must be a valid UUID'),
   error_message: nonEmptyStringSchema('Error message is required', 'Error message must be a string'),
-  agent_name: optionalStringSchema('Agent name must be a string')
+  // F6-2-T2: obligatorio en el servidor, como ya lo exigía el cliente.
+  agent_name: nonEmptyStringSchema('Agent name is required', 'Agent name must be a string')
 });
 
 const heartbeatBodySchema = z.object({
@@ -900,7 +994,13 @@ const backlogIdBodySchema = z.object({
 const semanticBugSearchBodySchema = z.object({
   url: nonEmptyStringSchema('Project url is required', 'Project url is required', { unwrapQuotes: true }),
   query_text: nonEmptyStringSchema('Query text is required', 'Query text must be a string'),
-  top_k: integerFieldSchema('top_k must be an integer between 1 and 20', { optional: true }),
+  // F6-2-T2: antes se aceptaba cualquier entero y la ruta lo recortaba en silencio,
+  // mientras que el cliente lo rechazaba. Ahora rechazan los dos caminos.
+  top_k: integerFieldSchema(`top_k must be an integer between 1 and ${MAX_SEMANTIC_SEARCH_TOP_K}`, {
+    optional: true,
+    min: 1,
+    max: MAX_SEMANTIC_SEARCH_TOP_K
+  }),
   threshold: numberFieldSchema('threshold must be a number between 0 and 1', { optional: true, min: 0, max: 1 }),
   include_closed: z.preprocess(
     (value) => {
@@ -909,7 +1009,7 @@ const semanticBugSearchBodySchema = z.object({
       if (typeof value === 'string') return parseBooleanFlag(value);
       return value;
     },
-    z.boolean({ invalid_type_error: 'include_closed must be a boolean' }).optional()
+    z.boolean({ error: 'include_closed must be a boolean' }).optional()
   ),
   exclude_backlog_item_id: uuidFieldSchema('exclude_backlog_item_id must be a valid UUID', { optional: true, nullable: true })
 });
@@ -1366,14 +1466,31 @@ const requestOpenRouterEmbedding = async (inputText, {
 
   const model = await getEffectiveOpenRouterEmbeddingModel();
 
-  const response = await fetch(OPENROUTER_EMBEDDINGS_URL, {
-    method: 'POST',
-    headers: getOpenRouterHeaders(),
-    body: JSON.stringify({
-      model,
-      input: normalizedInput
-    })
-  });
+  // F6-2-T4: segunda implementación del embedding, duplicada de
+  // `scripts/lib/semantic_embeddings.js`. Es la que alcanzan
+  // `search_similar_bug_reports` —donde el cliente espera de verdad— y el embedding
+  // de bug de create/update_backlog_item, así que lleva el mismo plazo de espera.
+  // (Unificar las dos copias es trabajo aparte, fuera de F6.)
+  let response;
+  try {
+    response = await fetch(OPENROUTER_EMBEDDINGS_URL, {
+      method: 'POST',
+      headers: getOpenRouterHeaders(),
+      body: JSON.stringify({
+        model,
+        input: normalizedInput
+      }),
+      signal: AbortSignal.timeout(OPENROUTER_EMBEDDING_TIMEOUT_MS)
+    });
+  } catch (error) {
+    // Nombrar a OpenRouter no es cosmético: es lo que reconoce
+    // isSemanticProviderError() para devolver 503 en vez de 500, y lo que hace que
+    // runNonBlockingSemanticOperation lo absorba en las escrituras.
+    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+      throw new Error(`OpenRouter embedding request timed out after ${OPENROUTER_EMBEDDING_TIMEOUT_MS} ms`);
+    }
+    throw error;
+  }
 
   const data = await readOpenRouterResponse(response);
   await persistOpenRouterUsage({
@@ -1977,7 +2094,21 @@ const integrationRoot = path.join(__dirname, '..', 'integracion');
 // - 3.1.0: additive — publishes the `method_orchestrator_agent` template (BMAD method engine driven
 //   from a client spec via create_initiative/set_agent_role + apts_next conduction). No artifact was
 //   removed or changed shape; only a new optional agent template was added.
-const integrationManifestSchemaVersion = '3.1.0';
+// - 3.2.0: additive — publishes `mcp_endpoint`, the remote MCP surface (Streamable HTTP, stateless),
+//   with the per-runtime registration block as data so a client can register the server without
+//   downloading any file. The four stdio artifacts (mcp_server, js_client, contract_check,
+//   package_manifest) are flagged deprecated but keep being served unchanged, and their
+//   `recommended` flags are untouched: a client on 3.1.0 ignores the new fields and still gets a
+//   working surface. No artifact was removed or changed shape.
+// - 3.3.0: content fix — the `skills_json` contract stated in 16 of its 21 tool descriptions that
+//   identity "auto-resolves from env/local managed context/Git when omitted". That is false for the
+//   remote surface, where identity comes from the registration headers and task_id/branch travel in
+//   the call. Descriptions rewritten in neutral terms ("the integration layer supplies …"); no
+//   operation, schema, or verdict changed. `skills_json.artifact_version` goes 3.0.0 -> 3.3.0 so
+//   already-integrated clients pick the fix up through the existing sync policy (compare by
+//   artifact_version -> overwrite). Manifest shape is unchanged; a client on 3.1.0 or 3.2.0 keeps a
+//   working surface.
+const integrationManifestSchemaVersion = '3.3.0';
 const publicIntegrationBasePath = '/api/public/integrar';
 
 const integrationArtifacts = {
@@ -1986,8 +2117,10 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts_skills.json'),
     fileName: 'apts_skills.json',
     contentType: 'application/json; charset=utf-8',
-    artifactVersion: '3.0.0',
-    updatedInSchemaVersion: '3.0.0',
+    // 3.3.0: descripciones reescritas en términos neutros (ya no afirman resolución automática de
+    // identidad). Sube la versión para que la política de sincronización propague la corrección.
+    artifactVersion: '3.3.0',
+    updatedInSchemaVersion: '3.3.0',
     kind: 'skills_contract',
     recommended: true,
     usagePriority: 'discovery',
@@ -2099,6 +2232,10 @@ const integrationArtifacts = {
     deprecatedFilenames: ['apts-cli.js', 'apts-cli.mjs'],
     dependsOnArtifactIds: ['js_client', 'contract_check'],
     module_system: 'esm',
+    deprecated: true,
+    deprecatedInSchemaVersion: '3.2.0',
+    replacedBy: 'mcp_endpoint',
+    deprecationReason: 'Superseded by the remote MCP endpoint published in mcp_endpoint, which needs no download. Still served unchanged for clients already on it; recommended is deliberately left as it was so 3.1.0 clients keep a working surface.',
     selection_rule: 'Only supported integration surface. Zero-dependency stdio JSON-RPC MCP server that exposes one tool per contract operation. Register it in .mcp.json (Claude Code) or opencode.json (opencode), both pointing at this file run with node. If the runtime cannot register an MCP server, resolve the runtime setup with the operator; there is no alternative script surface.',
     description: 'Official MCP (stdio) server for APTS; the cross-runtime integration surface for Claude Code and opencode.'
   },
@@ -2116,6 +2253,10 @@ const integrationArtifacts = {
     syncAction: 'overwrite',
     deprecatedFilenames: ['apts-client.mjs', 'apts-helper.js', 'apts-helper.mjs'],
     module_system: 'esm',
+    deprecated: true,
+    deprecatedInSchemaVersion: '3.2.0',
+    replacedBy: 'mcp_endpoint',
+    deprecationReason: 'Internal dependency of the deprecated stdio server. The remote endpoint executes in the backend process and no longer goes through this client. Still served unchanged.',
     selection_rule: 'Single ESM HTTP client (named exports). It is an internal dependency of the MCP server, executed as a Node subprocess rather than imported by the host project. The former CommonJS/ESM twins and the standalone helper were retired in 2.1.0.',
     description: 'Official ESM-only JavaScript HTTP client for APTS (internal dependency of the MCP server).'
   },
@@ -2133,6 +2274,10 @@ const integrationArtifacts = {
     syncAction: 'overwrite',
     deprecatedFilenames: [],
     module_system: 'esm',
+    deprecated: true,
+    deprecatedInSchemaVersion: '3.2.0',
+    replacedBy: 'mcp_endpoint',
+    deprecationReason: 'The same check now runs inside the backend at startup, so the remote surface cannot drift from the contract. Still served unchanged for clients that keep the downloadable stdio server.',
     selection_rule: 'Startup self-check used by the MCP server to verify that the client and the MCP tool list stay aligned with apts_skills.json (19 operations). Install it beside apts-mcp.js.',
     description: 'Contract self-check that validates client/MCP alignment with apts_skills.json.'
   },
@@ -2149,6 +2294,10 @@ const integrationArtifacts = {
     optional: true,
     syncAction: 'overwrite',
     deprecatedFilenames: [],
+    deprecated: true,
+    deprecatedInSchemaVersion: '3.2.0',
+    replacedBy: 'mcp_endpoint',
+    deprecationReason: 'Only needed to make the downloadable scripts run as ES modules. A remote registration downloads no scripts. Still served unchanged.',
     selection_rule: 'Marks the workspace-local APTS folder as ESM ({ "type": "module" }) and declares the apts-mcp bin. Install it alongside the scripts so Node treats them as ES modules.',
     description: 'ESM package manifest ({ type: module }) for the workspace-local APTS scripts.'
   },
@@ -2189,6 +2338,111 @@ const integrationArtifacts = {
 };
 
 const buildAbsoluteUrl = (req, route) => `${req.protocol}://${req.get('host')}${route}`;
+
+// --- Registro del MCP remoto (F6-3-T1) -------------------------------------
+//
+// Se publica como DATO, por programa cliente: un cliente puede registrar el
+// servidor copiando `config` en `config_file`, sin descargar ningún archivo.
+// Las tres cabeceras de identidad son parte del registro, no un extra: sustituyen
+// a la resolución automática que hacía el script local (decisión #1). Sin ellas el
+// cliente remoto se queda sin identidad y la superficie queda peor que la actual.
+//
+// La URL se deriva del host de la petición, igual que `api_base_url`, porque `/mcp`
+// vive fuera del árbol `/api` y no puede componerse a partir de él (decisión A1 de F6-3).
+const MCP_IDENTITY_HEADER_SPEC = [
+  { header: 'Authorization', purpose: 'access_key', env: 'APTS_API_KEY', scheme: 'Bearer' },
+  { header: 'X-APTS-Project-Url', purpose: 'identity', field: 'project_url', env: 'APTS_PROJECT_URL' },
+  { header: 'X-APTS-Agent-Name', purpose: 'identity', field: 'agent_name', env: 'APTS_AGENT_NAME' },
+  { header: 'X-APTS-Agent-Email', purpose: 'identity', field: 'agent_email', env: 'APTS_AGENT_EMAIL' }
+];
+
+// Cada programa cliente tiene su propio archivo, su propia clave de servidor y su
+// propia forma de sustituir valores; por eso el bloque se publica por runtime y no
+// como un ejemplo único.
+const buildMcpRuntimeRegistrations = (url) => ({
+  claudecode: {
+    config_file: '.mcp.json',
+    value_substitution: 'Environment variables expand as ${VAR} inside the config file.',
+    config: {
+      mcpServers: {
+        apts: {
+          type: 'http',
+          url,
+          headers: {
+            Authorization: 'Bearer ${APTS_API_KEY}',
+            'X-APTS-Project-Url': '${APTS_PROJECT_URL}',
+            'X-APTS-Agent-Name': '${APTS_AGENT_NAME}',
+            'X-APTS-Agent-Email': '${APTS_AGENT_EMAIL}'
+          }
+        }
+      }
+    }
+  },
+  opencode: {
+    config_file: 'opencode.json',
+    value_substitution: 'Environment variables expand as {env:VAR} inside the config file.',
+    config: {
+      $schema: 'https://opencode.ai/config.json',
+      mcp: {
+        apts: {
+          type: 'remote',
+          url,
+          enabled: true,
+          headers: {
+            Authorization: 'Bearer {env:APTS_API_KEY}',
+            'X-APTS-Project-Url': '{env:APTS_PROJECT_URL}',
+            'X-APTS-Agent-Name': '{env:APTS_AGENT_NAME}',
+            'X-APTS-Agent-Email': '{env:APTS_AGENT_EMAIL}'
+          }
+        }
+      }
+    }
+  },
+  vscode: {
+    config_file: '.vscode/mcp.json',
+    value_substitution: 'The access key is prompted once via inputs[] and stored by the editor. The three identity values are project-stable and non-secret: replace the placeholders with real values.',
+    config: {
+      inputs: [
+        { id: 'apts-api-key', type: 'promptString', description: 'APTS_API_KEY', password: true }
+      ],
+      servers: {
+        apts: {
+          type: 'http',
+          url,
+          headers: {
+            Authorization: 'Bearer ${input:apts-api-key}',
+            'X-APTS-Project-Url': '<APTS_PROJECT_URL>',
+            'X-APTS-Agent-Name': '<APTS_AGENT_NAME>',
+            'X-APTS-Agent-Email': '<APTS_AGENT_EMAIL>'
+          }
+        }
+      }
+    }
+  }
+});
+
+const buildMcpEndpoint = (req) => {
+  const url = buildAbsoluteUrl(req, MCP_ROUTE_PATH);
+
+  return {
+    url,
+    transport: 'streamable_http',
+    protocol_version: '2025-06-18',
+    session: 'stateless',
+    requires_download: false,
+    post: 'One JSON-RPC message per request (initialize, tools/list, tools/call, ping). Notifications answer 202 with an empty body.',
+    get: 'Answers 405: this endpoint is stateless and has no server-to-client stream. Clients that probe it may ignore the 405 and continue over POST.',
+    max_message_size: MCP_MAX_MESSAGE_SIZE,
+    headers: MCP_IDENTITY_HEADER_SPEC,
+    identity_rule: 'The three identity headers are part of the registration, not an option: they replace the local autofill the downloadable script used to do. Values sent in the call arguments win over the header; when both are missing the call is rejected with a named field.',
+    call_supplied_fields: [
+      { field: 'task_id', note: 'Returned by register_task; send it in the execution calls that need it.' },
+      { field: 'branch', note: 'Optional. It cannot travel in a header because it changes during the session, and the server never sees the client repository.' }
+    ],
+    registration_by_runtime: buildMcpRuntimeRegistrations(url),
+    surface_note: 'This endpoint exposes the same contract operations as the downloadable stdio server, which stays available. Registering it needs a URL and headers only: no file download, no local Node process, no artifact version to keep in sync.'
+  };
+};
 
 const buildLegacyCleanupTargets = () => Object.entries(integrationArtifacts)
   .flatMap(([id, artifact]) => (artifact.deprecatedFilenames || []).map((fileName) => ({
@@ -2497,6 +2751,7 @@ const buildIntegrationManifest = (req) => {
     },
     entrypoint: buildAbsoluteUrl(req, publicIntegrationBasePath),
     api_base_url: buildAbsoluteUrl(req, '/api'),
+    mcp_endpoint: buildMcpEndpoint(req),
     auth: {
       type: 'bearer',
       header: 'Authorization',
@@ -2556,6 +2811,15 @@ const buildIntegrationManifest = (req) => {
       updated_in_schema_version: artifact.updatedInSchemaVersion,
       sync_action: artifact.syncAction,
       deprecated_filenames: artifact.deprecatedFilenames || [],
+      // Obsoleto no significa retirado: los 4 artefactos del camino por entrada/salida
+      // estándar se siguen sirviendo sin cambios, y su `recommended` se deja como estaba
+      // para que un cliente en 3.1.0 —que no conoce `mcp_endpoint`— conserve una
+      // superficie que funciona (decisión #7, convivencia).
+      deprecated: artifact.deprecated || false,
+      deprecated_in_schema_version: artifact.deprecatedInSchemaVersion || null,
+      deprecation_reason: artifact.deprecationReason || null,
+      replaced_by: artifact.replacedBy || null,
+      still_served: true,
       description: artifact.description,
       recommended: artifact.recommended && isArtifactRuntimeCompatible(artifact, activeRuntime),
       recommended_unfiltered: artifact.recommended,
@@ -2634,7 +2898,10 @@ const notifyWebhook = async (project_url, payload) => {
       await fetch(project.webhook_url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        // F6-2-T4: sin plazo, un webhook del cliente que no responde colgaba la
+        // escritura que lo dispara (update_task_status y compañía).
+        signal: AbortSignal.timeout(WEBHOOK_DELIVERY_TIMEOUT_MS)
       }).catch((err) => {
         logger.warn({
           project_url,
@@ -3080,6 +3347,1026 @@ app.get('/api/health', async (_req, res) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// F6-2-T1: piezas que hasta ahora vivían dentro de la ruta express.
+//
+// La superficie MCP remota ejecuta en proceso: no tiene `req.query` ni
+// `req.params`, así que el parseo de parámetros y las tres lecturas que llevaban
+// la consulta incrustada en la ruta se extraen aquí. Las rutas y la superficie
+// remota llaman a las mismas funciones, que es lo que hace que la igualdad de
+// F6-2-T5 sea por construcción y no por casualidad.
+// ---------------------------------------------------------------------------
+
+const parseReadProjectContextOptions = (raw = {}) => {
+  const url = normalizeUrl(raw.url);
+  const view = validateResponseView(raw.view);
+  const includeSections = parseProjectContextInclude(raw.include);
+  const limit = parseOptionalNonNegativeInteger(raw.limit, 'limit', { max: MAX_TASK_DETAIL_LOG_LIMIT }) ?? 5;
+  const tasksLimit = parseOptionalNonNegativeInteger(raw.tasks_limit, 'tasks_limit', { max: MAX_PROJECT_CONTEXT_SECTION_LIMIT })
+    ?? DEFAULT_PROJECT_CONTEXT_SECTION_LIMIT;
+  const tasksOffset = parseOptionalNonNegativeInteger(raw.tasks_offset, 'tasks_offset') ?? 0;
+  const backlogLimit = parseOptionalNonNegativeInteger(raw.backlog_limit, 'backlog_limit', { max: MAX_PROJECT_CONTEXT_SECTION_LIMIT })
+    ?? DEFAULT_PROJECT_CONTEXT_SECTION_LIMIT;
+  const backlogOffset = parseOptionalNonNegativeInteger(raw.backlog_offset, 'backlog_offset') ?? 0;
+  const backlogStatus = normalizeInputString(raw.backlog_status, { unwrapQuotes: true, lowercase: true }) || null;
+
+  if (!url) {
+    throw createHttpError(400, 'Project url is required');
+  }
+
+  if (backlogStatus && !BACKLOG_STATUSES.includes(backlogStatus)) {
+    throw createHttpError(400, 'Invalid backlog status');
+  }
+
+  return {
+    url,
+    view,
+    includeSections,
+    limit,
+    tasksLimit,
+    tasksOffset,
+    backlogLimit,
+    backlogOffset,
+    backlogStatus
+  };
+};
+
+const readProjectContextInternal = async ({
+  url,
+  view,
+  includeSections,
+  limit,
+  tasksLimit,
+  tasksOffset,
+  backlogLimit,
+  backlogOffset,
+  backlogStatus
+}) => {
+  const responsePayload = {};
+
+  if (includeSections.has('tasks')) {
+    const tasksQuery = db('tasks')
+      .where({ project_url: url })
+      .orderBy('updated_at', 'desc')
+      .offset(tasksOffset)
+      .limit(tasksLimit);
+    const tasks = (view === 'compact'
+      ? await tasksQuery.select(TASK_COMPACT_SELECT_COLUMNS)
+      : await tasksQuery.select('*'))
+      .map((task) => mapTaskRecord(task, { view }));
+    responsePayload.tasks = tasks;
+  }
+
+  if (includeSections.has('backlog')) {
+    const backlog = await listBacklogItems(url, backlogStatus, {
+      view,
+      limit: backlogLimit,
+      offset: backlogOffset
+    });
+    responsePayload.backlog = backlog;
+  }
+
+  if (includeSections.has('logs')) {
+    const logsQuery = db('agent_logs')
+      .join('tasks', 'agent_logs.task_id', 'tasks.id')
+      .where('tasks.project_url', url)
+      .orderBy('agent_logs.created_at', 'desc')
+      .limit(limit);
+
+    const logs = (view === 'compact'
+      ? await logsQuery.select(
+        'agent_logs.id',
+        'agent_logs.task_id',
+        'agent_logs.action_type',
+        'agent_logs.agent_name',
+        'agent_logs.branch',
+        'agent_logs.message',
+        'agent_logs.created_at',
+        'agent_logs.updated_at',
+        db.raw("CASE WHEN agent_logs.technical_details IS NULL THEN 'false' ELSE 'true' END AS has_technical_details")
+      )
+      : await logsQuery.select('agent_logs.*'))
+      .map((log) => mapAgentLogRecord(log, { view }));
+
+    responsePayload.logs = logs;
+  }
+
+  return responsePayload;
+};
+
+const parseListBacklogItemsOptions = (raw = {}) => {
+  const url = normalizeUrl(raw.url);
+  const status = normalizeInputString(raw.status, { unwrapQuotes: true, lowercase: true }) || null;
+  const includeDeleted = parseBooleanFlag(raw.include_deleted);
+  const view = validateResponseView(raw.view);
+  const id = normalizeInputString(raw.id, { unwrapQuotes: true }) || null;
+  const ids = parseCommaSeparatedUuidList(raw.ids, 'ids');
+  const limit = parseOptionalNonNegativeInteger(raw.limit, 'limit', { max: MAX_BACKLOG_LIST_LIMIT })
+    ?? DEFAULT_BACKLOG_LIST_LIMIT;
+  const offset = parseOptionalNonNegativeInteger(raw.offset, 'offset') ?? 0;
+
+  if (!url) {
+    throw createHttpError(400, 'Project url is required');
+  }
+
+  if (status && !BACKLOG_STATUSES.includes(status)) {
+    throw createHttpError(400, 'Invalid backlog status');
+  }
+
+  if (id && !isUuid(id)) {
+    throw createHttpError(400, 'id must be a valid UUID');
+  }
+
+  if (id && ids.length > 0) {
+    throw createHttpError(400, 'Use either id or ids, not both');
+  }
+
+  return { url, status, includeDeleted, view, id, ids, limit, offset };
+};
+
+const parseGetBacklogItemOptions = (raw = {}) => ({
+  view: validateResponseView(raw.view || 'full'),
+  includeDeleted: parseBooleanFlag(raw.include_deleted)
+});
+
+const getBacklogItemInternal = async (backlogItemId, { view, includeDeleted }) => {
+  const backlogItemQuery = db('backlog_items').where({ id: backlogItemId });
+  if (!includeDeleted) {
+    backlogItemQuery.whereNull('deleted_at');
+  }
+
+  const backlogItem = view === 'compact'
+    ? await backlogItemQuery.select(BACKLOG_COMPACT_SELECT_COLUMNS).first()
+    : await backlogItemQuery.select('*').first();
+
+  if (!backlogItem) {
+    throw createHttpError(404, 'Backlog item not found');
+  }
+
+  return { backlog_item: mapBacklogItemRecord(backlogItem, { view }) };
+};
+
+const parseGetTaskOptions = (raw = {}) => ({
+  view: validateResponseView(raw.view || 'full'),
+  logsLimit: parseOptionalNonNegativeInteger(raw.limit, 'limit', { max: MAX_TASK_DETAIL_LOG_LIMIT })
+    ?? DEFAULT_TASK_DETAIL_LOG_LIMIT
+});
+
+const getTaskInternal = async (taskId, { view, logsLimit }) => {
+  const taskQuery = db('tasks').where({ id: taskId });
+  const task = view === 'compact'
+    ? await taskQuery.select(TASK_COMPACT_SELECT_COLUMNS).first()
+    : await taskQuery.select('*').first();
+
+  if (!task) {
+    throw createHttpError(404, 'Task not found');
+  }
+
+  const logsQuery = db('agent_logs')
+    .where({ task_id: taskId })
+    .orderBy('created_at', 'desc')
+    .limit(logsLimit);
+
+  const logs = (view === 'compact'
+    ? await logsQuery.select(
+      'id',
+      'task_id',
+      'action_type',
+      'agent_name',
+      'branch',
+      'message',
+      'created_at',
+      'updated_at',
+      db.raw("CASE WHEN technical_details IS NULL THEN 'false' ELSE 'true' END AS has_technical_details")
+    )
+    : await logsQuery.select('*'))
+    .map((log) => mapAgentLogRecord(log, { view }));
+
+  const heartbeatLogs = await db('agent_logs')
+    .where({ task_id: taskId, action_type: 'heartbeat' })
+    .orderBy('created_at', 'desc')
+    .limit(5)
+    .select('id', 'created_at', 'agent_name', 'branch', 'message');
+
+  const recentHeartbeats = heartbeatLogs.length > 0
+    ? heartbeatLogs.map((heartbeat) => ({
+      id: heartbeat.id,
+      timestamp: heartbeat.created_at,
+      agent_name: heartbeat.agent_name || null,
+      branch: heartbeat.branch || null,
+      message: heartbeat.message || null
+    }))
+    : (task.last_heartbeat
+      ? [{
+        id: null,
+        timestamp: task.last_heartbeat,
+        agent_name: task.agent_name || null,
+        branch: null,
+        message: null
+      }]
+      : []);
+
+  return {
+    task: mapTaskRecord(task, { view }),
+    recent_heartbeats: recentHeartbeats,
+    logs
+  };
+};
+
+// F6-2-T5: `create_backlog_item` era la única de las siete operaciones de lote que
+// validaba *dentro* del bucle, o sea después de haber escrito los elementos
+// anteriores: un lote con un elemento malo dejaba escritos los buenos y devolvía un
+// resultado parcial. Se valida por adelantado, como ya hacían las otras seis. Solo
+// aplica al modo lote; el elemento suelto sigue validándose donde siempre, para no
+// cambiar su mensaje de error.
+const assertBacklogCreateBatchItems = (items) => {
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index] || {};
+    const url = normalizeUrl(normalizeInputString(item?.project_url, { unwrapQuotes: true }));
+    if (!url) {
+      throw createHttpError(400, `Invalid payload at index ${index}: Project url is required`);
+    }
+    const { error } = getBacklogPayload(item);
+    if (error) {
+      throw createHttpError(400, `Invalid payload at index ${index}: ${error}`);
+    }
+  }
+};
+
+// F6-2-T2: la validación de create_initiative vive aquí para que la hereden las dos
+// superficies. Además de lo que ya comprobaba la ruta (project_url, title y que
+// spec_artifact sea un objeto), ahora se comprueban `track`, `phase` y
+// `spec_artifact.content`, que iban directos al insert o a createHash().
+const parseCreateInitiativeInput = (body = {}) => {
+  const projectUrl = typeof body?.project_url === 'string' ? body.project_url.trim() : '';
+  const title = typeof body?.title === 'string' ? body.title.trim() : '';
+  if (!projectUrl) {
+    throw createHttpError(400, 'project_url is required');
+  }
+  if (!title) {
+    throw createHttpError(400, 'title is required');
+  }
+
+  const track = body?.track;
+  if (track !== undefined && track !== null && !INITIATIVE_TRACKS.includes(track)) {
+    throw createHttpError(400, `track must be one of: ${INITIATIVE_TRACKS.join(', ')}`);
+  }
+
+  const phase = body?.phase;
+  if (phase !== undefined && phase !== null && !INITIATIVE_PHASES.includes(phase)) {
+    throw createHttpError(400, `phase must be one of: ${INITIATIVE_PHASES.join(', ')}`);
+  }
+
+  const specArtifact = body?.spec_artifact;
+  if (specArtifact !== undefined && specArtifact !== null) {
+    if (typeof specArtifact !== 'object' || Array.isArray(specArtifact)) {
+      throw createHttpError(400, 'spec_artifact must be an object');
+    }
+    // Sin esto revienta en crypto.createHash().update() (method_bootstrap.js:50).
+    if (typeof specArtifact.content !== 'string' || !specArtifact.content.trim()) {
+      throw createHttpError(400, 'spec_artifact.content is required and must be a non-empty string');
+    }
+    if (specArtifact.title !== undefined && specArtifact.title !== null && typeof specArtifact.title !== 'string') {
+      throw createHttpError(400, 'spec_artifact.title must be a string');
+    }
+  }
+
+  return {
+    project_url: projectUrl,
+    title,
+    track: track ?? undefined,
+    source_ref: body?.source_ref,
+    phase: phase ?? undefined,
+    description: body?.description,
+    spec_artifact: specArtifact
+  };
+};
+
+// El envoltorio `query:{…}` y el recorte de top_k vivían en la ruta; sin ellos la
+// respuesta remota no sería la misma.
+const searchSimilarBugReportsOperation = async (parsedBody) => {
+  const {
+    url,
+    query_text: queryText,
+    top_k: requestedTopK,
+    threshold: requestedThreshold,
+    include_closed: includeClosed,
+    exclude_backlog_item_id: excludeBacklogItemId
+  } = parsedBody;
+
+  // Sin recorte: el esquema ya acota top_k a 1..MAX_SEMANTIC_SEARCH_TOP_K (F6-2-T2).
+  const topK = requestedTopK ?? DEFAULT_SEMANTIC_SEARCH_TOP_K;
+  const threshold = requestedThreshold ?? DEFAULT_SEMANTIC_SEARCH_THRESHOLD;
+
+  try {
+    const result = await searchSimilarBugReports({
+      projectUrl: url,
+      queryText,
+      topK,
+      threshold,
+      includeClosed: includeClosed === true,
+      excludeBacklogItemId: excludeBacklogItemId || null
+    });
+
+    return {
+      query: {
+        url: normalizeUrl(url),
+        query_text: queryText,
+        top_k: topK,
+        threshold,
+        include_closed: includeClosed === true,
+        exclude_backlog_item_id: excludeBacklogItemId || null
+      },
+      ...result
+    };
+  } catch (operationError) {
+    throw normalizeSemanticError(operationError, {
+      unavailableMessage: 'Semantic bug search is temporarily unavailable',
+      internalMessage: 'Semantic bug search failed',
+      unavailableCode: 'SEMANTIC_BUG_SEARCH_UNAVAILABLE',
+      internalCode: 'SEMANTIC_BUG_SEARCH_FAILED'
+    });
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Remote MCP surface: POST /mcp (Streamable HTTP, stateless). F6-1 + F6-2.
+//
+// F6-2: la ejecución ya no pasa por apts-client.js ni por el salto HTTP interno.
+// dispatch() recibe un ejecutor en proceso con las mismas 21 funciones que
+// exportaba el cliente, y cada una llama directamente a la función de negocio.
+// ---------------------------------------------------------------------------
+
+// Identity headers set once in the client's MCP registration block (decision #1).
+// The call always wins over the header; when neither has a field we reject.
+const MCP_IDENTITY_HEADERS = {
+  project_url: 'x-apts-project-url',
+  agent_name: 'x-apts-agent-name',
+  agent_email: 'x-apts-agent-email'
+};
+const MCP_IDENTITY_HEADER_LABELS = {
+  project_url: 'X-APTS-Project-Url',
+  agent_name: 'X-APTS-Agent-Name',
+  agent_email: 'X-APTS-Agent-Email'
+};
+
+// Campos de identidad que el cliente autorellenaba por operación. Con la ejecución
+// en proceso el cliente ya no está en el camino, así que la tabla vive aquí y es la
+// que decide qué se exige antes de ejecutar (decisión #1). Mientras el archivo
+// descargable siga publicándose, la prueba interna de contrato (F6-2-T3) comprueba
+// que esta tabla y la del cliente no se separen.
+const MCP_IDENTITY_FIELDS_BY_OPERATION = {
+  register_task: ['project_url', 'agent_name', 'agent_email'],
+  read_project_context: ['url'],
+  list_backlog_items: ['url'],
+  get_project_constraints: ['url'],
+  search_similar_bug_reports: ['url'],
+  create_backlog_item: ['project_url'],
+  update_task_status: ['task_id', 'project_url', 'agent_name', 'agent_email'],
+  // `branch` sale de la lista en F6-2: sin cliente por medio no hay resolución
+  // automática que cortar, y la decisión #1 la daba por opcional de verdad.
+  log_agent_progress: ['task_id', 'project_url', 'agent_name'],
+  report_blocker: ['task_id', 'project_url', 'agent_name'],
+  heartbeat: ['task_id', 'project_url', 'agent_name'],
+  apts_next: ['project_url', 'agent_name'],
+  apts_status: ['project_url'],
+  apts_workflow_step: ['project_url', 'agent_name'],
+  apts_submit_step: ['project_url', 'agent_name'],
+  create_initiative: ['project_url'],
+  set_agent_role: ['project_url']
+};
+
+let mcpRuntimePromise = null;
+
+// Solo el despachador: la ejecución la resuelve mcpLocalExecutor, en este proceso.
+const loadMcpRuntime = () => {
+  if (mcpRuntimePromise) return mcpRuntimePromise;
+
+  mcpRuntimePromise = import(pathToFileURL(path.join(integrationRoot, 'paquete-apts', 'apts-mcp.js')).href)
+    .then((server) => ({ server }))
+    .catch((error) => {
+      mcpRuntimePromise = null;
+      throw error;
+    });
+
+  return mcpRuntimePromise;
+};
+
+// --- Ejecutor en proceso (F6-2-T1) ----------------------------------------
+//
+// dispatch() llama a `client[clientExport](payload)`. Antes ese objeto era el
+// módulo apts-client.js, que hablaba HTTP contra este mismo servidor. Ahora es el
+// objeto de abajo, con las mismas 21 funciones llamando directamente a la función
+// de negocio que llamaría la ruta express. apts-mcp.js no se toca.
+//
+// Cada función reproduce **la ruta concreta que el cliente habría llamado** con
+// ese mismo payload: mismo esquema de validación, mismo cuerpo de respuesta y,
+// cuando falla, el mismo error que el cliente habría construido a partir de la
+// respuesta HTTP. Es lo que hace comparable el resultado en F6-2-T5.
+
+const mcpStatusToErrorCode = (statusCode) => {
+  if (statusCode === 400) return 'BAD_REQUEST';
+  if (statusCode === 401) return 'UNAUTHORIZED';
+  if (statusCode === 403) return 'FORBIDDEN';
+  if (statusCode === 404) return 'NOT_FOUND';
+  if (statusCode === 408) return 'TIMEOUT';
+  if (statusCode === 409) return 'CONFLICT';
+  if (statusCode === 422) return 'UNPROCESSABLE_ENTITY';
+  if (statusCode === 429) return 'RATE_LIMITED';
+  if (statusCode >= 500) return 'SERVER_ERROR';
+  return 'APTS_HTTP_ERROR';
+};
+
+const isMcpRetriableStatus = (statusCode) => statusCode === 408
+  || statusCode === 425
+  || statusCode === 429
+  || statusCode >= 500;
+
+// Traduce un error del servidor al mismo objeto que apts-client.js habría creado
+// leyendo la respuesta HTTP (apts-client.js:631). Sin esto, un mismo rechazo se
+// vería distinto por cada camino aunque la causa fuera la misma.
+const buildMcpExecutionError = (statusCode, payload) => {
+  const executionError = new Error(payload.error || `APTS request failed with status ${statusCode}`);
+  executionError.name = 'AptsClientError';
+  executionError.statusCode = statusCode;
+  executionError.errorCode = typeof payload.error_code === 'string'
+    ? payload.error_code
+    : mcpStatusToErrorCode(statusCode);
+  executionError.retriable = typeof payload.retriable === 'boolean'
+    ? payload.retriable
+    : isMcpRetriableStatus(statusCode);
+  executionError.details = payload;
+  return executionError;
+};
+
+// Envuelve una operación con el mismo registro y la misma traducción de error que
+// haría la ruta express al responder.
+const runMcpOperation = async (operation, {
+  fallbackMessage,
+  logMessage,
+  logContext = {},
+  mapError
+}) => {
+  try {
+    return await operation();
+  } catch (operationError) {
+    // `mapError` existe porque no todas las rutas responden igual: `apts_set_status`
+    // tiene un atajo propio para los errores con statusCode numérico y devuelve
+    // `error_code` en vez de `code`. Sin reproducirlo, el envoltorio no coincide.
+    const mapped = mapError ? mapError(operationError) : null;
+    const { statusCode, payload } = mapped || buildApiErrorPayload(operationError, { fallbackMessage });
+
+    const logPayload = { ...logContext, error: serializeErrorForLog(operationError) };
+    if (statusCode >= 500) {
+      logger.error(logPayload, logMessage);
+    } else {
+      logger.warn(logPayload, logMessage);
+    }
+
+    throw buildMcpExecutionError(statusCode, payload);
+  }
+};
+
+// Reproduce la orquestación de lotes de las rutas: array = lote (nunca estricto,
+// porque la superficie MCP no tiene forma de pedir `strict`), objeto = elemento
+// suelto por la ruta de un solo elemento.
+const runMcpBatch = async (payload, { schema, handler, assertBatchItems }) => {
+  const { isBatch, items, error } = normalizeBatchRequestBody(payload);
+  if (error) {
+    throw createHttpError(400, error);
+  }
+
+  const parsedItems = schema ? parseBatchItems(items, schema) : items.map((item) => item || {});
+
+  if (!isBatch) {
+    return handler(parsedItems[0], 0);
+  }
+
+  if (assertBatchItems) assertBatchItems(parsedItems);
+
+  const results = await executeBatchOperation(parsedItems, handler);
+  return buildBatchOperationResponse(results).payload;
+};
+
+// Valida el identificador con el mismo esquema que usa la ruta al leerlo de la URL.
+const parseMcpPathUuid = (value, schema) => {
+  const parsed = schema.safeParse({ id: value });
+  if (!parsed.success) {
+    throw createHttpError(400, zodErrorMessage(parsed.error));
+  }
+  return parsed.data.id;
+};
+
+const parseMcpBody = (payload, schema) => {
+  const parsed = schema.safeParse(payload || {});
+  if (!parsed.success) {
+    throw createHttpError(400, zodErrorMessage(parsed.error));
+  }
+  return parsed.data;
+};
+
+const requireMcpTrimmedString = (value, message) => {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  if (!normalized) {
+    throw createHttpError(400, message);
+  }
+  return normalized;
+};
+
+const mcpLocalExecutor = {
+  registerTask: (payload) => runMcpOperation(
+    () => runMcpBatch(payload, {
+      schema: registerTaskBodySchema,
+      handler: (item) => registerTaskInternal(item)
+    }),
+    { fallbackMessage: 'Failed to register task', logMessage: 'register_task failed' }
+  ),
+
+  readProjectContext: (payload) => runMcpOperation(
+    () => readProjectContextInternal(parseReadProjectContextOptions(payload)),
+    { fallbackMessage: 'Failed to read project context', logMessage: 'read_project_context failed' }
+  ),
+
+  listBacklogItems: (payload) => runMcpOperation(
+    async () => {
+      const { url, status, ...listOptions } = parseListBacklogItemsOptions(payload);
+      return { backlog: await listBacklogItems(url, status, listOptions) };
+    },
+    { fallbackMessage: 'Failed to list backlog items', logMessage: 'list_backlog_items failed' }
+  ),
+
+  getBacklogItem: (payload) => runMcpOperation(
+    () => getBacklogItemInternal(
+      parseMcpPathUuid(payload?.backlog_item_id, backlogIdParamSchema),
+      parseGetBacklogItemOptions(payload)
+    ),
+    { fallbackMessage: 'Failed to read backlog item', logMessage: 'read_backlog_item failed' }
+  ),
+
+  getTask: (payload) => runMcpOperation(
+    () => getTaskInternal(
+      parseMcpPathUuid(payload?.task_id, taskIdParamSchema),
+      parseGetTaskOptions(payload)
+    ),
+    { fallbackMessage: 'Failed to read task details', logMessage: 'read_task_details failed' }
+  ),
+
+  getProjectConstraints: (payload) => runMcpOperation(
+    () => {
+      const url = normalizeUrl(payload?.url);
+      if (!url) {
+        throw createHttpError(400, 'Project url is required');
+      }
+      return getProjectConstraints(url);
+    },
+    { fallbackMessage: 'Failed to read project constraints', logMessage: 'read_project_constraints failed' }
+  ),
+
+  searchSimilarBugReports: (payload) => runMcpOperation(
+    () => searchSimilarBugReportsOperation(parseMcpBody(payload, semanticBugSearchBodySchema)),
+    { fallbackMessage: 'Failed to execute semantic bug search', logMessage: 'semantic_bug_search failed' }
+  ),
+
+  createBacklogItem: (payload) => runMcpOperation(
+    () => runMcpBatch(payload, {
+      schema: null,
+      assertBatchItems: assertBacklogCreateBatchItems,
+      handler: (item) => createBacklogItemInternal(item)
+    }),
+    { fallbackMessage: 'Failed to create backlog item', logMessage: 'create_backlog_item failed' }
+  ),
+
+  updateBacklogItem: (payload) => runMcpOperation(
+    () => {
+      if (Array.isArray(payload)) {
+        return runMcpBatch(payload, {
+          schema: backlogIdBodySchema,
+          handler: (parsed, index) => updateBacklogItemInternal(parsed.backlog_item_id, payload[index] || {})
+        });
+      }
+
+      const { backlog_item_id: backlogItemId, ...body } = payload || {};
+      return updateBacklogItemInternal(backlogItemId, body);
+    },
+    { fallbackMessage: 'Failed to update backlog item', logMessage: 'update_backlog_item failed' }
+  ),
+
+  deleteBacklogItem: (payload) => runMcpOperation(
+    () => {
+      if (Array.isArray(payload)) {
+        return runMcpBatch(payload, {
+          schema: backlogIdBodySchema,
+          handler: (parsed) => deleteBacklogItemInternal(parsed.backlog_item_id)
+        });
+      }
+
+      return deleteBacklogItemInternal(payload?.backlog_item_id);
+    },
+    { fallbackMessage: 'Failed to delete backlog item', logMessage: 'delete_backlog_item failed' }
+  ),
+
+  updateTaskStatus: (payload) => runMcpOperation(
+    () => {
+      if (Array.isArray(payload)) {
+        return runMcpBatch(payload, {
+          schema: taskStatusUpdateBatchBodySchema,
+          handler: ({ task_id: taskId, ...body }) => updateTaskStatusInternal(taskId, body)
+        });
+      }
+
+      const { task_id: rawTaskId, ...rawBody } = payload || {};
+      const taskId = parseMcpPathUuid(rawTaskId, taskIdParamSchema);
+      return updateTaskStatusInternal(taskId, parseMcpBody(rawBody, taskStatusUpdateBodySchema));
+    },
+    { fallbackMessage: 'Failed to update task status', logMessage: 'update_task_status failed' }
+  ),
+
+  logAgentProgress: (payload) => runMcpOperation(
+    () => {
+      if (Array.isArray(payload)) {
+        return runMcpBatch(payload, {
+          schema: logAgentProgressBatchBodySchema,
+          handler: ({ task_id: taskId, ...body }) => logAgentProgressInternal(taskId, body)
+        });
+      }
+
+      // El cliente quitaba project_url del cuerpo antes de mandarlo: la ruta de un
+      // solo elemento no lo acepta y el identificador viaja en la URL.
+      const { task_id: rawTaskId, project_url: _projectUrl, ...rawBody } = payload || {};
+      const taskId = parseMcpPathUuid(rawTaskId, taskIdParamSchema);
+      return logAgentProgressInternal(taskId, parseMcpBody(rawBody, logAgentProgressBodySchema));
+    },
+    { fallbackMessage: 'Failed to log agent progress', logMessage: 'log_agent_progress failed' }
+  ),
+
+  reportBlocker: (payload) => runMcpOperation(
+    () => runMcpBatch(payload, {
+      schema: reportBlockerBodySchema,
+      handler: (item) => reportBlockerInternal(item)
+    }),
+    { fallbackMessage: 'Failed to report blocker', logMessage: 'report_blocker failed' }
+  ),
+
+  heartbeat: (payload) => runMcpOperation(
+    () => {
+      if (Array.isArray(payload)) {
+        return runMcpBatch(payload, {
+          schema: heartbeatBatchBodySchema,
+          handler: (parsed) => heartbeatInternal(parsed.task_id)
+        });
+      }
+
+      const { task_id: rawTaskId, ...rawBody } = payload || {};
+      const taskId = parseMcpPathUuid(rawTaskId, taskIdParamSchema);
+      // Diferencia declarada (decisión #4): el servidor valida el resto del cuerpo
+      // y luego lo descarta; heartbeatInternal solo usa el identificador.
+      parseMcpBody(rawBody, heartbeatBodySchema);
+      return heartbeatInternal(taskId);
+    },
+    { fallbackMessage: 'Failed to register heartbeat', logMessage: 'heartbeat failed' }
+  ),
+
+  aptsNext: (payload) => runMcpOperation(
+    () => aptsNext(db, {
+      project_url: requireMcpTrimmedString(payload?.project_url, 'project_url is required'),
+      agent_name: requireMcpTrimmedString(payload?.agent_name, 'agent_name is required')
+    }),
+    { fallbackMessage: 'Failed to resolve next method step', logMessage: 'apts_next failed' }
+  ),
+
+  aptsStatus: (payload) => runMcpOperation(
+    () => {
+      // La ruta lee `url` de la cadena de consulta; el contrato lo llama project_url.
+      const projectUrl = requireMcpTrimmedString(payload?.project_url, 'url is required');
+      const agentName = typeof payload?.agent_name === 'string' ? payload.agent_name.trim() : '';
+      return methodStatus(db, { project_url: projectUrl, agent_name: agentName || null });
+    },
+    { fallbackMessage: 'Failed to read method status', logMessage: 'apts_status failed' }
+  ),
+
+  aptsSetStatus: (payload) => runMcpOperation(
+    () => {
+      const backlogItemId = payload?.backlog_item_id;
+      if (!UUID_REGEX.test(backlogItemId || '')) {
+        throw createHttpError(400, 'Invalid backlog item id');
+      }
+      if (!STORY_METHOD_STATUSES.includes(payload?.status)) {
+        throw createHttpError(400, `status must be one of: ${STORY_METHOD_STATUSES.join(', ')}`);
+      }
+      return setMethodStatus(db, { backlog_item_id: backlogItemId, status: payload.status });
+    },
+    {
+      fallbackMessage: 'Failed to set method status',
+      logMessage: 'apts_set_status failed',
+      // Atajo propio de la ruta: cuando el error trae statusCode numérico responde
+      // `{ error, error_code }` tal cual, sin pasar por sendApiError —o sea sin
+      // `code` y sin recorte del mensaje—. `error_code: undefined` desaparece al
+      // serializar a JSON, igual que en la ruta.
+      mapError: (operationError) => (typeof operationError?.statusCode === 'number'
+        ? {
+          statusCode: operationError.statusCode,
+          payload: JSON.parse(JSON.stringify({ error: operationError.message, error_code: operationError.code }))
+        }
+        : null)
+    }
+  ),
+
+  aptsWorkflowStep: (payload) => runMcpOperation(
+    () => {
+      const projectUrl = requireMcpTrimmedString(payload?.project_url, 'project_url is required');
+      const agentName = requireMcpTrimmedString(payload?.agent_name, 'agent_name is required');
+      const answers = payload?.answers;
+      if (answers !== undefined && answers !== null && (typeof answers !== 'object' || Array.isArray(answers))) {
+        throw createHttpError(400, 'answers must be an object');
+      }
+      return aptsWorkflowStep(db, { project_url: projectUrl, agent_name: agentName, answers });
+    },
+    { fallbackMessage: 'Failed to serve workflow step', logMessage: 'apts_workflow_step failed' }
+  ),
+
+  aptsSubmitStep: (payload) => runMcpOperation(
+    () => {
+      const projectUrl = requireMcpTrimmedString(payload?.project_url, 'project_url is required');
+      const agentName = requireMcpTrimmedString(payload?.agent_name, 'agent_name is required');
+      const output = payload?.output;
+      if (output !== undefined && output !== null && (typeof output !== 'object' || Array.isArray(output))) {
+        throw createHttpError(400, 'output must be an object');
+      }
+      return aptsSubmitStep(db, { project_url: projectUrl, agent_name: agentName, output });
+    },
+    { fallbackMessage: 'Failed to submit workflow step', logMessage: 'apts_submit_step failed' }
+  ),
+
+  createInitiative: (payload) => runMcpOperation(
+    () => createInitiative(db, parseCreateInitiativeInput(payload)),
+    { fallbackMessage: 'Failed to create initiative', logMessage: 'create_initiative failed' }
+  ),
+
+  setAgentRole: (payload) => runMcpOperation(
+    () => setAgentRole(db, {
+      project_url: requireMcpTrimmedString(payload?.project_url, 'project_url is required'),
+      agent_name: requireMcpTrimmedString(payload?.agent_name, 'agent_name is required'),
+      entity_key: requireMcpTrimmedString(payload?.entity_key, 'entity_key is required')
+    }),
+    { fallbackMessage: 'Failed to set agent role', logMessage: 'set_agent_role failed' }
+  )
+};
+
+const hasMcpIdentityValue = (value) => typeof value === 'string' && value.trim().length > 0;
+
+const readMcpHeaderIdentity = (req) => {
+  const identity = {};
+
+  for (const [field, header] of Object.entries(MCP_IDENTITY_HEADERS)) {
+    const raw = req.headers[header];
+    if (hasMcpIdentityValue(raw)) {
+      identity[field] = raw.trim();
+    }
+  }
+
+  return identity;
+};
+
+// Rellena la identidad desde la llamada primero y la cabecera después. Lo que
+// siga faltando se informa para que la ruta rechace: sin project_url una llamada
+// escribiría contra el proyecto equivocado (decisión #1).
+const injectMcpIdentity = (payload, autoFillFields, headerIdentity) => {
+  const fields = autoFillFields || [];
+  if (!fields.length) return { payload, missing: [], sources: {} };
+
+  if (Array.isArray(payload)) {
+    const missing = new Set();
+    const sources = {};
+    const conflicts = [];
+    const items = payload.map((item) => {
+      const result = injectMcpIdentity(item, fields, headerIdentity);
+      result.missing.forEach((field) => missing.add(field));
+      Object.assign(sources, result.sources);
+      conflicts.push(...(result.conflicts || []));
+      return result.payload;
+    });
+
+    return { payload: items, missing: [...missing], sources, conflicts };
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    return { payload, missing: [...fields], sources: {}, conflicts: [] };
+  }
+
+  const enriched = { ...payload };
+  const missing = [];
+  const sources = {};
+  const conflicts = [];
+
+  for (const field of fields) {
+    if (hasMcpIdentityValue(enriched[field])) {
+      sources[field] = 'call';
+      // F6-4 — "la llamada gana a la cabecera" (decisión #1) existe para el cambio de rol,
+      // que va por `agent_name`. Aplicado a la identidad de PROYECTO abre otra puerta: un
+      // cliente real (opencode 1.18.10) mandó `project_url` con la ruta del sistema de
+      // archivos del cliente y pisó la cabecera correcta. Ahí no se pisa en silencio ni se
+      // ignora en silencio: se rechaza nombrando los dos valores.
+      const identityFieldName = field === 'url' ? 'project_url' : field;
+      if (identityFieldName === 'project_url'
+        && hasMcpIdentityValue(headerIdentity[identityFieldName])
+        && String(enriched[field]).trim() !== String(headerIdentity[identityFieldName]).trim()) {
+        conflicts.push({
+          field,
+          header_value: headerIdentity[identityFieldName],
+          call_value: enriched[field]
+        });
+      }
+      continue;
+    }
+
+    const identityField = field === 'url' ? 'project_url' : field;
+    if (hasMcpIdentityValue(headerIdentity[identityField])) {
+      enriched[field] = headerIdentity[identityField];
+      sources[field] = 'header';
+      continue;
+    }
+
+    missing.push(field);
+  }
+
+  return { payload: enriched, missing, sources, conflicts };
+};
+
+const buildMcpIdentityConflictPayload = (operationName, conflicts) => ({
+  ok: false,
+  error: {
+    name: 'AptsIdentityError',
+    message: `${operationName} sent a ${conflicts.map((c) => c.field).join(', ')} that contradicts the MCP registration header. `
+      + `Omit it: the integration layer supplies the project identity.`,
+    code: 'IDENTITY_CONFLICT',
+    statusCode: 400,
+    retriable: false,
+    details: {
+      operation: operationName,
+      conflicts: conflicts.map((c) => ({
+        field: c.field,
+        header: MCP_IDENTITY_HEADER_LABELS[c.field === 'url' ? 'project_url' : c.field] || null,
+        header_value: c.header_value,
+        call_value: c.call_value
+      }))
+    }
+  }
+});
+
+const buildMcpIdentityErrorPayload = (operationName, missingFields) => ({
+  ok: false,
+  error: {
+    name: 'AptsIdentityError',
+    message: `${operationName} is missing required identity fields: ${missingFields.join(', ')}. The remote surface never resolves them from the server.`,
+    code: 'MISSING_IDENTITY',
+    statusCode: 400,
+    retriable: false,
+    details: {
+      operation: operationName,
+      missing_fields: missingFields,
+      resolution: missingFields.map((field) => {
+        const identityField = field === 'url' ? 'project_url' : field;
+        return {
+          field,
+          header: MCP_IDENTITY_HEADER_LABELS[identityField] || null,
+          source: MCP_IDENTITY_HEADER_LABELS[identityField]
+            ? 'MCP registration header, or this call'
+            : 'this call only'
+        };
+      })
+    }
+  }
+});
+
+const isValidMcpMessage = (message) => Boolean(message)
+  && typeof message === 'object'
+  && !Array.isArray(message)
+  && message.jsonrpc === '2.0'
+  && typeof message.method === 'string';
+
+// MCP clients are local processes and normally send no Origin; only reject when
+// one is present and unknown (DNS-rebinding defense without false positives).
+const isMcpOriginAllowed = (req) => {
+  const origin = req.headers.origin;
+  if (!hasMcpIdentityValue(origin)) return true;
+  return allowedOrigins.includes(origin.trim());
+};
+
+// We never emit SSE on this route, so we only require that the client accepts JSON.
+const isMcpAcceptAllowed = (req) => {
+  const accept = req.headers.accept;
+  if (!hasMcpIdentityValue(accept)) return true;
+  return /application\/json|\*\/\*/i.test(accept);
+};
+
+app.get('/mcp', apiLimiter, (_req, res) => res
+  .status(405)
+  .set('Allow', 'POST')
+  .json({
+    jsonrpc: '2.0',
+    id: null,
+    error: {
+      code: -32000,
+      message: 'Method Not Allowed: this MCP endpoint is stateless and has no server-to-client stream. Use POST /mcp.'
+    }
+  }));
+
+app.post('/mcp', apiLimiter, authenticateAgent, mcpJsonParser, async (req, res) => {
+  if (!isMcpOriginAllowed(req)) {
+    return res.status(403).json({ error: 'Origin not allowed' });
+  }
+
+  if (!isMcpAcceptAllowed(req)) {
+    return res.status(406).json({ error: 'Accept header must allow application/json' });
+  }
+
+  let runtime;
+  try {
+    runtime = await loadMcpRuntime();
+  } catch (error) {
+    logger.error({ err: error }, 'MCP runtime failed to load');
+    return res.status(500).json({
+      jsonrpc: '2.0',
+      id: null,
+      error: { code: -32603, message: 'MCP runtime unavailable' }
+    });
+  }
+
+  const { buildError, buildResult, dispatch } = runtime.server;
+  const message = req.body;
+
+  if (!isValidMcpMessage(message)) {
+    return res.status(400).json(buildError(message?.id ?? null, -32600, 'Invalid Request'));
+  }
+
+  const isNotification = message.id === undefined || message.id === null;
+  const headerIdentity = readMcpHeaderIdentity(req);
+
+  // Logged for every message, not just tool calls, so `initialize` shows whether
+  // the client program actually sends the registration headers (F6-1-T4).
+  logger.info({
+    mcp_request: {
+      method: message.method,
+      client: message.params?.clientInfo?.name || null,
+      identity_headers: Object.keys(headerIdentity)
+    }
+  }, 'MCP request');
+
+  if (message.method === 'tools/call') {
+    const operationName = message.params?.name;
+    const rawArguments = message.params?.arguments;
+    const payload = rawArguments === undefined || rawArguments === null ? {} : rawArguments;
+    const autoFillFields = MCP_IDENTITY_FIELDS_BY_OPERATION[operationName];
+    const resolved = injectMcpIdentity(payload, autoFillFields, headerIdentity);
+
+    logger.info({
+      mcp_identity: {
+        operation: operationName,
+        header_fields: Object.keys(headerIdentity),
+        sources: resolved.sources,
+        missing: resolved.missing,
+        conflicts: (resolved.conflicts || []).map((c) => c.field)
+      }
+    }, 'MCP identity resolved');
+
+    if ((resolved.conflicts || []).length) {
+      if (isNotification) return res.status(202).end();
+
+      const conflictPayload = buildMcpIdentityConflictPayload(operationName, resolved.conflicts);
+      return res.json(buildResult(message.id, {
+        content: [{ type: 'text', text: JSON.stringify(conflictPayload) }],
+        structuredContent: conflictPayload,
+        isError: true
+      }));
+    }
+
+    if (resolved.missing.length) {
+      if (isNotification) return res.status(202).end();
+
+      const errorPayload = buildMcpIdentityErrorPayload(operationName, resolved.missing);
+      return res.json(buildResult(message.id, {
+        content: [{ type: 'text', text: JSON.stringify(errorPayload) }],
+        structuredContent: errorPayload,
+        isError: true
+      }));
+    }
+
+    message.params = { ...message.params, arguments: resolved.payload };
+  }
+
+  try {
+    const response = await dispatch(message, mcpLocalExecutor);
+    if (!response) return res.status(202).end();
+    return res.json(response);
+  } catch (error) {
+    logger.error({ err: error, method: message.method }, 'MCP dispatch failed');
+    if (isNotification) return res.status(202).end();
+    return res.status(500).json(buildError(message.id, -32603, 'Internal error', {
+      message: error?.message || String(error)
+    }));
+  }
+});
+
 // Skill 0: register_task
 app.post('/api/projects/tasks', apiLimiter, authenticateAgent, async (req, res) => {
   const { isBatch, items, error } = normalizeBatchRequestBody(req.body);
@@ -3088,13 +4375,11 @@ app.post('/api/projects/tasks', apiLimiter, authenticateAgent, async (req, res) 
   }
   const useStrictBatchMode = shouldUseStrictBatchMode(req, isBatch);
 
-  const parsedItems = [];
-  for (let index = 0; index < items.length; index += 1) {
-    const parsedBody = registerTaskBodySchema.safeParse(items[index] || {});
-    if (!parsedBody.success) {
-      return res.status(400).json({ error: `Invalid payload at index ${index}: ${zodErrorMessage(parsedBody.error)}` });
-    }
-    parsedItems.push(parsedBody.data);
+  let parsedItems;
+  try {
+    parsedItems = parseBatchItems(items, registerTaskBodySchema);
+  } catch (parseError) {
+    return res.status(400).json({ error: parseError.message });
   }
 
   try {
@@ -3122,76 +4407,8 @@ app.post('/api/projects/tasks', apiLimiter, authenticateAgent, async (req, res) 
 // Skill 1: read_project_context
 app.get('/api/projects/context', apiLimiter, authenticateAgent, async (req, res) => {
   try {
-    const url = normalizeUrl(req.query.url);
-    const view = validateResponseView(req.query.view);
-    const includeSections = parseProjectContextInclude(req.query.include);
-    const limit = parseOptionalNonNegativeInteger(req.query.limit, 'limit', { max: MAX_TASK_DETAIL_LOG_LIMIT }) ?? 5;
-    const tasksLimit = parseOptionalNonNegativeInteger(req.query.tasks_limit, 'tasks_limit', { max: MAX_PROJECT_CONTEXT_SECTION_LIMIT })
-      ?? DEFAULT_PROJECT_CONTEXT_SECTION_LIMIT;
-    const tasksOffset = parseOptionalNonNegativeInteger(req.query.tasks_offset, 'tasks_offset') ?? 0;
-    const backlogLimit = parseOptionalNonNegativeInteger(req.query.backlog_limit, 'backlog_limit', { max: MAX_PROJECT_CONTEXT_SECTION_LIMIT })
-      ?? DEFAULT_PROJECT_CONTEXT_SECTION_LIMIT;
-    const backlogOffset = parseOptionalNonNegativeInteger(req.query.backlog_offset, 'backlog_offset') ?? 0;
-    const backlogStatus = normalizeInputString(req.query.backlog_status, { unwrapQuotes: true, lowercase: true }) || null;
-
-    if (!url) {
-      return res.status(400).json({ error: 'Project url is required' });
-    }
-
-    if (backlogStatus && !BACKLOG_STATUSES.includes(backlogStatus)) {
-      return res.status(400).json({ error: 'Invalid backlog status' });
-    }
-
-    const responsePayload = {};
-
-    if (includeSections.has('tasks')) {
-      const tasksQuery = db('tasks')
-        .where({ project_url: url })
-        .orderBy('updated_at', 'desc')
-        .offset(tasksOffset)
-        .limit(tasksLimit);
-      const tasks = (view === 'compact'
-        ? await tasksQuery.select(TASK_COMPACT_SELECT_COLUMNS)
-        : await tasksQuery.select('*'))
-        .map((task) => mapTaskRecord(task, { view }));
-      responsePayload.tasks = tasks;
-    }
-
-    if (includeSections.has('backlog')) {
-      const backlog = await listBacklogItems(url, backlogStatus, {
-        view,
-        limit: backlogLimit,
-        offset: backlogOffset
-      });
-      responsePayload.backlog = backlog;
-    }
-
-    if (includeSections.has('logs')) {
-      const logsQuery = db('agent_logs')
-        .join('tasks', 'agent_logs.task_id', 'tasks.id')
-        .where('tasks.project_url', url)
-        .orderBy('agent_logs.created_at', 'desc')
-        .limit(limit);
-
-      const logs = (view === 'compact'
-        ? await logsQuery.select(
-          'agent_logs.id',
-          'agent_logs.task_id',
-          'agent_logs.action_type',
-          'agent_logs.agent_name',
-          'agent_logs.branch',
-          'agent_logs.message',
-          'agent_logs.created_at',
-          'agent_logs.updated_at',
-          db.raw("CASE WHEN agent_logs.technical_details IS NULL THEN 'false' ELSE 'true' END AS has_technical_details")
-        )
-        : await logsQuery.select('agent_logs.*'))
-        .map((log) => mapAgentLogRecord(log, { view }));
-
-      responsePayload.logs = logs;
-    }
-
-    return res.json(responsePayload);
+    const options = parseReadProjectContextOptions(req.query);
+    return res.json(await readProjectContextInternal(options));
   } catch (routeError) {
     return sendApiError(res, routeError, {
       fallbackMessage: 'Failed to read project context',
@@ -3234,40 +4451,8 @@ app.get('/api/projects/:url/constraints', apiLimiter, authenticateAgent, async (
 // Skill 1b: list_backlog_items
 app.get('/api/projects/backlog', apiLimiter, authenticateAgent, async (req, res) => {
   try {
-    const url = normalizeUrl(req.query.url);
-    const status = normalizeInputString(req.query.status, { unwrapQuotes: true, lowercase: true }) || null;
-    const includeDeleted = parseBooleanFlag(req.query.include_deleted);
-    const view = validateResponseView(req.query.view);
-    const id = normalizeInputString(req.query.id, { unwrapQuotes: true }) || null;
-    const ids = parseCommaSeparatedUuidList(req.query.ids, 'ids');
-    const limit = parseOptionalNonNegativeInteger(req.query.limit, 'limit', { max: MAX_BACKLOG_LIST_LIMIT })
-      ?? DEFAULT_BACKLOG_LIST_LIMIT;
-    const offset = parseOptionalNonNegativeInteger(req.query.offset, 'offset') ?? 0;
-
-    if (!url) {
-      return res.status(400).json({ error: 'Project url is required' });
-    }
-
-    if (status && !BACKLOG_STATUSES.includes(status)) {
-      return res.status(400).json({ error: 'Invalid backlog status' });
-    }
-
-    if (id && !isUuid(id)) {
-      return res.status(400).json({ error: 'id must be a valid UUID' });
-    }
-
-    if (id && ids.length > 0) {
-      return res.status(400).json({ error: 'Use either id or ids, not both' });
-    }
-
-    const backlog = await listBacklogItems(url, status, {
-      includeDeleted,
-      view,
-      id,
-      ids,
-      limit,
-      offset
-    });
+    const { url, status, ...listOptions } = parseListBacklogItemsOptions(req.query);
+    const backlog = await listBacklogItems(url, status, listOptions);
     return res.json({ backlog });
   } catch (routeError) {
     return sendApiError(res, routeError, {
@@ -3284,46 +4469,10 @@ app.post('/api/projects/backlog/semantic-search', apiLimiter, authenticateAgent,
     return res.status(400).json({ error: zodErrorMessage(parsedBody.error) });
   }
 
-  const {
-    url,
-    query_text: queryText,
-    top_k: requestedTopK,
-    threshold: requestedThreshold,
-    include_closed: includeClosed,
-    exclude_backlog_item_id: excludeBacklogItemId
-  } = parsedBody.data;
-
-  const topK = Math.max(1, Math.min(MAX_SEMANTIC_SEARCH_TOP_K, requestedTopK ?? DEFAULT_SEMANTIC_SEARCH_TOP_K));
-  const threshold = requestedThreshold ?? DEFAULT_SEMANTIC_SEARCH_THRESHOLD;
-
   try {
-    const result = await searchSimilarBugReports({
-      projectUrl: url,
-      queryText,
-      topK,
-      threshold,
-      includeClosed: includeClosed === true,
-      excludeBacklogItemId: excludeBacklogItemId || null
-    });
-
-    return res.json({
-      query: {
-        url: normalizeUrl(url),
-        query_text: queryText,
-        top_k: topK,
-        threshold,
-        include_closed: includeClosed === true,
-        exclude_backlog_item_id: excludeBacklogItemId || null
-      },
-      ...result
-    });
+    return res.json(await searchSimilarBugReportsOperation(parsedBody.data));
   } catch (routeError) {
-    return sendApiError(res, normalizeSemanticError(routeError, {
-      unavailableMessage: 'Semantic bug search is temporarily unavailable',
-      internalMessage: 'Semantic bug search failed',
-      unavailableCode: 'SEMANTIC_BUG_SEARCH_UNAVAILABLE',
-      internalCode: 'SEMANTIC_BUG_SEARCH_FAILED'
-    }), {
+    return sendApiError(res, routeError, {
       fallbackMessage: 'Failed to execute semantic bug search',
       logMessage: 'semantic_bug_search failed'
     });
@@ -3337,6 +4486,14 @@ app.post('/api/projects/backlog', apiLimiter, authenticateAgent, async (req, res
     return res.status(400).json({ error });
   }
   const useStrictBatchMode = shouldUseStrictBatchMode(req, isBatch);
+
+  if (isBatch) {
+    try {
+      assertBacklogCreateBatchItems(items);
+    } catch (parseError) {
+      return res.status(400).json({ error: parseError.message });
+    }
+  }
 
   try {
     if (!isBatch) {
@@ -3367,23 +4524,8 @@ app.get('/api/backlog/:id', apiLimiter, authenticateAgent, async (req, res) => {
   }
 
   try {
-    const view = validateResponseView(req.query.view || 'full');
-    const includeDeleted = parseBooleanFlag(req.query.include_deleted);
-
-    const backlogItemQuery = db('backlog_items').where({ id: parsedParams.data.id });
-    if (!includeDeleted) {
-      backlogItemQuery.whereNull('deleted_at');
-    }
-
-    const backlogItem = view === 'compact'
-      ? await backlogItemQuery.select(BACKLOG_COMPACT_SELECT_COLUMNS).first()
-      : await backlogItemQuery.select('*').first();
-
-    if (!backlogItem) {
-      return res.status(404).json({ error: 'Backlog item not found' });
-    }
-
-    return res.json({ backlog_item: mapBacklogItemRecord(backlogItem, { view }) });
+    const options = parseGetBacklogItemOptions(req.query);
+    return res.json(await getBacklogItemInternal(parsedParams.data.id, options));
   } catch (routeError) {
     return sendApiError(res, routeError, {
       fallbackMessage: 'Failed to read backlog item',
@@ -3427,18 +4569,14 @@ app.patch('/api/backlog', apiLimiter, authenticateAgent, async (req, res) => {
   }
   const useStrictBatchMode = shouldUseStrictBatchMode(req, isBatch);
 
-  const normalizedItems = [];
-  for (let index = 0; index < items.length; index += 1) {
-    const rawItem = items[index] || {};
-    const parsedBacklogId = backlogIdBodySchema.safeParse(rawItem);
-    if (!parsedBacklogId.success) {
-      return res.status(400).json({ error: `Invalid payload at index ${index}: ${zodErrorMessage(parsedBacklogId.error)}` });
-    }
-
-    normalizedItems.push({
-      backlog_item_id: parsedBacklogId.data.backlog_item_id,
-      body: rawItem
-    });
+  let normalizedItems;
+  try {
+    normalizedItems = parseBatchItems(items, backlogIdBodySchema).map((parsed, index) => ({
+      backlog_item_id: parsed.backlog_item_id,
+      body: items[index] || {}
+    }));
+  } catch (parseError) {
+    return res.status(400).json({ error: parseError.message });
   }
 
   try {
@@ -3470,13 +4608,11 @@ app.delete('/api/backlog', apiLimiter, authenticateAgent, async (req, res) => {
   }
   const useStrictBatchMode = shouldUseStrictBatchMode(req, isBatch);
 
-  const normalizedItems = [];
-  for (let index = 0; index < items.length; index += 1) {
-    const parsedBacklogId = backlogIdBodySchema.safeParse(items[index] || {});
-    if (!parsedBacklogId.success) {
-      return res.status(400).json({ error: `Invalid payload at index ${index}: ${zodErrorMessage(parsedBacklogId.error)}` });
-    }
-    normalizedItems.push(parsedBacklogId.data.backlog_item_id);
+  let normalizedItems;
+  try {
+    normalizedItems = parseBatchItems(items, backlogIdBodySchema).map((parsed) => parsed.backlog_item_id);
+  } catch (parseError) {
+    return res.status(400).json({ error: parseError.message });
   }
 
   try {
@@ -3507,36 +4643,15 @@ app.delete('/api/backlog', apiLimiter, authenticateAgent, async (req, res) => {
 // plegado + (opcional) la spec del cliente como semantic_documents tipado. Tras el
 // bootstrap, apts_next deja de devolver 'blocked' y entrega el primer step real.
 app.post('/api/projects/initiatives', apiLimiter, authenticateAgent, async (req, res) => {
-  const projectUrl = typeof req.body?.project_url === 'string' ? req.body.project_url.trim() : '';
-  const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
-  if (!projectUrl) {
-    return res.status(400).json({ error: 'project_url is required' });
-  }
-  if (!title) {
-    return res.status(400).json({ error: 'title is required' });
-  }
-  const specArtifact = req.body?.spec_artifact;
-  if (specArtifact !== undefined && specArtifact !== null
-      && (typeof specArtifact !== 'object' || Array.isArray(specArtifact))) {
-    return res.status(400).json({ error: 'spec_artifact must be an object' });
-  }
-
   try {
-    const payload = await createInitiative(db, {
-      project_url: projectUrl,
-      title,
-      track: req.body?.track,
-      source_ref: req.body?.source_ref,
-      phase: req.body?.phase,
-      description: req.body?.description,
-      spec_artifact: specArtifact,
-    });
+    const input = parseCreateInitiativeInput(req.body);
+    const payload = await createInitiative(db, input);
     return res.status(payload.created ? 201 : 200).json(payload);
   } catch (routeError) {
     return sendApiError(res, routeError, {
       fallbackMessage: 'Failed to create initiative',
       logMessage: 'create_initiative failed',
-      logContext: { project_url: projectUrl }
+      logContext: { project_url: req.body?.project_url }
     });
   }
 });
@@ -3713,69 +4828,8 @@ app.get('/api/tasks/:id', apiLimiter, authenticateAgent, async (req, res) => {
   }
 
   try {
-    const view = validateResponseView(req.query.view || 'full');
-    const logsLimit = parseOptionalNonNegativeInteger(req.query.limit, 'limit', { max: MAX_TASK_DETAIL_LOG_LIMIT })
-      ?? DEFAULT_TASK_DETAIL_LOG_LIMIT;
-    const taskId = parsedParams.data.id;
-
-    const taskQuery = db('tasks').where({ id: taskId });
-    const task = view === 'compact'
-      ? await taskQuery.select(TASK_COMPACT_SELECT_COLUMNS).first()
-      : await taskQuery.select('*').first();
-
-    if (!task) {
-      return res.status(404).json({ error: 'Task not found' });
-    }
-
-    const logsQuery = db('agent_logs')
-      .where({ task_id: taskId })
-      .orderBy('created_at', 'desc')
-      .limit(logsLimit);
-
-    const logs = (view === 'compact'
-      ? await logsQuery.select(
-        'id',
-        'task_id',
-        'action_type',
-        'agent_name',
-        'branch',
-        'message',
-        'created_at',
-        'updated_at',
-        db.raw("CASE WHEN technical_details IS NULL THEN 'false' ELSE 'true' END AS has_technical_details")
-      )
-      : await logsQuery.select('*'))
-      .map((log) => mapAgentLogRecord(log, { view }));
-
-    const heartbeatLogs = await db('agent_logs')
-      .where({ task_id: taskId, action_type: 'heartbeat' })
-      .orderBy('created_at', 'desc')
-      .limit(5)
-      .select('id', 'created_at', 'agent_name', 'branch', 'message');
-
-    const recentHeartbeats = heartbeatLogs.length > 0
-      ? heartbeatLogs.map((heartbeat) => ({
-        id: heartbeat.id,
-        timestamp: heartbeat.created_at,
-        agent_name: heartbeat.agent_name || null,
-        branch: heartbeat.branch || null,
-        message: heartbeat.message || null
-      }))
-      : (task.last_heartbeat
-        ? [{
-          id: null,
-          timestamp: task.last_heartbeat,
-          agent_name: task.agent_name || null,
-          branch: null,
-          message: null
-        }]
-        : []);
-
-    return res.json({
-      task: mapTaskRecord(task, { view }),
-      recent_heartbeats: recentHeartbeats,
-      logs
-    });
+    const options = parseGetTaskOptions(req.query);
+    return res.json(await getTaskInternal(parsedParams.data.id, options));
   } catch (routeError) {
     return sendApiError(res, routeError, {
       fallbackMessage: 'Failed to read task details',
@@ -3816,13 +4870,11 @@ app.patch('/api/tasks/status', apiLimiter, authenticateAgent, async (req, res) =
   }
   const useStrictBatchMode = shouldUseStrictBatchMode(req, isBatch);
 
-  const parsedItems = [];
-  for (let index = 0; index < items.length; index += 1) {
-    const parsedBody = taskStatusUpdateBatchBodySchema.safeParse(items[index] || {});
-    if (!parsedBody.success) {
-      return res.status(400).json({ error: `Invalid payload at index ${index}: ${zodErrorMessage(parsedBody.error)}` });
-    }
-    parsedItems.push(parsedBody.data);
+  let parsedItems;
+  try {
+    parsedItems = parseBatchItems(items, taskStatusUpdateBatchBodySchema);
+  } catch (parseError) {
+    return res.status(400).json({ error: parseError.message });
   }
 
   try {
@@ -3886,13 +4938,11 @@ app.post('/api/tasks/logs', apiLimiter, authenticateAgent, async (req, res) => {
   }
   const useStrictBatchMode = shouldUseStrictBatchMode(req, isBatch);
 
-  const parsedItems = [];
-  for (let index = 0; index < items.length; index += 1) {
-    const parsedBody = logAgentProgressBatchBodySchema.safeParse(items[index] || {});
-    if (!parsedBody.success) {
-      return res.status(400).json({ error: `Invalid payload at index ${index}: ${zodErrorMessage(parsedBody.error)}` });
-    }
-    parsedItems.push(parsedBody.data);
+  let parsedItems;
+  try {
+    parsedItems = parseBatchItems(items, logAgentProgressBatchBodySchema);
+  } catch (parseError) {
+    return res.status(400).json({ error: parseError.message });
   }
 
   try {
@@ -3933,13 +4983,11 @@ app.post('/api/projects/blockers', apiLimiter, authenticateAgent, async (req, re
   }
   const useStrictBatchMode = shouldUseStrictBatchMode(req, isBatch);
 
-  const parsedItems = [];
-  for (let index = 0; index < items.length; index += 1) {
-    const parsedBody = reportBlockerBodySchema.safeParse(items[index] || {});
-    if (!parsedBody.success) {
-      return res.status(400).json({ error: `Invalid payload at index ${index}: ${zodErrorMessage(parsedBody.error)}` });
-    }
-    parsedItems.push(parsedBody.data);
+  let parsedItems;
+  try {
+    parsedItems = parseBatchItems(items, reportBlockerBodySchema);
+  } catch (parseError) {
+    return res.status(400).json({ error: parseError.message });
   }
 
   try {
@@ -3995,13 +5043,11 @@ app.post('/api/tasks/heartbeat', apiLimiter, authenticateAgent, async (req, res)
   }
   const useStrictBatchMode = shouldUseStrictBatchMode(req, isBatch);
 
-  const parsedItems = [];
-  for (let index = 0; index < items.length; index += 1) {
-    const parsedBody = heartbeatBatchBodySchema.safeParse(items[index] || {});
-    if (!parsedBody.success) {
-      return res.status(400).json({ error: `Invalid payload at index ${index}: ${zodErrorMessage(parsedBody.error)}` });
-    }
-    parsedItems.push(parsedBody.data);
+  let parsedItems;
+  try {
+    parsedItems = parseBatchItems(items, heartbeatBatchBodySchema);
+  } catch (parseError) {
+    return res.status(400).json({ error: parseError.message });
   }
 
   try {
@@ -4519,8 +5565,92 @@ const startBackgroundJobs = () => {
   }, 60 * 1000);
 };
 
+// F6-2-T3: `contract-check` pasa a prueba interna del backend. Se ejecuta en el
+// arranque, antes de escuchar, y aborta si la superficie remota se ha separado del
+// contrato — el mismo criterio estricto que ya aplica `apts-mcp.js` al arrancar
+// (`checkMcpContract`, código de salida 3). El archivo descargable se sigue
+// publicando mientras dure la convivencia (decisión #7).
+//
+// Comprueba tres cosas que ningún otro sitio comprueba:
+//   1. el ejecutor en proceso expone exactamente una función por operación;
+//   2. la tabla de identidad no nombra operaciones que no existen;
+//   3. esa tabla no se ha separado de la del cliente descargable, salvo en la
+//      diferencia declarada (`branch` fuera de `log_agent_progress`, decisión #1).
+const DECLARED_IDENTITY_DIFFERENCES = {
+  log_agent_progress: ['branch']
+};
+
+const checkRemoteMcpContract = async () => {
+  const packageDir = path.join(integrationRoot, 'paquete-apts');
+  const { contractOperations } = await import(pathToFileURL(path.join(packageDir, 'contract-check.js')).href);
+  const operations = contractOperations();
+  const operationNames = new Set(operations.map((operation) => operation.name));
+  const problems = [];
+
+  const expectedExports = operations.map((operation) => operation.clientExport).sort();
+  const actualExports = Object.keys(mcpLocalExecutor)
+    .filter((key) => typeof mcpLocalExecutor[key] === 'function')
+    .sort();
+  const missingExports = expectedExports.filter((name) => !actualExports.includes(name));
+  const extraExports = actualExports.filter((name) => !expectedExports.includes(name));
+  if (missingExports.length || extraExports.length) {
+    problems.push({
+      surface: 'mcp_local_executor',
+      missing: missingExports,
+      unexpected: extraExports
+    });
+  }
+
+  const unknownIdentityOperations = Object.keys(MCP_IDENTITY_FIELDS_BY_OPERATION)
+    .filter((name) => !operationNames.has(name));
+  if (unknownIdentityOperations.length) {
+    problems.push({
+      surface: 'mcp_identity_table',
+      unexpected: unknownIdentityOperations
+    });
+  }
+
+  // La comparación con el cliente es tolerante a que el archivo desaparezca: está
+  // marcado para retirarse, y su ausencia no debe tumbar el backend.
+  try {
+    const clientModule = await import(pathToFileURL(path.join(packageDir, 'apts-client.js')).href);
+    const clientTable = clientModule.AUTO_FILL_FIELDS_BY_OPERATION || {};
+    const drifted = [];
+
+    for (const name of new Set([...Object.keys(clientTable), ...Object.keys(MCP_IDENTITY_FIELDS_BY_OPERATION)])) {
+      const declared = DECLARED_IDENTITY_DIFFERENCES[name] || [];
+      const fromClient = (clientTable[name] || []).filter((field) => !declared.includes(field)).sort();
+      const fromServer = (MCP_IDENTITY_FIELDS_BY_OPERATION[name] || []).sort();
+      if (JSON.stringify(fromClient) !== JSON.stringify(fromServer)) {
+        drifted.push({ operation: name, client: fromClient, server: fromServer });
+      }
+    }
+
+    if (drifted.length) {
+      problems.push({ surface: 'mcp_identity_table_vs_client', drifted });
+    }
+  } catch (error) {
+    logger.warn({ err: error }, 'Contract self-check skipped the downloadable client comparison');
+  }
+
+  if (problems.length) {
+    const contractError = new Error('Remote MCP surface is out of sync with apts_skills.json');
+    contractError.code = 'CONTRACT_MISMATCH';
+    contractError.details = problems;
+    throw contractError;
+  }
+
+  return { operations: operations.length };
+};
+
 const startServer = async () => {
   try {
+    const contractCheckResult = await checkRemoteMcpContract().catch((error) => {
+      logger.fatal({ err: error, details: error?.details || null }, 'Contract self-check failed');
+      process.exit(3);
+    });
+    logger.info(contractCheckResult, 'Remote MCP contract self-check passed');
+
     const [batchNo, migrationNames] = await db.migrate.latest();
 
     logger.info({

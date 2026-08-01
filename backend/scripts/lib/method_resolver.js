@@ -685,8 +685,16 @@ const setMethodStatus = (db, { backlog_item_id, status }) =>
     const from = item.status;
     const allowed = STORY_METHOD_TRANSITIONS[from] || [];
     if (!allowed.includes(status)) {
+      // F6-4 — La máquina de método es lineal hacia adelante, así que un estado como
+      // 'blocked' (lo pone la monitorización de latidos caducados) no tiene salida por
+      // aquí. Salida sí hay: la edición libre. Sin decirlo, el agente se queda parado
+      // pidiendo ayuda con la herramienta en la mano — medido en F6-4-T2.
+      const salida = allowed.length
+        ? ''
+        : `. Este estado no tiene salida por la máquina de método; para reponer la story usa `
+          + `update_backlog_item (edición libre), p. ej. status 'ready'`;
       throw new MethodStatusError(
-        `transición de método inválida: '${from}' → '${status}' (permitidas desde '${from}': ${allowed.length ? allowed.join(', ') : 'ninguna'})`,
+        `transición de método inválida: '${from}' → '${status}' (permitidas desde '${from}': ${allowed.length ? allowed.join(', ') : 'ninguna'})${salida}`,
         { code: 'INVALID_TRANSITION', statusCode: 409 },
       );
     }

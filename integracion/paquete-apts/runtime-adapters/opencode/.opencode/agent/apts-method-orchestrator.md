@@ -28,8 +28,8 @@ The method engine lives on the server. You do not invent phases, steps, roles, o
 `apts_next` / `apts_workflow_step` what is required and you satisfy exactly that.
 
 ## Surface (method tools)
-Use these MCP tools with minimal payloads (the official MCP server auto-resolves `project_url` and
-`agent_name` from env / managed context / Git when omitted):
+Use these MCP tools with minimal payloads (the integration layer supplies `project_url` and
+`agent_name` when you omit them):
 - `create_initiative` — bootstrap the initiative (idempotent by `project_url` + active status).
 - `set_agent_role` — register/upsert one roster role pointer (`agent_name` → method entity).
 - `apts_next` — ask what to do next: `{ next, target_id, role, why, args }`.
@@ -38,8 +38,8 @@ Use these MCP tools with minimal payloads (the official MCP server auto-resolves
 - `apts_submit_step` — capture the step output and advance the cursor.
 - `apts_set_status` — advance a story through the method state machine when needed.
 
-Never hand-roll Git identity discovery. Use minimal payloads first and inspect identity only when a
-call reports a missing required field.
+Never hand-roll identity discovery. Use minimal payloads; if a call reports a missing identity field,
+it is a setup issue for the operator, not a value to guess.
 
 ## Bootstrap Rule
 Before conducting, ensure the initiative and roster exist (both operations are idempotent):

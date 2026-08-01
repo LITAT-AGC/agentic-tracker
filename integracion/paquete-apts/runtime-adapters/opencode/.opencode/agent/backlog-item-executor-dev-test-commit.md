@@ -37,8 +37,8 @@ The orchestrator should pass at least:
 
 ## APTS Rules
 - Use the APTS MCP tools for every normal operation. Never invent fresh direct-client bootstrap code inside the task.
-- Do not run manual Git identity discovery as a default step. Start with minimum JSON payloads and let the client auto-fill protocol fields.
-- If an APTS call fails because of missing context, inspect the managed context file (`.apts/execution-context.json`) and only then fill missing identity explicitly.
+- Do not run manual identity discovery as a default step. Start with minimum JSON payloads; the integration layer supplies the protocol fields.
+- If an APTS call fails for a missing identity field, report it to the orchestrator or the operator. It is a setup issue, not a value to invent.
 - Call `register_task` with `backlog_item_id` before editing; treat its response as create-or-resume and always continue with the returned `task_id`.
 - Before editing code, call `read_project_context`, preferring `view = compact` unless you explicitly need raw task context or full recent logs.
 - Send `log_agent_progress` at meaningful milestones.

@@ -180,6 +180,18 @@ const createInitiative = (db, {
 // librería de la iniciativa (entities scopeadas por su source_ref) y se valida que
 // exista ahí; una key de otra librería se rechaza aunque `entities.key` sea único
 // global. Corre en transacción (initiative + entity + upsert consistentes).
+// F6-4 — Error de entrada del llamante, no fallo del servidor. Sin esto, `new Error`
+// pelado sale como 500 con el mensaje interno (getErrorStatusCode, index.js:522), que
+// es el mismo defecto que F6-2-T2 cerró en create_initiative. Patrón de servidor puro:
+// se marca el error con statusCode/code y la ruta ya lo traduce.
+const badRequest = (message, code = 'INVALID_ARGUMENT') => {
+  const error = new Error(message);
+  error.statusCode = 400;
+  error.code = code;
+  error.expose = true;
+  return error;
+};
+
 const setAgentRole = (db, {
   project_url,
   agent_name,
@@ -187,13 +199,13 @@ const setAgentRole = (db, {
 } = {}) =>
   db.transaction(async (trx) => {
     if (!project_url || typeof project_url !== 'string') {
-      throw new Error('set_agent_role requires project_url');
+      throw badRequest('set_agent_role requires project_url');
     }
     if (!agent_name || typeof agent_name !== 'string') {
-      throw new Error('set_agent_role requires agent_name');
+      throw badRequest('set_agent_role requires agent_name');
     }
     if (!entity_key || typeof entity_key !== 'string') {
-      throw new Error('set_agent_role requires entity_key');
+      throw badRequest('set_agent_role requires entity_key');
     }
 
     // La iniciativa activa fija la librería (source_ref) contra la que resolver el rol.
@@ -202,7 +214,7 @@ const setAgentRole = (db, {
       .orderBy('created_at', 'asc')
       .first('id', 'source_ref');
     if (!initiative) {
-      throw new Error(
+      throw badRequest(
         `set_agent_role requires an active initiative for ${project_url}; run create_initiative first`,
       );
     }
@@ -212,8 +224,17 @@ const setAgentRole = (db, {
       .where({ key: entity_key, source_ref: initiative.source_ref })
       .first('id', 'key');
     if (!entity) {
-      throw new Error(
-        `entity_key '${entity_key}' no existe en la librería source_ref '${initiative.source_ref}'`,
+      // El roster no es descubrible por ninguna de las 21 operaciones (F6-4): un cliente
+      // que no descarga el paquete no tiene de dónde sacar las claves. El rechazo las
+      // enumera para que el error sea accionable en un solo intento.
+      const disponibles = (await trx('entities')
+        .where({ source_ref: initiative.source_ref, kind: 'role' })
+        .orderBy('key', 'asc')
+        .pluck('key')).join(', ');
+      throw badRequest(
+        `entity_key '${entity_key}' no existe en la librería source_ref '${initiative.source_ref}'. `
+        + `Claves válidas: ${disponibles}`,
+        'UNKNOWN_ENTITY_KEY',
       );
     }
 

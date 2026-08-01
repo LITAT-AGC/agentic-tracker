@@ -2,7 +2,7 @@
   "skills": [
     {
       "name": "register_task",
-      "description": "Create or resume a task in the project. Minimum payload via the official MCP server: title (project_url, agent_name, and agent_email are auto-resolved from env/local managed context/Git when omitted). AI-agent flows should use the official MCP server and never generate fresh direct-client bootstrap code. When backlog_item_id points to an active task in todo, in_progress, or stalled, APTS resumes that task instead of creating a duplicate.",
+      "description": "Create or resume a task in the project. Minimum payload via the official MCP server: title (the integration layer supplies project_url, agent_name, and agent_email). AI-agent flows should use the official MCP server and never generate fresh direct-client bootstrap code. When backlog_item_id points to an active task in todo, in_progress, or stalled, APTS resumes that task instead of creating a duplicate.",
       "parameters": {
         "oneOf": [
           {
@@ -66,7 +66,7 @@
     },
     {
       "name": "read_project_context",
-      "description": "Read current project state with optional section selection. Minimum payload via the official MCP server: none for identity (url auto-resolves from env/local managed context/Git when omitted). Optional: limit (logs only), backlog_status, include, view, and per-section pagination. The tasks and backlog sections are paginated to protect the agent context window: each defaults to 50 items (max 200) and is windowed via tasks_limit/tasks_offset and backlog_limit/backlog_offset. For the execution loop prefer apts_next/apts_workflow_step; use this call for one-off orientation and page through large backlogs instead of fetching everything. Agent flows now default to compact summaries; request view=full only when raw detail is needed.",
+      "description": "Read current project state with optional section selection. Minimum payload via the official MCP server: none for identity (the integration layer supplies url). Optional: limit (logs only), backlog_status, include, view, and per-section pagination. The tasks and backlog sections are paginated to protect the agent context window: each defaults to 50 items (max 200) and is windowed via tasks_limit/tasks_offset and backlog_limit/backlog_offset. For the execution loop prefer apts_next/apts_workflow_step; use this call for one-off orientation and page through large backlogs instead of fetching everything. Agent flows now default to compact summaries; request view=full only when raw detail is needed.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -139,7 +139,7 @@
     },
     {
       "name": "list_backlog_items",
-      "description": "List backlog items for a project ordered by priority and sort order. Minimum payload via the official MCP server: none for identity (url auto-resolves from env/local managed context/Git when omitted). Optional filters include id, ids, status, and pagination with limit/offset. To protect the agent context window the result is paginated: limit defaults to 50 items (max 200) and offset defaults to 0, so page through large backlogs instead of fetching everything. Agent flows now default to compact summaries; request view=full only for chosen items.",
+      "description": "List backlog items for a project ordered by priority and sort order. Minimum payload via the official MCP server: none for identity (the integration layer supplies url). Optional filters include id, ids, status, and pagination with limit/offset. To protect the agent context window the result is paginated: limit defaults to 50 items (max 200) and offset defaults to 0, so page through large backlogs instead of fetching everything. Agent flows now default to compact summaries; request view=full only for chosen items.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -254,7 +254,7 @@
     },
     {
       "name": "get_project_constraints",
-      "description": "Read project constraints registered in APTS (test/lint/typecheck commands, framework, language, and conventions). Minimum payload via the official MCP server: none for identity (url auto-resolves from env/local managed context/Git when omitted).",
+      "description": "Read project constraints registered in APTS (test/lint/typecheck commands, framework, language, and conventions). Minimum payload via the official MCP server: none for identity (the integration layer supplies url).",
       "parameters": {
         "type": "object",
         "properties": {
@@ -267,7 +267,7 @@
     },
     {
       "name": "search_similar_bug_reports",
-      "description": "Find semantically similar non-deleted bug reports using OpenRouter embeddings to reduce duplicate bug intake. Minimum payload via the official MCP server: query_text (url auto-resolves from env/local managed context/Git when omitted).",
+      "description": "Find semantically similar non-deleted bug reports using OpenRouter embeddings to reduce duplicate bug intake. Minimum payload via the official MCP server: query_text (the integration layer supplies url).",
       "parameters": {
         "type": "object",
         "properties": {
@@ -300,7 +300,7 @@
     },
     {
       "name": "create_backlog_item",
-      "description": "Create a managed backlog item for a project. Minimum payload via the official MCP server: title (project_url auto-resolves from env/local managed context/Git when omitted). For chat-triggered bug intake, create or update bug items only after read-only triage confirms a real defect and the user explicitly confirms they want the issue tracked as a bug in APTS; use item_type 'bug' for defect intake.",
+      "description": "Create a managed backlog item for a project. Minimum payload via the official MCP server: title (the integration layer supplies project_url). For chat-triggered bug intake, create or update bug items only after read-only triage confirms a real defect and the user explicitly confirms they want the issue tracked as a bug in APTS; use item_type 'bug' for defect intake.",
       "parameters": {
         "oneOf": [
           {
@@ -580,7 +580,7 @@
     },
     {
       "name": "update_task_status",
-      "description": "Update the status of a task. Minimum payload via the official MCP server: status (task_id auto-resolves from APTS_TASK_ID or local managed execution context when omitted; project_url, agent_name, and agent_email auto-resolve from env/local managed context/Git). Use strict transitions: close with review first, then done only from review and with recent execution activity.",
+      "description": "Update the status of a task. Minimum payload via the official MCP server: status (pass task_id, the value returned by register_task, unless your integration layer supplies it; the integration layer supplies project_url, agent_name, and agent_email). Use strict transitions: close with review first, then done only from review and with recent execution activity.",
       "parameters": {
         "oneOf": [
           {
@@ -652,7 +652,7 @@
     },
     {
       "name": "log_agent_progress",
-      "description": "Log agent progress, bugs fixed, architectural decisions. Minimum payload via the official MCP server: message (task_id auto-resolves from APTS_TASK_ID or local managed execution context when omitted; project_url, agent_name, and branch auto-resolve from env/local managed context/Git).",
+      "description": "Log agent progress, bugs fixed, architectural decisions. Minimum payload via the official MCP server: message (pass task_id, the value returned by register_task, unless your integration layer supplies it; the integration layer supplies project_url and agent_name; branch is optional and travels in the call).",
       "parameters": {
         "oneOf": [
           {
@@ -758,7 +758,7 @@
     },
     {
       "name": "report_blocker",
-      "description": "Emergency skill to use when blocked. Minimum payload via the official MCP server: error_message (task_id auto-resolves from APTS_TASK_ID or local managed execution context when omitted; project_url and agent_name auto-resolve from env/local managed context/Git).",
+      "description": "Emergency skill to use when blocked. Minimum payload via the official MCP server: error_message (pass task_id, the value returned by register_task, unless your integration layer supplies it; the integration layer supplies project_url and agent_name).",
       "parameters": {
         "oneOf": [
           {
@@ -810,7 +810,7 @@
     },
     {
       "name": "heartbeat",
-      "description": "Periodic life signal sent every 5 minutes. Minimum payload via the official MCP server: none when APTS_TASK_ID or local managed execution context is available (task_id auto-resolves from env/context; agent_name and project_url auto-resolve from env/Git/context).",
+      "description": "Periodic life signal sent every 5 minutes. Minimum payload via the official MCP server: task_id, the value returned by register_task, unless your integration layer supplies it (the integration layer supplies agent_name and project_url).",
       "parameters": {
         "oneOf": [
           {
@@ -852,7 +852,7 @@
     },
     {
       "name": "apts_next",
-      "description": "Resolve the next deterministic method step for an agent in a project (server-authoritative method engine). Minimum payload via the official MCP server: none (project_url and agent_name auto-resolve from env/local managed context/Git when omitted). Returns a single directive { next: run_step|wait|done|blocked, target_id, role, why, args } for the calling agent's required role, advancing the lifecycle phase and claiming iterable work without collision across agents. Use this instead of reading and reasoning over project state in-context.",
+      "description": "Resolve the next deterministic method step for an agent in a project (server-authoritative method engine). Minimum payload via the official MCP server: none (the integration layer supplies project_url and agent_name). Returns a single directive { next: run_step|wait|done|blocked, target_id, role, why, args } for the calling agent's required role, advancing the lifecycle phase and claiming iterable work without collision across agents. Use this instead of reading and reasoning over project state in-context.",
       "parameters": {
         "type": "object",
         "properties": {
@@ -868,7 +868,7 @@
     },
     {
       "name": "apts_status",
-      "description": "Read the method state of a project in data-mode: backlog item counts by status for the active epic, current lifecycle phase, progress, and a single read-only recommendation line (computed via apts_next without mutating state). Minimum payload via the official MCP server: none (project_url auto-resolves from env/local managed context/Git when omitted; pass agent_name for an agent-specific recommendation).",
+      "description": "Read the method state of a project in data-mode: backlog item counts by status for the active epic, current lifecycle phase, progress, and a single read-only recommendation line (computed via apts_next without mutating state). Minimum payload via the official MCP server: none (the integration layer supplies project_url; pass agent_name for an agent-specific recommendation).",
       "parameters": {
         "type": "object",
         "properties": {
@@ -909,7 +909,7 @@
     },
     {
       "name": "apts_workflow_step",
-      "description": "Serve the current generative workflow step for an agent by goteo (model B: fresh context per step). The server reconstructs the step payload from server-authoritative state (the agent's cursor in project_state): it re-cables the verbatim instruction_chunk at serve-time and reinjects only what the step needs[] as bounded slices, so per-step context stays ~constant regardless of project size. Returns { mode: run|await_input|wait|done|blocked, workflow_key, step_key, step_order, goal, role, target_id, instruction_chunk, template_slice, needs[], outputs[] }. If the step is an elicitation point, mode='await_input' with questions[]; resume by calling again with `answers`. Minimum payload via the official MCP server: none (project_url and agent_name auto-resolve from env/local managed context/Git when omitted).",
+      "description": "Serve the current generative workflow step for an agent by goteo (model B: fresh context per step). The server reconstructs the step payload from server-authoritative state (the agent's cursor in project_state): it re-cables the verbatim instruction_chunk at serve-time and reinjects only what the step needs[] as bounded slices, so per-step context stays ~constant regardless of project size. Returns { mode: run|await_input|wait|done|blocked, workflow_key, step_key, step_order, goal, role, target_id, instruction_chunk, template_slice, needs[], outputs[] }. If the step is an elicitation point, mode='await_input' with questions[]; resume by calling again with `answers`. Minimum payload via the official MCP server: none (the integration layer supplies project_url and agent_name).",
       "parameters": {
         "type": "object",
         "properties": {
@@ -928,7 +928,7 @@
     },
     {
       "name": "apts_submit_step",
-      "description": "Capture the output of the current workflow step and advance the cursor (goteo, model B). Doc artifacts are persisted as typed semantic_documents (doc_type from the enum: brief/prd/architecture/epics/story_spec/retro), code is recorded as a reference (code_ref), and iterable units update the claimed story's status. What is captured is decided by the step's declared outputs[] (coherent with the workflow-level completion that apts_next checks). Then it advances to the next step, or closes the workflow and releases the pointer. Returns { ok, captured[], advanced_to, workflow_complete }. Pass the produced content/reference in `output`. Minimum payload via the official MCP server: none (project_url and agent_name auto-resolve from env/local managed context/Git when omitted).",
+      "description": "Capture the output of the current workflow step and advance the cursor (goteo, model B). Doc artifacts are persisted as typed semantic_documents (doc_type from the enum: brief/prd/architecture/epics/story_spec/retro), code is recorded as a reference (code_ref), and iterable units update the claimed story's status. What is captured is decided by the step's declared outputs[] (coherent with the workflow-level completion that apts_next checks). Then it advances to the next step, or closes the workflow and releases the pointer. Returns { ok, captured[], advanced_to, workflow_complete }. Pass the produced content/reference in `output`. Minimum payload via the official MCP server: none (the integration layer supplies project_url and agent_name).",
       "parameters": {
         "type": "object",
         "properties": {
@@ -947,7 +947,7 @@
     },
     {
       "name": "create_initiative",
-      "description": "Bootstrap a conducible BMAD method initiative for a project (server-authoritative method engine). Creates - idempotently by (project_url, active status) - an initiative in the 'analysis' phase scoped to the seeded BMAD library (source_ref 'bmad:v6.8.0'), folds in one empty epic (the engine needs an epic in implementation and there is no epic tool), and optionally stores the client's spec as a typed semantic_documents artifact linked to the initiative (the server has no access to the client repo filesystem). Returns { initiative_id, epic_id, phase, created|resumed }. After bootstrap, apts_next stops returning 'blocked' and delivers the first real step. Minimum payload via the official MCP server: title (project_url auto-resolves from env/local managed context/Git when omitted).",
+      "description": "Bootstrap a conducible BMAD method initiative for a project (server-authoritative method engine). Creates - idempotently by (project_url, active status) - an initiative in the 'analysis' phase scoped to the seeded BMAD library (source_ref 'bmad:v6.8.0'), folds in one empty epic (the engine needs an epic in implementation and there is no epic tool), and optionally stores the client's spec as a typed semantic_documents artifact linked to the initiative (the server has no access to the client repo filesystem). Returns { initiative_id, epic_id, phase, created|resumed }. After bootstrap, apts_next stops returning 'blocked' and delivers the first real step. Minimum payload via the official MCP server: title (the integration layer supplies project_url).",
       "parameters": {
         "type": "object",
         "properties": {
@@ -1006,7 +1006,7 @@
     },
     {
       "name": "set_agent_role",
-      "description": "Register or update a roster role pointer for the active BMAD method initiative (server-authoritative method engine). Upserts - idempotently by (active initiative, agent_name) - a project_state pointer that binds an agent_name to a method entity (role). Resolves entity_key to an entity in the initiative's library (scoped by its source_ref) and persists entity_id non-null; an unset entity_id makes apts_next wait forever. After the roster is set, apts_next delivers run_step to the required role instead of wait. Roster model A: one agent_name per role; the orchestrator switches identity using the `role` apts_next returns. Requires an active initiative (run create_initiative first). Minimum payload via the official MCP server: agent_name and entity_key (project_url auto-resolves from env/local managed context/Git when omitted).",
+      "description": "Register or update a roster role pointer for the active BMAD method initiative (server-authoritative method engine). Upserts - idempotently by (active initiative, agent_name) - a project_state pointer that binds an agent_name to a method entity (role). Resolves entity_key to an entity in the initiative's library (scoped by its source_ref) and persists entity_id non-null; an unset entity_id makes apts_next wait forever. After the roster is set, apts_next delivers run_step to the required role instead of wait. Roster model A: one agent_name per role; the orchestrator switches identity using the `role` apts_next returns. Requires an active initiative (run create_initiative first). Minimum payload via the official MCP server: agent_name and entity_key (the integration layer supplies project_url).",
       "parameters": {
         "type": "object",
         "properties": {

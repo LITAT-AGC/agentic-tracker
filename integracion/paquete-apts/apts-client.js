@@ -1837,6 +1837,10 @@ async function setAgentRole(payload) {
 }
 
 export {
+  // Identity fields this client resolves on its own when the caller omits them.
+  // Exported so the remote MCP surface can inject them *before* invoking any
+  // operation, instead of keeping a parallel copy of this map (F6-1, decision #1).
+  AUTO_FILL_FIELDS_BY_OPERATION,
   AptsClientError,
   aptsNext,
   aptsSetStatus,

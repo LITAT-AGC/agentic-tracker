@@ -2,6 +2,15 @@ const crypto = require('node:crypto');
 
 const DEFAULT_OPENROUTER_EMBEDDING_MODEL = process.env.OPENROUTER_DEFAULT_EMBEDDING_MODEL || 'openai/text-embedding-3-small';
 const OPENROUTER_EMBEDDINGS_URL = 'https://openrouter.ai/api/v1/embeddings';
+// F6-2-T4: hasta ahora este `fetch` no llevaba plazo de espera, así que si
+// OpenRouter no respondía, la escritura de backlog que lo dispara se quedaba
+// esperando sin límite —y en modo lote, una vez por elemento—. El cliente remoto sí
+// impone plazo y corta, con lo que el pedido se perdía sin saber en qué estado quedó.
+// Se puede ajustar con OPENROUTER_EMBEDDING_TIMEOUT_MS.
+const OPENROUTER_EMBEDDING_TIMEOUT_MS = (() => {
+  const configured = Number.parseInt(process.env.OPENROUTER_EMBEDDING_TIMEOUT_MS || '', 10);
+  return Number.isInteger(configured) && configured > 0 ? configured : 10000;
+})();
 const STRATEGY_MODEL_CONFIG_PREFIX = 'embedding_strategy:';
 const LEGACY_STRATEGY_MODEL_CONFIG = {
   bug_dedup: 'openrouter_embedding_model'
@@ -170,14 +179,27 @@ const requestEmbedding = async (connection, strategyKey, inputText, {
   }
 
   const model = await getEffectiveEmbeddingModel(connection, strategyKey);
-  const response = await fetch(OPENROUTER_EMBEDDINGS_URL, {
-    method: 'POST',
-    headers: getOpenRouterHeaders(),
-    body: JSON.stringify({
-      model,
-      input: normalizedInput
-    })
-  });
+
+  let response;
+  try {
+    response = await fetch(OPENROUTER_EMBEDDINGS_URL, {
+      method: 'POST',
+      headers: getOpenRouterHeaders(),
+      body: JSON.stringify({
+        model,
+        input: normalizedInput
+      }),
+      signal: AbortSignal.timeout(OPENROUTER_EMBEDDING_TIMEOUT_MS)
+    });
+  } catch (error) {
+    // El mensaje nombra a OpenRouter a propósito: es lo que reconoce
+    // isSemanticProviderError() para tratarlo como fallo del proveedor (503) y,
+    // en las escrituras, para que runNonBlockingSemanticOperation lo absorba.
+    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+      throw new Error(`OpenRouter embedding request timed out after ${OPENROUTER_EMBEDDING_TIMEOUT_MS} ms`);
+    }
+    throw error;
+  }
 
   const data = await readOpenRouterResponse(response);
   await persistOpenRouterUsage(connection, {

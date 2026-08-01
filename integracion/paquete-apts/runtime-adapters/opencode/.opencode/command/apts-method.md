@@ -6,7 +6,7 @@ agent: apts-method-orchestrator
 
 Conduct a server-authoritative BMAD method initiative end-to-end from this client.
 
-1. Resolve project and identity context (let the MCP server auto-fill; do not hand-roll Git discovery).
+1. Send minimal payloads: the integration layer supplies project and identity context.
 2. Ensure the method is bootstrapped (idempotent): `create_initiative` (pass the client spec as `spec_artifact` when present) and one `set_agent_role` per BMAD role (Roster model A).
 3. Drive the lifecycle with `apts_next`: handle `wait` by switching role identity, drive generative steps yourself (`apts_workflow_step` → produce the declared artifact → `apts_submit_step`), and delegate the iterable `dev-story` step to the executor subagent.
 4. Continue until the engine returns `done`; on `blocked`, stop and report the blocker.
