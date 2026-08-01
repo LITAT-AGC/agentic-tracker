@@ -29,6 +29,10 @@ const {
   STORY_METHOD_STATUSES
 } = require('./scripts/lib/method_resolver');
 const { createInitiative, setAgentRole } = require('./scripts/lib/method_bootstrap');
+// Deuda de F6 que esto cierra: la llamada de embedding estaba implementada dos
+// veces —aquí y en la librería—, con el mismo `fetch`, las mismas cabeceras y el
+// mismo plazo copiados. Se conserva una sola: la de la librería.
+const { requestEmbedding: requestLibraryEmbedding } = require('./scripts/lib/semantic_embeddings');
 const rootPackage = require('../package.json');
 const db = createKnex(knexConfig[process.env.NODE_ENV || 'development']);
 
@@ -204,19 +208,29 @@ const TASK_ACTIVITY_FRESHNESS_MS = 15 * 60 * 1000;
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
 const OPENROUTER_CHAT_URL = 'https://openrouter.ai/api/v1/chat/completions';
-const OPENROUTER_EMBEDDINGS_URL = 'https://openrouter.ai/api/v1/embeddings';
-// F6-2-T4: plazos de espera para las llamadas externas que alcanzan las 21
-// operaciones. Sin ellos, un proveedor que no responde deja al que llama esperando
-// sin límite, y en modo lote se multiplica por elemento.
-const OPENROUTER_EMBEDDING_TIMEOUT_MS = (() => {
-  const configured = Number.parseInt(process.env.OPENROUTER_EMBEDDING_TIMEOUT_MS || '', 10);
-  return Number.isInteger(configured) && configured > 0 ? configured : 10000;
-})();
+// Plazos de espera de las llamadas externas. Sin ellos, un proveedor que no responde
+// deja al que llama esperando sin límite, y en modo lote se multiplica por elemento.
+// El del embedding vive en `scripts/lib/semantic_embeddings.js`, que es desde F6 la
+// única implementación de esa llamada; la variable de entorno sigue siendo
+// `OPENROUTER_EMBEDDING_TIMEOUT_MS`.
+//
 // El webhook es un servicio de terceros y su entrega ya tolera fallos, así que el
 // plazo es más corto: nadie debería esperar por él.
 const WEBHOOK_DELIVERY_TIMEOUT_MS = (() => {
   const configured = Number.parseInt(process.env.WEBHOOK_DELIVERY_TIMEOUT_MS || '', 10);
   return Number.isInteger(configured) && configured > 0 ? configured : 5000;
+})();
+// Las dos llamadas del panel. Estaban sin plazo: F6-2-T4 las dejó fuera a propósito
+// porque no se alcanzan desde las 21 operaciones, y quedaron anotadas como deuda.
+// El listado de modelos es una lectura barata; la de chat es una generación de un
+// modelo de lenguaje, que tarda legítimamente mucho más, así que no comparten valor.
+const OPENROUTER_MODELS_TIMEOUT_MS = (() => {
+  const configured = Number.parseInt(process.env.OPENROUTER_MODELS_TIMEOUT_MS || '', 10);
+  return Number.isInteger(configured) && configured > 0 ? configured : 10000;
+})();
+const OPENROUTER_CHAT_TIMEOUT_MS = (() => {
+  const configured = Number.parseInt(process.env.OPENROUTER_CHAT_TIMEOUT_MS || '', 10);
+  return Number.isInteger(configured) && configured > 0 ? configured : 120000;
 })();
 const DEFAULT_OPENROUTER_MODEL = process.env.OPENROUTER_DEFAULT_MODEL || 'google/gemini-2.0-flash-lite-001';
 const DEFAULT_OPENROUTER_EMBEDDING_MODEL = process.env.OPENROUTER_DEFAULT_EMBEDDING_MODEL || 'openai/text-embedding-3-small';
@@ -1222,10 +1236,11 @@ const getEffectiveOpenRouterModel = async () => {
   return configuredModel || DEFAULT_OPENROUTER_MODEL;
 };
 
-const getEffectiveOpenRouterEmbeddingModel = async () => {
-  const configuredModel = await getConfigValue(CONFIG_KEYS.openrouterEmbeddingModel);
-  return configuredModel || DEFAULT_OPENROUTER_EMBEDDING_MODEL;
-};
+// La selección del modelo de embedding se fue con la implementación: ahora la
+// resuelve `getEffectiveEmbeddingModel` de la librería, que lee la misma clave de
+// configuración (`openrouter_embedding_model`) como respaldo de la estrategia.
+// `CONFIG_KEYS.openrouterEmbeddingModel` y `DEFAULT_OPENROUTER_EMBEDDING_MODEL`
+// siguen aquí porque los usa el panel para mostrar y guardar la configuración.
 
 const getOpenRouterHeaders = () => {
   const headers = {
@@ -1379,9 +1394,20 @@ const getOpenRouterUsageSummary = async ({ days = 14 } = {}) => {
 };
 
 const fetchOpenRouterModels = async () => {
-  const response = await fetch(OPENROUTER_MODELS_URL, {
-    headers: getOpenRouterHeaders()
-  });
+  let response;
+  try {
+    response = await fetch(OPENROUTER_MODELS_URL, {
+      headers: getOpenRouterHeaders(),
+      signal: AbortSignal.timeout(OPENROUTER_MODELS_TIMEOUT_MS)
+    });
+  } catch (error) {
+    // Nombrar a OpenRouter no es cosmético: es lo que reconoce
+    // isSemanticProviderError() para tratarlo como fallo del proveedor.
+    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+      throw new Error(`OpenRouter models request timed out after ${OPENROUTER_MODELS_TIMEOUT_MS} ms`);
+    }
+    throw error;
+  }
   const data = await readOpenRouterResponse(response);
 
   return (data.data || [])
@@ -1454,6 +1480,23 @@ const buildBugEmbeddingText = (backlogItem) => {
     .slice(0, 16000);
 };
 
+// Antes esta función era una **segunda implementación** del embedding: su propio
+// `fetch`, sus propias cabeceras, su propio plazo de espera y su propia lectura de
+// la respuesta, todo copiado de `scripts/lib/semantic_embeddings.js`. Dos copias del
+// mismo cálculo divergen en silencio: F6-2-T4 ya tuvo que poner el plazo dos veces,
+// una en cada una. Ahora esto es sólo el envoltorio HTTP de la única implementación.
+//
+// La estrategia es `bug_dedup` —es la que alcanzan `search_similar_bug_reports` y el
+// embedding de bug de create/update_backlog_item— y su resolución de modelo cae por
+// `LEGACY_STRATEGY_MODEL_CONFIG` en `openrouter_embedding_model`, exactamente la
+// clave de configuración que leía esta función. Mismo modelo, salvo que se configure
+// a propósito `embedding_strategy:bug_dedup:model`.
+//
+// Lo que el envoltorio conserva, porque es de esta superficie y no de la librería:
+// los códigos HTTP. La librería lanza errores pelados (500); aquí un texto de entrada
+// vacío sigue siendo 400 y una respuesta sin vector sigue siendo 502.
+const BUG_EMBEDDING_STRATEGY_KEY = 'bug_dedup';
+
 const requestOpenRouterEmbedding = async (inputText, {
   usageType = 'embedding',
   projectUrl = null,
@@ -1464,53 +1507,24 @@ const requestOpenRouterEmbedding = async (inputText, {
     throw createHttpError(400, 'Embedding input text is required');
   }
 
-  const model = await getEffectiveOpenRouterEmbeddingModel();
-
-  // F6-2-T4: segunda implementación del embedding, duplicada de
-  // `scripts/lib/semantic_embeddings.js`. Es la que alcanzan
-  // `search_similar_bug_reports` —donde el cliente espera de verdad— y el embedding
-  // de bug de create/update_backlog_item, así que lleva el mismo plazo de espera.
-  // (Unificar las dos copias es trabajo aparte, fuera de F6.)
-  let response;
   try {
-    response = await fetch(OPENROUTER_EMBEDDINGS_URL, {
-      method: 'POST',
-      headers: getOpenRouterHeaders(),
-      body: JSON.stringify({
-        model,
-        input: normalizedInput
-      }),
-      signal: AbortSignal.timeout(OPENROUTER_EMBEDDING_TIMEOUT_MS)
+    return await requestLibraryEmbedding(db, BUG_EMBEDDING_STRATEGY_KEY, normalizedInput, {
+      usageType,
+      projectUrl,
+      backlogItemId
     });
   } catch (error) {
-    // Nombrar a OpenRouter no es cosmético: es lo que reconoce
-    // isSemanticProviderError() para devolver 503 en vez de 500, y lo que hace que
-    // runNonBlockingSemanticOperation lo absorba en las escrituras.
-    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
-      throw new Error(`OpenRouter embedding request timed out after ${OPENROUTER_EMBEDDING_TIMEOUT_MS} ms`);
+    // Único caso en que la librería y esta superficie difieren de veredicto: una
+    // respuesta sin vector es un fallo del proveedor (502), no un 500. El resto de
+    // errores —incluido el vencimiento del plazo, cuyo mensaje nombra a OpenRouter
+    // para que isSemanticProviderError() lo reconozca— pasa tal cual.
+    if (String(error?.message || '').includes('did not include a valid vector')) {
+      throw createHttpError(502, 'OpenRouter embedding response did not include a valid vector', {
+        cause: error
+      });
     }
     throw error;
   }
-
-  const data = await readOpenRouterResponse(response);
-  await persistOpenRouterUsage({
-    usageType,
-    model,
-    usage: data?.usage,
-    projectUrl,
-    backlogItemId
-  });
-  const embedding = parseEmbeddingVector(data?.data?.[0]?.embedding);
-
-  if (!embedding.length) {
-    throw createHttpError(502, 'OpenRouter embedding response did not include a valid vector');
-  }
-
-  return {
-    model,
-    embedding,
-    norm: vectorNorm(embedding)
-  };
 };
 
 const persistBugEmbeddingForBacklogItem = async (backlogItemId, { connection = db } = {}) => {
@@ -1796,15 +1810,26 @@ const buildBacklogAnalysisMessages = (backlogItem) => ([
 
 const requestBacklogAnalysis = async (backlogItem) => {
   const model = await getEffectiveOpenRouterModel();
-  const response = await fetch(OPENROUTER_CHAT_URL, {
-    method: 'POST',
-    headers: getOpenRouterHeaders(),
-    body: JSON.stringify({
-      model,
-      temperature: 0.2,
-      messages: buildBacklogAnalysisMessages(backlogItem)
-    })
-  });
+  let response;
+  try {
+    response = await fetch(OPENROUTER_CHAT_URL, {
+      method: 'POST',
+      headers: getOpenRouterHeaders(),
+      body: JSON.stringify({
+        model,
+        temperature: 0.2,
+        messages: buildBacklogAnalysisMessages(backlogItem)
+      }),
+      // Plazo largo a propósito: esto es una generación de un modelo de lenguaje, no
+      // una lectura. Corta lo que se ha colgado, sin cortar lo que sólo va lento.
+      signal: AbortSignal.timeout(OPENROUTER_CHAT_TIMEOUT_MS)
+    });
+  } catch (error) {
+    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+      throw new Error(`OpenRouter chat request timed out after ${OPENROUTER_CHAT_TIMEOUT_MS} ms`);
+    }
+    throw error;
+  }
   const data = await readOpenRouterResponse(response);
   await persistOpenRouterUsage({
     usageType: 'backlog_analysis',
@@ -2108,7 +2133,16 @@ const integrationRoot = path.join(__dirname, '..', 'integracion');
 //   already-integrated clients pick the fix up through the existing sync policy (compare by
 //   artifact_version -> overwrite). Manifest shape is unchanged; a client on 3.1.0 or 3.2.0 keeps a
 //   working surface.
-const integrationManifestSchemaVersion = '3.3.0';
+// - 3.4.0: content fix — the method roster was not discoverable through any of the 21 operations, so
+//   the only way to learn the valid `entity_key` values was to call `set_agent_role` with an invented
+//   one and read them off the rejection. `create_initiative` now returns `roster.entity_keys` (both on
+//   creation and on resume) and `apts_next` attaches the same roster when the caller has no pointer
+//   yet — the one blocked state whose exit is registering a role. Two `skills_json` descriptions say
+//   so. Nothing else changed: same 21 operations, same parameters, same verdicts, and the rejection
+//   still enumerates the keys as a last resort. `skills_json.artifact_version` goes 3.3.0 -> 3.4.0 so
+//   already-integrated clients pick it up through the existing sync policy. Response payloads only
+//   grew a field, which JSON consumers ignore: a client on 3.1.0, 3.2.0 or 3.3.0 keeps working.
+const integrationManifestSchemaVersion = '3.4.0';
 const publicIntegrationBasePath = '/api/public/integrar';
 
 const integrationArtifacts = {
@@ -2118,9 +2152,11 @@ const integrationArtifacts = {
     fileName: 'apts_skills.json',
     contentType: 'application/json; charset=utf-8',
     // 3.3.0: descripciones reescritas en términos neutros (ya no afirman resolución automática de
-    // identidad). Sube la versión para que la política de sincronización propague la corrección.
-    artifactVersion: '3.3.0',
-    updatedInSchemaVersion: '3.3.0',
+    // identidad). 3.4.0: `create_initiative` y `set_agent_role` dicen de dónde salen las claves de
+    // rol, que antes solo se aprendían leyendo un rechazo. Sube la versión para que la política de
+    // sincronización propague la corrección.
+    artifactVersion: '3.4.0',
+    updatedInSchemaVersion: '3.4.0',
     kind: 'skills_contract',
     recommended: true,
     usagePriority: 'discovery',

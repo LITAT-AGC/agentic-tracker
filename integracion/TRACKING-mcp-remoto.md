@@ -29,15 +29,18 @@ estaba mal planteada, se detiene y se replantea, no se improvisa.
 | F6-1 Prueba del transporte Streamable HTTP | ✅ Hecho | ✅ **firmado 2026-08-01** | 4/4 tareas. Cabecera confirmada en Claude Code **y** opencode; cero identidad del servidor en `APTS_test` |
 | F6-2 Ejecución dentro del proceso + igualdad de validación | ✅ Hecho | ✅ **firmado 2026-08-01** | 5/5 tareas. **21/21 operaciones en verde, cero bloqueos**; sin salto HTTP interno; sin dependencias nuevas ni migraciones |
 | F6-3 Registro remoto en el manifiesto | ✅ Hecho | ✅ **firmado 2026-08-01** | 4/4 tareas. Bump aditivo 3.1.0 → 3.2.0 comprobado (0 claves perdidas); `vscode` **sí** envía las cabeceras |
-| F6-4 Validación end-to-end desde cliente fresco | ✅ Hecho | 🛑 **espera firma** | 3/3 tareas. `phase=done` desde cliente fresco; **0 descargas del núcleo ejecutable**; `APTS_test` restaurado |
+| F6-4 Validación end-to-end desde cliente fresco | ✅ Hecho | ✅ **firmado 2026-08-01** | 3/3 tareas. `phase=done` desde cliente fresco; **0 descargas del núcleo ejecutable**; `APTS_test` restaurado |
 
 Leyenda: ⬜ Pendiente · 🟡 En curso · ✅ Hecho · ⛔ Bloqueado · 🛑 En gate (espera operador)
 
-**Próxima acción:** **F6-4 está en su punto de parada, esperando la firma del operador.** La
-evidencia está en [Informe de identidad F6-4-T2](#informe-de-identidad-f6-4-t2), en
+**Estado: F6 CERRADA Y FIRMADA (2026-08-01).** Las cinco fases con su gate firmado. El objetivo del
+PLAN §2 está cumplido y verificado: el backend expone sus 21 operaciones como servidor MCP remoto
+sobre HTTP, y conectar un proyecto cliente es registrar una URL con unas cabeceras. La evidencia
+está en [Informe de identidad F6-4-T2](#informe-de-identidad-f6-4-t2), en
 [Hallazgos de F6-4](#hallazgos-de-f6-4) y en el [Informe de cierre F6](#informe-de-cierre-f6--mcp-remoto).
-Al firmar: borrar el cliente desechable y los seis programas de comprobación, que están fuera del
-repositorio. **No marcar F6 cerrada hasta la firma.**
+
+**Próxima acción:** ninguna dentro de F6. La deuda escrita que **no** es de F6 está listada al final
+del [Informe de cierre](#informe-de-cierre-f6--mcp-remoto); se ataca fuera de este documento.
 
 ## Contexto de arranque (lo que ya está verificado)
 
@@ -897,7 +900,7 @@ restos de `apts://f63/%`. Todas las operaciones de la fase fueron de solo lectur
     entrada/salida estándar, incluida la comprobación de que ya no queda ninguna afirmación de
     resolución automática en las descripciones que ve `tools/list`. ✅ Auto-chequeo de contrato del
     arranque en verde (`operations: 21`) con el contrato reescrito.
-- [ ] **F6-4-T2** Llevarlo de `analysis` a `phase=done` contra `APTS_test` por la ruta remota,
+- [x] **F6-4-T2** Llevarlo de `analysis` a `phase=done` contra `APTS_test` por la ruta remota,
   cambiando de rol por el camino. Como la identidad de proyecto va en la cabecera, **el cambio de rol
   se hace mandando `agent_name` en la llamada**, que gana a la cabecera.
   - **Conducción por tramos** (decisión del operador), una invocación no interactiva de Claude Code
@@ -1037,13 +1040,22 @@ cambio de comportamiento del motor que F5 dio por cerrado, y más riesgo del que
     todo lo creado en la sesión, incluidos los residuos de las dos suites de regresión (proyectos
     `apts-batch-…` y `test-project`): 1 iniciativa, 1 epic, 7 items, 7 tareas, 6 punteros de roster,
     13 documentos y 16 registros de avance. ✅ Servidor de pruebas apagado.
-  - **Los programas de comprobación y el cliente desechable quedan fuera del repositorio hasta la
-    firma del gate**, igual que se hizo en F6-3, por si hay que repetir alguna medición. Son seis:
+  - **Los programas de comprobación y el cliente desechable quedaron fuera del repositorio hasta la
+    firma del gate**, igual que se hizo en F6-3, por si había que repetir alguna medición. Son seis:
     montaje del cliente desde el manifiesto, reescritura del contrato, comparación de manifiestos,
-    humo por entrada/salida estándar, conteo de la base y medición de identidad. **Se borran al
-    firmar.**
-- [ ] **F6-4-GATE** 🛑 Ciclo completo desde un cliente nuevo sin ningún archivo descargado; informe
-  de cierre de F6 escrito en este documento. **Evidencia lista; espera firma del operador.**
+    humo por entrada/salida estándar, conteo de la base y medición de identidad.
+  - ⚠️ **Ya no son recuperables.** Vivían en el directorio temporal de la sesión que los escribió y
+    desaparecieron con ella, así que no hubo nada que borrar al firmar. **Repetir cualquiera de las
+    seis mediciones exige rehacer su programa**; la lista de arriba dice cuáles son y cada tarea dice
+    qué medía. Lo que quedó escrito son los números, no las herramientas.
+- [x] **F6-4-GATE** ✅ **Firmado por el operador el 2026-08-01.** Ciclo completo desde un cliente
+  nuevo sin ningún artefacto ejecutable descargado; informe de cierre de F6 escrito en este
+  documento. Queda verificado y **no se reabre**: `phase=done` comprobado en la base (2/2 historias,
+  2/2 tareas, 8 artefactos tipados); 0 de 4 artefactos del núcleo ejecutable descargados; dos
+  programas cliente distintos condujeron el mismo proyecto por la ruta remota y el segundo reanudó
+  trabajo del primero; 176 llamadas con identidad resuelta, 0 rechazos por identidad ausente, 0
+  errores del agente con `task_id` y 0 identidad del servidor filtrada; `APTS_test` restaurado a
+  `2 / 2 / 361 / 263`. **Con este gate, F6 queda cerrada.**
 
 ---
 
@@ -1095,23 +1107,44 @@ HTTP, de modo que conectar un proyecto cliente sea registrar una URL con unas ca
   transporte y las 21 operaciones, pero no el bucle de conducción; hoy sigue siendo un artefacto de
   prosa descargable. Es el hueco más claro que deja F6.
 
-**Deuda escrita, que no es de F6:**
+**Deuda escrita, que no es de F6.** Lo atendido después del cierre está en
+[`DEUDA-post-F6.md`](./DEUDA-post-F6.md); esta lista queda como quedó al firmar, con su estado:
 
-- Las dos llamadas a OpenRouter del panel sin plazo de espera (`index.js:1369` modelos, `:1769` chat).
-- Las **dos implementaciones duplicadas del embedding** (`semantic_embeddings.js` e `index.js:1456`).
-- El recorte de la prosa del manifiesto.
-- Publicar el bucle de conducción del método como dato del manifiesto.
-- Que el roster del método (`entity_key`) sea descubrible sin fallar primero: hoy sólo se aprende
-  leyendo el rechazo.
+- ✅ Las dos llamadas a OpenRouter del panel sin plazo de espera (`index.js:1369` modelos, `:1769`
+  chat). **Hechas:** 10 s y 120 s, configurables.
+- ✅ Las **dos implementaciones duplicadas del embedding** (`semantic_embeddings.js` e
+  `index.js:1456`). **Unificada la llamada externa**, que es lo que dolía. Quedan duplicadas
+  `cosineSimilarity` y `parseEmbeddingVector`, con su diferencia medida y anotada — y apareció una
+  **tercera** copia, en `scripts/reembed_bug_embeddings.js`, que el informe no había visto.
+- ⬜ El recorte de la prosa del manifiesto.
+- ⬜ Publicar el bucle de conducción del método como dato del manifiesto.
+- ✅ Que el roster del método (`entity_key`) sea descubrible sin fallar primero: hoy sólo se aprende
+  leyendo el rechazo. **Hecho:** lo publican `create_initiative` (alta y resume) y `apts_next` cuando
+  el llamante no tiene puntero. El rechazo sigue enumerando, ya como última red.
 
-**Estado del árbol:** todo F6 sigue **sin commitear** en `feat/mcp-remoto`, igual que el acarreo de
-F5. `APTS_test` restaurado a `2 / 2 / 361 / 263`.
+**Estado del árbol:** todo F6 está commiteado en `feat/mcp-remoto` @ **`3b763d8`**, sobre `6fd94ac`.
+*(Este párrafo decía antes "sin commitear"; era cierto al redactarlo y dejó de serlo con ese commit.)*
+La rama **no está pusheada**: acumula dos commits por delante de `origin/main` (`6fd94ac`, que trae
+el PLAN y el TRACKING, y `3b763d8`, que trae F6-1..F6-4). Pushear o fusionar es decisión aparte, no
+parte del gate. `APTS_test` restaurado a `2 / 2 / 361 / 263`.
 
 ---
 
 ## Log de cambios
 
 *(Entradas nuevas arriba. Anotar archivos tocados, migraciones, y estado de `APTS_test`.)*
+
+- 2026-08-01 — **GATE F6-4 FIRMADO. F6 queda CERRADA**, con sus cinco fases firmadas. Sin código:
+  solo se registra la firma y se corrigen dos cosas que este documento decía y ya no eran ciertas.
+  Archivos tocados: `integracion/TRACKING-mcp-remoto.md`, `integracion/PLAN-mcp-remoto.md`.
+  - **El informe de cierre decía "todo F6 sigue sin commitear".** Era cierto al redactarlo; F6 está
+    en `feat/mcp-remoto` @ `3b763d8`. La rama sigue **sin pushear**, dos commits por delante de
+    `origin/main` (`6fd94ac` + `3b763d8`). Pushear o fusionar queda como decisión aparte.
+  - **El cliente desechable y los seis programas de comprobación ya no existen.** F6-4-T3 los dejaba
+    fuera del repositorio "hasta la firma", pero vivían en el directorio temporal de la sesión que
+    los escribió y se fueron con ella: no hubo nada que borrar. Repetir una medición exige rehacer su
+    programa; F6-4-T3 dice cuáles son los seis y cada tarea dice qué medía.
+  - `APTS_test` **sin tocar**, en `2 / 2 / 361 / 263`. No se levantó el servidor de pruebas.
 
 - 2026-08-01 — **F6-4 completa (T1..T3); en GATE, esperando firma. Con ella se cierra F6.** Un cliente
   nuevo, sin ningún artefacto ejecutable descargado, condujo un proyecto de `analysis` a `phase=done`

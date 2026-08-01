@@ -29,6 +29,9 @@
 const { resolvePhaseStep, evaluatePrimitive } = require('./method_primitives');
 const { buildWorkflowCompletion } = require('./method_outputs');
 const { applyRewire } = require('../importer/rewire');
+// Fuente única del roster. `method_bootstrap` no importa este módulo, así que no
+// hay ciclo.
+const { loadRosterKeys } = require('./method_bootstrap');
 
 const LIFECYCLE = ['analysis', 'planning', 'solutioning', 'implementation', 'done'];
 const TERMINAL_STATUSES = ['done', 'archived'];
@@ -230,7 +233,21 @@ const aptsNext = (db, { project_url, agent_name }) =>
     }
     const caller = await loadCallerPointer(trx, initiative.id, agent_name);
     if (!caller) {
-      return { next: 'blocked', target_id: null, role: null, why: `agente '${agent_name}' sin puntero en la iniciativa` };
+      // Único bloqueo cuya salida es registrar un rol, y el roster no era descubrible
+      // sin fallar antes en `set_agent_role`. Se adjunta SOLO aquí: en el ciclo normal
+      // esta rama no se toma, así que el coste recurrente en tokens es cero.
+      // Alcanza también a `apts_status`, que compone su recomendación con este mismo
+      // resolver.
+      return {
+        next: 'blocked',
+        target_id: null,
+        role: null,
+        why: `agente '${agent_name}' sin puntero en la iniciativa; registralo con set_agent_role`,
+        roster: {
+          source_ref: initiative.source_ref,
+          entity_keys: await loadRosterKeys(trx, initiative.source_ref),
+        },
+      };
     }
     const epic = await loadEpic(trx, initiative.id);
     const ctx = {

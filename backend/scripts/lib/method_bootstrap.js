@@ -31,6 +31,19 @@ const DEFAULT_PHASE = 'analysis';
 // step product-brief) para no marcar 'analysis' como completa de entrada.
 const SPEC_DOC_TYPE = 'spec';
 
+// Claves de rol de una librería, ordenadas. Fuente única del roster: la usan
+// `create_initiative` (para publicarlo al arrancar), `apts_next` (cuando el agente
+// no tiene puntero) y el rechazo de `set_agent_role`.
+//
+// Deuda de F6 que esto cierra: el roster no era descubrible por ninguna de las 21
+// operaciones. Un cliente que no descarga el paquete no tenía de dónde sacar las
+// claves, así que la única vía era llamar a `set_agent_role` con una clave inventada
+// y leerlas en el mensaje de error. Ahora fallar primero deja de ser obligatorio.
+const loadRosterKeys = (db, sourceRef) => db('entities')
+  .where({ source_ref: sourceRef, kind: 'role' })
+  .orderBy('key', 'asc')
+  .pluck('key');
+
 // Asegura la fila `projects` (FK NOT NULL de initiatives/epics). Idempotente:
 // no pisa el `name` de un proyecto ya existente.
 const ensureProject = async (db, projectUrl, name) => {
@@ -120,6 +133,12 @@ const createInitiative = (db, {
         created: false,
         resumed: true,
         ...(spec ? { spec_artifact_id: spec.id } : {}),
+        // El roster también en el camino de resume: es la vía de recuperación de un
+        // agente que retoma con el contexto limpio y no tiene las claves a mano.
+        roster: {
+          source_ref: existing.source_ref,
+          entity_keys: await loadRosterKeys(trx, existing.source_ref),
+        },
       };
     }
 
@@ -164,6 +183,13 @@ const createInitiative = (db, {
       created: true,
       resumed: false,
       ...(spec ? { spec_artifact_id: spec.id } : {}),
+      // Las claves de rol de la librería recién fijada. `set_agent_role` es la
+      // operación siguiente en el arranque y las necesita: publicarlas aquí evita
+      // el rechazo obligatorio que hoy es la única forma de aprenderlas.
+      roster: {
+        source_ref,
+        entity_keys: await loadRosterKeys(trx, source_ref),
+      },
     };
   });
 
@@ -224,13 +250,9 @@ const setAgentRole = (db, {
       .where({ key: entity_key, source_ref: initiative.source_ref })
       .first('id', 'key');
     if (!entity) {
-      // El roster no es descubrible por ninguna de las 21 operaciones (F6-4): un cliente
-      // que no descarga el paquete no tiene de dónde sacar las claves. El rechazo las
-      // enumera para que el error sea accionable en un solo intento.
-      const disponibles = (await trx('entities')
-        .where({ source_ref: initiative.source_ref, kind: 'role' })
-        .orderBy('key', 'asc')
-        .pluck('key')).join(', ');
+      // El rechazo sigue enumerando las claves, por la misma fuente que ahora las
+      // publica `create_initiative` y `apts_next`: aquí es la última red, no la única.
+      const disponibles = (await loadRosterKeys(trx, initiative.source_ref)).join(', ');
       throw badRequest(
         `entity_key '${entity_key}' no existe en la librería source_ref '${initiative.source_ref}'. `
         + `Claves válidas: ${disponibles}`,
@@ -264,6 +286,7 @@ const setAgentRole = (db, {
 module.exports = {
   createInitiative,
   setAgentRole,
+  loadRosterKeys,
   writeSpecArtifact,
   ensureProject,
   SPEC_DOC_TYPE,

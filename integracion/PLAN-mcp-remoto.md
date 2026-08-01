@@ -6,9 +6,13 @@
 > **Regla de oro: se PARA al final de cada fase**, a esperar validación humana, antes de pasar a la
 > siguiente, igual que en [`PLAN-motor-metodo-cliente.md`](./PLAN-motor-metodo-cliente.md).
 >
-> **Estado: §3 cerrada y firmada el 2026-08-01.** Las secciones §3, §5, §6 y §7 se actualizaron con
-> lo decidido y con lo que se verificó en F6-0; en §7 hay una corrección de diagnóstico respecto a
-> la redacción original.
+> **Estado: F6 CERRADA Y FIRMADA el 2026-08-01**, con las cinco fases (F6-0 … F6-4) y sus cinco gates
+> firmados. El objetivo de §2 está cumplido y verificado contra `APTS_test`. Informe de cierre en el
+> [TRACKING](./TRACKING-mcp-remoto.md#informe-de-cierre-f6--mcp-remoto), donde está también la deuda
+> escrita que **no** es de F6.
+>
+> Las secciones §3, §5, §6 y §7 se actualizaron con lo decidido y con lo que se verificó en F6-0; en
+> §7 hay una corrección de diagnóstico respecto a la redacción original.
 
 ## 1. Problema (verificado, no supuesto)
 
@@ -203,7 +207,7 @@ endpoint se publica como campo propio `mcp_endpoint` derivado del host, y la pro
 en **una sola versión neutra** que no dice quién resuelve la identidad. Detalle en
 [Evidencia del gate F6-3](./TRACKING-mcp-remoto.md#evidencia-del-gate-f6-3).
 
-### F6-4 — Validación end-to-end desde cliente fresco 🛑 EN GATE (2026-08-01)
+### F6-4 — Validación end-to-end desde cliente fresco ✅ FIRMADA (2026-08-01)
 Cliente solo-spec, **cero descargas del núcleo ejecutable**, registrado contra el endpoint remoto y
 conducido de `analysis` a `phase=done` contra `APTS_test`.
 **GATE STOP:** lifecycle completo desde cliente fresco sin artefactos ejecutables locales;
