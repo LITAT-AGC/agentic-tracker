@@ -33,7 +33,11 @@ const { deriveWiring } = require('../scripts/importer/wiring');
 
 // Seed del MÉTODO: entorno por arg explícito o NODE_ENV (production/test/development).
 // Producción:  node seeds/bmad_seed.js production    |    Test:  node seeds/bmad_seed.js test
-const knex = methodSeedKnex('bmad_seed', process.argv[2]);
+// El entorno se toma del primer argumento que NO sea una bandera, para que
+// `--force` pueda ir en cualquier posición sin acabar interpretado como entorno.
+const ARGS = process.argv.slice(2);
+const FORCE = ARGS.includes('--force');
+const knex = methodSeedKnex('bmad_seed', ARGS.find((a) => !a.startsWith('--')));
 
 const j = (v) => (v === undefined || v === null ? null : JSON.stringify(v));
 
@@ -79,10 +83,50 @@ const entityRow = (ir) => {
 const defPhase = (phase) =>
   ['analysis', 'planning', 'solutioning', 'implementation'].includes(phase) ? phase : null;
 
+// ---- 0. Guardia: este seed tira del bucle a quien esté conduciendo ----
+// La limpieza del paso 1 borra las filas `bmad:v6.8.0` y las reinserta con UUID
+// nuevos. `project_state` apunta al método con tres FK `ON DELETE SET NULL`
+// (entity_id, current_workflow_id, current_step_id), así que el borrado no falla:
+// deja los punteros en NULL sin tocar `step_status`. Un agente que estaba en
+// `running` queda en `running` apuntando a nada. Medido en APTS_test.
+//
+// Se cuentan solo los punteros que este seed va a destruir de verdad —los que
+// caen en `bmad:v6.8.0`—; los de la fixture toy sobreviven y no son motivo de
+// aborto. Con `--force` se sigue adelante, pero diciendo a quién se lleva por
+// delante.
+const agentesEnRiesgo = async (connection) => {
+  const hasTable = await connection.schema.hasTable('project_state');
+  if (!hasTable) return [];
+
+  return connection('project_state as ps')
+    .leftJoin('entities as e', 'e.id', 'ps.entity_id')
+    .leftJoin('workflow_definitions as wd', 'wd.id', 'ps.current_workflow_id')
+    .where((q) => q.where('e.source_ref', SOURCE_REF).orWhere('wd.source_ref', SOURCE_REF))
+    .select('ps.agent_name', 'ps.step_status', 'ps.initiative_id');
+};
+
 async function run() {
   const corpus = loadCorpus();
   const agents = corpus.filter((ir) => ir.kind === 'agent');
   const workflows = corpus.filter((ir) => ir.kind === 'workflow');
+
+  const enRiesgo = await agentesEnRiesgo(knex);
+  if (enRiesgo.length) {
+    const lista = enRiesgo
+      .map((r) => `  - ${r.agent_name} (step_status=${r.step_status}, iniciativa ${r.initiative_id})`)
+      .join('\n');
+
+    if (!FORCE) {
+      throw new Error(
+        `${enRiesgo.length} agente(s) están conduciendo el método sobre la biblioteca ${SOURCE_REF}.\n`
+        + `Volver a sembrar los dejaría sin rol, sin workflow y sin paso, conservando su step_status:\n`
+        + `${lista}\n`
+        + 'Si aun así querés sembrar, repetí el comando con --force.'
+      );
+    }
+
+    console.warn(`AVISO — --force: se van a anular los punteros de ${enRiesgo.length} agente(s):\n${lista}`);
+  }
 
   return knex.transaction(async (trx) => {
     // ---- 1. Limpieza idempotente por source_ref (no toca fixture ni primitivas) ----
