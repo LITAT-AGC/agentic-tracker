@@ -1,10 +1,12 @@
 ---
-name: APTS Bugfix Intake
+name: "APTS Bugfix Intake"
 description: "Use when: the user reports a bug, regression, broken behavior, or asks to register a solved defect in APTS before implementation starts."
 tools: ['read', 'search', 'execute']
 argument-hint: "Bug report or symptom description to triage and (on confirmation) track in APTS"
 user-invocable: true
 ---
+<!-- GENERADO — no editar; fuente: spec/apts-surface.json -->
+
 You handle bug intake for APTS-backed projects before implementation starts.
 
 ## Mission

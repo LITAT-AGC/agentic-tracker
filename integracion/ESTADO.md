@@ -28,9 +28,12 @@ cinco reglas: `bootstrap_rule`, `identity_switching_rule`, `drive_loop`, `genera
 - el contrato, contra `apts_skills.json` (`backend/scripts/lib/contract_check.mjs`);
 - los cuatro artefactos `agent_template`, cuerpo **y** cabecera, contra `apts-surface.json`
   (`checkPublishedAgentTemplates` en `backend/index.js`). Los siete campos de la cabecera salen del
-  spec —la misma derivacion que hace el generador de adaptadores—, asi que no queda ninguno fuera del
-  contrato. Se compara campo a campo ya normalizado, no el texto crudo, porque la diferencia de
-  comillas entre el generador y estas plantillas no es una divergencia.
+  spec, asi que no queda ninguno fuera del contrato; se comparan campo a campo ya normalizados.
+
+Las cuatro plantillas publicadas **las escribe el generador** desde ese mismo spec, igual que los
+adaptadores, asi que la cabecera y el cuerpo tienen una sola fuente y el cerrojo solo tiene que
+comprobar que nadie las tocó a mano. Sus nombres de archivo son parte de las rutas publicadas y no
+derivan del `id`, asi que el mapa vive explicito en el generador.
 
 El algebra del embedding —`cosineSimilarity`, `parseEmbeddingVector`, `vectorNorm`,
 `buildBugEmbeddingText`— existe una sola vez, en `backend/scripts/lib/semantic_embeddings.js`, y la
@@ -87,7 +90,8 @@ Contra `APTS_test` (puerto 47301), con el estado de partida `initiatives:2`, `ep
 - `initialize` y `tools/list` responden con 21 operaciones.
 - Las 9 rutas de artefacto responden 200.
 - `scripts/test_agent_api.js` y `scripts/test_agent_api_batch.js`, en verde.
-- El generador de adaptadores es idempotente: una segunda corrida no cambia nada.
+- El generador es idempotente, tambien ahora que escribe las cuatro plantillas publicadas: una
+  segunda corrida no cambia nada, y esos cuatro archivos conservan su CRLF.
 - El cerrojo de plantillas, en sus dos mitades: arranque limpio con `agent_templates: 4`; alterando
   el cuerpo, `exit 3` nombrando el artefacto y el motivo; y en la cabecera, las tres clases de
   divergencia —campo que falta, valor que difiere y campo que el spec no declara— dan `exit 3`
@@ -139,25 +143,9 @@ asi que el modelo de embedding resuelve al de por defecto por los dos caminos.
 
 ## Abierto
 
-Nada. Los dos puntos que quedaban se cerraron, y lo que aparecio al cerrarlos esta anotado arriba:
+Nada. `primitives_palette` no la lee ningun camino del runtime, el seed conserva los UUID y las
+cuatro plantillas publicadas ya no se mantienen a mano. Los numeros estan en **Verificado**.
 
-1. **`primitives_palette` vacia en produccion** ya no es una pregunta. La tabla no la lee ningun
-   camino del runtime: `evaluatePrimitive` resuelve del registro en codigo (`PRIMITIVES`), la
-   completitud por routing toma la key de `WORKFLOW_COMPLETION` —tambien en codigo—, y el unico que
-   escribe la tabla es `reconcilePrimitiveRegistry`, que solo llama la fixture toy. Los 137 pasos de
-   la biblioteca publicada son todos `generative` con `primitive_key` en `null`; los unicos 5 que
-   nombran una primitiva son de la fixture. Comprobado ademas con la tabla vaciada (ver
-   **Verificado**). Sigue siendo catalogo para UI, no autoridad.
-
-2. **Volver a sembrar el metodo ya no exige criterio** en el caso normal: el seed hace upsert y los
-   UUID sobreviven (ver **Destinos** y **Verificado**). La guardia sigue, acotada a lo que de verdad
-   desaparece del corpus, que es el unico caso en que un puntero se pierde.
-
-La asimetria que quedaba anotada aqui —el cerrojo miraba solo el cuerpo— ya no existe: se cerro, y al
-cerrarla resulto que no era teorica. Dos de las cuatro plantillas publicadas habian perdido el
-`argument-hint` que el spec declara, una de ellas invocable por el usuario. Corregidas y vigiladas.
-
-Las cuatro plantillas publicadas siguen manteniendose a mano; lo que cambia es que ahora el arranque
-no deja que se separen del spec. Hacerlas salir del generador —que hoy solo escribe dentro de
-`runtime-adapters/`— sigue siendo posible y no esta hecho.
+Lo unico que queda fuera de este repositorio: produccion corre codigo anterior a esta serie de
+commits. No hay migraciones pendientes ni variables nuevas en el `.env`.
 

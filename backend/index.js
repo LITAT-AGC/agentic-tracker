@@ -5503,7 +5503,10 @@ const checkPublishedAgentTemplates = async () => {
   const surfaceSpec = JSON.parse(await fs.readFile(integrationArtifacts.surface_spec.filePath, 'utf8'));
   const agentByName = new Map(surfaceSpec.agents.map((agent) => [agent.name, agent]));
   const agentsById = new Map(surfaceSpec.agents.map((agent) => [agent.id, agent]));
-  const normalize = (text) => String(text).replace(/\r/g, '').trim();
+  // El cuerpo servido lleva delante el aviso de generado que emite
+  // `generate-adapters.js`; no es parte del cuerpo que declara el spec, así que
+  // se descuenta antes de comparar.
+  const normalize = (text) => String(text).replace(/\r/g, '').replace(/^<!--[\s\S]*?-->\n?/, '').trim();
   const problems = [];
   let checked = 0;
 

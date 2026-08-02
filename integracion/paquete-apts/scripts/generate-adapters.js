@@ -234,20 +234,8 @@ function emitOpencode(spec, root, written) {
 function emitVscode(spec, root, written) {
   // VS Code: agents as .agent.md plus copilot-instructions.md. No MCP/commands/permissions (n/a).
   for (const agent of spec.agents) {
-    const fm = [
-      `name: ${quoteYaml(agent.name)}`,
-      `description: ${quoteYaml(agent.description)}`,
-      `tools: [${agent.tools.map((tool) => `'${tool}'`).join(', ')}]`,
-    ];
-    if (agent.subagents && agent.subagents.length) {
-      const names = agent.subagents.map((id) => `'${agentById(spec, id).name}'`).join(', ');
-      fm.push(`agents: [${names}]`);
-    }
-    if (agent.argumentHint) fm.push(`argument-hint: ${quoteYaml(agent.argumentHint)}`);
-    fm.push(`user-invocable: ${agent.userInvocable !== false}`);
-    if (agent.userInvocable === false) fm.push('disable-model-invocation: false');
     writeFileTracked(written, path.join(root, 'agents', `${agent.id}.agent.md`),
-      markdownText(fm, agentBody(agent)));
+      markdownText(agentFrontmatter(spec, agent), agentBody(agent)));
   }
 
   writeFileTracked(written, path.join(root, 'copilot-instructions.md'), markdownText(null, [
@@ -263,6 +251,26 @@ function agentBody(agent) {
   return [agent.body];
 }
 
+// La cabecera YAML de un agente. Una sola vez, porque la consumen dos salidas
+// —los adaptadores de VS Code y las plantillas publicadas— y si se escribiera
+// dos veces podrían separarse, que es justo lo que este generador existe para
+// evitar. El backend deriva la misma cabecera al arrancar para comprobarlas.
+function agentFrontmatter(spec, agent) {
+  const fm = [
+    `name: ${quoteYaml(agent.name)}`,
+    `description: ${quoteYaml(agent.description)}`,
+    `tools: [${agent.tools.map((tool) => `'${tool}'`).join(', ')}]`,
+  ];
+  if (agent.subagents && agent.subagents.length) {
+    const names = agent.subagents.map((id) => `'${agentById(spec, id).name}'`).join(', ');
+    fm.push(`agents: [${names}]`);
+  }
+  if (agent.argumentHint) fm.push(`argument-hint: ${quoteYaml(agent.argumentHint)}`);
+  fm.push(`user-invocable: ${agent.userInvocable !== false}`);
+  if (agent.userInvocable === false) fm.push('disable-model-invocation: false');
+  return fm;
+}
+
 function commandBody(spec, command) {
   const lines = [command.body];
   if (command.agent) {
@@ -276,6 +284,39 @@ function commandBody(spec, command) {
 function hooksToClaude(hooks) {
   void hooks;
   return {};
+}
+
+// ---- plantillas publicadas -------------------------------------------------
+
+// Las cuatro plantillas que el backend sirve por HTTP viven fuera de
+// runtime-adapters/ —su ruta publicada es parte del manifiesto— pero salen del
+// mismo spec. Se emiten aquí para que dejen de mantenerse a mano: el arranque
+// del backend ya aborta si se separan del spec, y esto quita de raíz que puedan
+// separarse.
+//
+// El nombre de archivo NO se deriva del id: tres de los cuatro están en
+// castellano y la ruta publicada depende de ellos, así que el mapa es explícito.
+// Un agente nuevo en el spec sin entrada aquí es un error, no un silencio.
+const PUBLISHED_TEMPLATES = {
+  'apts-bugfix-intake': 'intake-bugfix-apts.agent.md',
+  'backlog-item-executor-dev-test-commit': 'ejecutor-item-backlog-dev-test-commit.agent.md',
+  'apts-backlog-orchestrator': 'orquestador-backlog-apts.agent.md',
+  'apts-method-orchestrator': 'apts-method-orchestrator.agent.md',
+};
+
+// Estos cuatro archivos son CRLF desde siempre, a diferencia de todo lo que sale
+// a runtime-adapters/. Se respeta: cambiarlo llenaría el diff de ruido y taparía
+// el cambio real.
+function emitPublishedTemplates(spec, root, written) {
+  for (const agent of spec.agents) {
+    const fileName = PUBLISHED_TEMPLATES[agent.id];
+    if (!fileName) throw new Error(`agente sin plantilla publicada mapeada: ${agent.id}`);
+    const absPath = path.join(root, fileName);
+    const text = markdownText(agentFrontmatter(spec, agent), agentBody(agent)).replace(/\r?\n/g, '\r\n');
+    fs.mkdirSync(path.dirname(absPath), { recursive: true });
+    fs.writeFileSync(absPath, text);
+    written.push(`../plantillas-agentes/${fileName}`);
+  }
 }
 
 // ---- main ------------------------------------------------------------------
@@ -299,6 +340,7 @@ function main() {
   emitClaude(spec, targets.claude, written);
   emitOpencode(spec, targets.opencode, written);
   emitVscode(spec, targets.vscode, written);
+  emitPublishedTemplates(spec, path.join(scriptDir, '..', '..', 'plantillas-agentes'), written);
 
   written.sort();
   process.stdout.write(`generate-adapters OK: ${written.length} files from ${spec.agents.length} agents, ${spec.commands.length} commands.\n`);

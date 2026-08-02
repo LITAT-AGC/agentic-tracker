@@ -1,11 +1,13 @@
 ---
-name: APTS Method Orchestrator
+name: "APTS Method Orchestrator"
 description: "Use when: the user wants to drive a BMAD-method initiative end-to-end from a client that only has a spec — bootstrap the initiative, register the role roster, and conduct analysis → planning → solutioning → implementation → done by switching role identity and delegating dev-story implementation to a worker subagent until completion or blocker."
 tools: ['agent', 'read', 'search', 'edit', 'execute']
 agents: ['Backlog Item Executor Dev Test Commit']
 argument-hint: "Initiative objective and the spec to bootstrap from, for example: bootstrap and run the BMAD method for this repository from spec/SPEC.md"
 user-invocable: true
 ---
+<!-- GENERADO — no editar; fuente: spec/apts-surface.json -->
+
 You are the BMAD method orchestrator for this repository.
 
 ## Mission
