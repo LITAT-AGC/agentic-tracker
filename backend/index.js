@@ -3532,8 +3532,8 @@ const searchSimilarBugReportsOperation = async (parsedBody) => {
 // ---------------------------------------------------------------------------
 // Remote MCP surface: POST /mcp (Streamable HTTP, stateless).
 //
-// la ejecución ya no pasa por apts-client.js ni por el salto HTTP interno.
-// dispatch() recibe un ejecutor en proceso con las mismas 21 funciones que
+// la ejecución no da ningún salto HTTP interno: dispatch() recibe un ejecutor
+// en proceso con las mismas 21 funciones que
 // exportaba el cliente, y cada una llama directamente a la función de negocio.
 // ---------------------------------------------------------------------------
 
@@ -3594,10 +3594,9 @@ const loadMcpRuntime = () => {
 
 // --- Ejecutor en proceso ----------------------------------------
 //
-// dispatch() llama a `client[clientExport](payload)`. Antes ese objeto era el
-// módulo apts-client.js, que hablaba HTTP contra este mismo servidor. Ahora es el
-// objeto de abajo, con las mismas 21 funciones llamando directamente a la función
-// de negocio que llamaría la ruta express. apts-mcp.js no se toca.
+// dispatch() llama a `client[clientExport](payload)`. Ese objeto es el de abajo:
+// las 21 funciones llamando directamente a la función de negocio que ejecutaría
+// la ruta express, sin pasar por HTTP.
 //
 // Cada función reproduce **la ruta concreta que el cliente habría llamado** con
 // ese mismo payload: mismo esquema de validación, mismo cuerpo de respuesta y,
@@ -3622,9 +3621,9 @@ const isMcpRetriableStatus = (statusCode) => statusCode === 408
   || statusCode === 429
   || statusCode >= 500;
 
-// Traduce un error del servidor al mismo objeto que apts-client.js habría creado
-// leyendo la respuesta HTTP (apts-client.js:631). Sin esto, un mismo rechazo se
-// vería distinto por cada camino aunque la causa fuera la misma.
+// Traduce un error del servidor al mismo objeto que se obtendría leyendo la
+// respuesta HTTP. Sin esto, un mismo rechazo se vería distinto según el camino
+// aunque la causa fuera la misma.
 const buildMcpExecutionError = (statusCode, payload) => {
   const executionError = new Error(payload.error || `APTS request failed with status ${statusCode}`);
   executionError.name = 'AptsClientError';

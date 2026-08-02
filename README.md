@@ -45,19 +45,18 @@ APTS esta pensado para equipos que usan agentes de desarrollo y necesitan:
 
 El paquete `integracion/paquete-apts/` describe las herramientas que un runtime de agentes puede exponer. Cada skill se corresponde con un endpoint REST del backend.
 
-Importante: este repositorio publica la API y el contrato de skills, pero no incluye un servidor MCP dedicado ni un adaptador universal para todos los agentes. Cada proyecto que quiera integrarse debe cargar ese JSON en su runtime de herramientas o crear un pequeno cliente HTTP que exponga esas mismas funciones.
+El backend expone ademas el endpoint MCP remoto en `POST /mcp`: un runtime lo registra con una URL y cuatro cabeceras, y recibe una tool nativa por operacion del contrato.
 
 ## Skills disponibles
 
-El repositorio incluye un paquete descargable para proyectos clientes en `integracion/paquete-apts/`. Ese paquete agrupa el skill, un contrato JSON copiable, clientes HTTP base para CommonJS y ESM, una CLI oficial para CommonJS y ESM, y una guia de instrucciones para agentes.
+El repositorio incluye material de integracion en `integracion/paquete-apts/`: el contrato JSON, la guia de instrucciones para agentes, la spec de superficie y el generador de adaptadores por runtime.
 
 Como este repositorio es publico, esos archivos se consumen directamente desde `integracion/paquete-apts/`.
 
-Ademas, el backend puede publicar un punto de entrada publico para agentes en `/api/public/integrar`. Ese endpoint devuelve un manifiesto JSON con el orden recomendado de instalacion, enlaces descargables al contrato de skills, la guia operativa base, las plantillas opcionales de agentes, los dos clientes HTTP de referencia, las dos CLI oficiales de referencia y un bloque `bootstrap` que explica el proposito de APTS, la migracion desde tracking local, que APTS pasa a ser la fuente de verdad operativa, como solicitar/alojar `APTS_API_KEY`, como mantener una bitacora local append-only de resiliencia sin convertirla en tracking oficial y que artefacto descargar segun si el proyecto Node.js cliente corre en CommonJS o en ESM, sin requerir token para el bootstrap.
+Ademas, el backend publica un punto de entrada publico para agentes en `/api/public/integrar`. Ese endpoint devuelve un manifiesto JSON con el bloque de registro del MCP remoto por runtime, el bucle de conduccion del metodo como dato (`method_conduction`), los artefactos opcionales (contrato de skills, guia operativa, plantillas de agentes, spec de superficie y generador de adaptadores) y un bloque `bootstrap` que explica el proposito de APTS, la migracion desde tracking local y como solicitar y alojar `APTS_API_KEY`. No requiere token.
 
-Politica de mantenimiento del manifiesto: cada cambio funcional, estructural o semantico en `/api/public/integrar` debe actualizar `schema_version` y agregar una entrada nueva en `bootstrap.manifest_updates.notes` explicando que cambio, desde que version aplica y por que importa para los clientes del manifiesto. Ese historial es append-only: no reemplazar notas anteriores por la ultima version.
+Politica de mantenimiento del manifiesto: cada cambio funcional, estructural o semantico en `/api/public/integrar` debe subir `schema_version`, y cada artefacto cuyo contenido cambie debe subir su `artifact_version`.
 
-Sincronizacion de artefactos de integracion: el manifiesto publica metadatos por artefacto (`artifact_version`, `updated_in_schema_version`, `sync_action` y `deprecated_filenames`). La politica global `bootstrap.artifact_sync_policy`, con su `updater_contract` y sus `legacy_cleanup_targets`, **se retiro en `schema_version` 4.0.0** junto con el resto de la prosa que explicaba como instalar y mantener sincronizados los cuatro ejecutables descargables: desde el MCP remoto no hay copia local que sincronizar. Los trece artefactos y sus rutas de descarga siguen sirviendose sin cambios, y los metadatos por artefacto siguen publicandose, asi que un actualizador propio conserva el dato; lo que ya no se publica es la receta.
 
 Superficie recomendada: registrar el servidor MCP remoto copiando el bloque de `mcp_endpoint.registration_by_runtime` que corresponda al runtime. No hace falta descargar ningun archivo para usar las 21 operaciones.
 
@@ -82,7 +81,7 @@ Authorization: Bearer <APTS_API_KEY>
 
 ## Flujo esperado de un agente
 
-1. Verificar contexto de identidad (el cliente MCP oficial lo autocompleta desde env, contexto local gestionado y luego Git local).
+1. Registrar el MCP remoto: la identidad del proyecto y del agente viaja en las cabeceras del registro.
 2. Consultar backlog (`list_backlog_items`) y seleccionar un item pendiente o crear uno nuevo si corresponde.
 3. Crear la tarea de ejecucion con `register_task` y asociarla al `backlog_item_id`.
 4. Leer el contexto del proyecto antes de trabajar (`read_project_context`).
@@ -90,29 +89,17 @@ Authorization: Bearer <APTS_API_KEY>
 6. Reportar blocker si no puede continuar.
 7. Marcar la tarea como `done` o `review` cuando termina; APTS sincroniza el estado del backlog vinculado.
 
-Fuentes de identidad usadas por el cliente MCP oficial cuando faltan campos en payload:
+Valores que el bloque de registro del MCP remoto referencia:
 
 ```env
+APTS_MCP_URL=https://apts.example.com/mcp
+APTS_API_KEY=...
 APTS_PROJECT_URL=https://github.com/org/repo
 APTS_AGENT_NAME=Copilot
 APTS_AGENT_EMAIL=copilot@example.com
-APTS_BRANCH=main
-APTS_TASK_ID=22222222-2222-2222-2222-222222222222
-APTS_CONTEXT_FILE=.apts/execution-context.json
 ```
 
-Con `APTS_TASK_ID` configurado, las llamadas repetitivas (`heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status`) pueden omitir `task_id` en el payload cuando se usa el cliente MCP oficial.
-Ademas, el cliente MCP oficial persiste contexto de ejecucion en `.apts/execution-context.json` por defecto (o la ruta definida en `APTS_CONTEXT_FILE`), por lo que luego de `register_task` las llamadas repetitivas pueden omitir `task_id` incluso sin reexportar variables.
-Ese archivo `.apts/execution-context.json` puede inspeccionarse o editarse directamente para revisar o reiniciar el estado de identidad gestionado.
-
-Fallback en Git local:
-
-```bash
-project_url=$(git remote get-url origin)
-agent_name=$(git config user.name)
-agent_email=$(git config user.email)
-branch=$(git branch --show-current)
-```
+El servidor no inspecciona el entorno, el sistema de archivos ni el Git del cliente: esos valores llegan en las cabeceras del registro. Un valor enviado en los argumentos de la llamada gana a la cabecera —asi conmuta de rol un agente— y un `project_url` que contradiga la cabecera se rechaza. `task_id` lo devuelve `register_task` y viaja en la llamada; `branch` es opcional y no puede ir en cabecera porque cambia durante la sesion.
 
 El backend normaliza la URL del repositorio para que valores como `git@github.com:org/repo.git` y `https://github.com/org/repo` se traten como el mismo proyecto.
 
@@ -327,11 +314,7 @@ Regla recomendada:
 
 Nota: en este repositorio `.vscode/` esta ignorado por git, por eso la plantilla versionable vive en `docs/`.
 
-Para el cliente HTTP exportable:
-
-- usa `apts-client.js`, el cliente unico ESM-only (el proyecto cliente debe tratar la carpeta como ESM via `package.json` con `{ "type": "module" }`).
-
-Importante: si APTS cambia endpoints, payloads, helpers o manejo de errores del cliente, el ajuste debe replicarse en `integracion/paquete-apts/apts-client.js`.
+Importante: si APTS cambia endpoints, payloads o manejo de errores, el ajuste debe reflejarse primero en `integracion/paquete-apts/apts_skills.json`. El auto-chequeo del arranque aborta si la superficie remota se separa del contrato.
 
 ### Contrato operativo minimo
 
@@ -358,7 +341,7 @@ Regla de backlog:
 
 Happy path operativo:
 
-1. Configurar `APTS_BASE_URL` y `APTS_API_KEY`; luego usar el servidor MCP oficial con autofill (sin resolver identidad manualmente en cada llamada).
+1. Configurar los valores del registro (`APTS_MCP_URL`, `APTS_API_KEY` y las tres de identidad); luego usar las tools del MCP remoto con payloads minimos.
 2. Llamar `list_backlog_items` y decidir si reutilizas o creas item.
 3. Llamar `register_task` y conservar `task_id`.
 4. Llamar `read_project_context` antes de editar.
@@ -500,8 +483,7 @@ mi-proyecto/
       apts-operacion.prompt.md
   tools/
     apts_skills.json
-  scripts/
-    apts-client.js
+  .mcp.json
   .env
 ```
 
@@ -516,10 +498,9 @@ mi-proyecto/
     skills/
       apts/
         SKILL.md
-        apts-client.js
 ```
 
-En ese caso, el `SKILL.md` del proyecto cliente debe describir cuando usar la skill y delegar la operacion al cliente HTTP o al bridge que habla con APTS.
+En ese caso, el `SKILL.md` del proyecto cliente debe describir cuando usar la skill y remitir a las tools del MCP remoto registrado.
 
 ### Troubleshooting: VS Code no reconoce los agentes
 
