@@ -4,12 +4,30 @@ require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true
 
 const knexFactory = require('knex');
 const knexConfig = require('../knexfile');
+// Este script tenia su propia copia de todo: el texto que se embebe, la llamada a
+// OpenRouter, la resolucion del modelo y el registro de consumo. Dos cosas malas
+// salian de ahi. Una, el `fetch` no llevaba plazo de espera, asi que un proveedor
+// mudo dejaba el re-embebido colgado sin limite, elemento a elemento. Y dos, el
+// modelo se resolvia solo por `openrouter_embedding_model`, mientras que la
+// busqueda vive de `getEffectiveEmbeddingModel(db, 'bug_dedup')`, que mira antes
+// `embedding_strategy:bug_dedup:model`: con esa clave puesta, este script
+// re-embebia con un modelo distinto al que luego compara la busqueda, y los
+// vectores dejaban de ser comparables en silencio. Reescribir vectores con un
+// modelo que no es el de la busqueda es justo lo contrario de lo que hace falta.
+const {
+  buildBugEmbeddingText,
+  normalizeTextField,
+  requestEmbedding
+} = require('./lib/semantic_embeddings');
 
 const DEFAULT_TARGET_ENV = process.env.APTS_REEMBED_TARGET_ENV || 'test';
-const DEFAULT_OPENROUTER_EMBEDDING_MODEL = process.env.OPENROUTER_DEFAULT_EMBEDDING_MODEL || 'openai/text-embedding-3-small';
-const OPENROUTER_EMBEDDINGS_URL = 'https://openrouter.ai/api/v1/embeddings';
 const OPEN_BUG_BACKLOG_STATUSES = new Set(['draft', 'needs_details', 'ready', 'in_progress', 'review', 'blocked']);
-const OPENROUTER_EMBEDDING_CONFIG_KEY = 'openrouter_embedding_model';
+// La misma clave de estrategia que usa la busqueda de bugs duplicados en
+// `backend/index.js`. Si aqui dijera otra cosa, volveria la divergencia.
+const BUG_EMBEDDING_STRATEGY_KEY = 'bug_dedup';
+// Se conserva el valor historico de `usage_type`: la tabla ya tiene filas con
+// `bug_embedding` y no hay motivo para partir la serie.
+const BUG_EMBEDDING_USAGE_TYPE = 'bug_embedding';
 
 const parseArgs = (argv) => {
   const options = {
@@ -76,159 +94,6 @@ const parseArgs = (argv) => {
   options.projects = options.projects.filter(Boolean);
   options.limit = Number.isInteger(options.limit) && options.limit > 0 ? options.limit : null;
   return options;
-};
-
-const normalizeTextField = (value) => (typeof value === 'string' ? value.trim() : '');
-
-const parseEmbeddingVector = (value) => {
-  if (!Array.isArray(value)) return [];
-
-  return value
-    .map((entry) => Number(entry))
-    .filter((entry) => Number.isFinite(entry));
-};
-
-const vectorNorm = (vector) => Math.sqrt(vector.reduce((accumulator, value) => accumulator + (value * value), 0));
-
-const buildBugEmbeddingText = (backlogItem) => {
-  const title = normalizeTextField(backlogItem?.title);
-  const description = normalizeTextField(backlogItem?.description);
-  const acceptanceCriteria = normalizeTextField(backlogItem?.acceptance_criteria);
-  const sourceKind = normalizeTextField(backlogItem?.source_kind);
-  const sourceRef = normalizeTextField(backlogItem?.source_ref);
-
-  return [
-    title ? `titulo: ${title}` : '',
-    description ? `descripcion: ${description}` : '',
-    acceptanceCriteria ? `criterios_aceptacion: ${acceptanceCriteria}` : '',
-    sourceKind ? `origen: ${sourceKind}` : '',
-    sourceRef ? `referencia: ${sourceRef}` : ''
-  ]
-    .filter(Boolean)
-    .join('\n\n')
-    .slice(0, 16000);
-};
-
-const getOpenRouterApiKey = () => {
-  const apiKey = normalizeTextField(process.env.OPENROUTER_API_KEY);
-  if (!apiKey) {
-    throw new Error('OPENROUTER_API_KEY is required to re-embed bug items.');
-  }
-  return apiKey;
-};
-
-const getOpenRouterHeaders = () => {
-  const headers = {
-    Authorization: `Bearer ${getOpenRouterApiKey()}`,
-    'Content-Type': 'application/json',
-    'X-Title': 'APTS'
-  };
-
-  const referer = normalizeTextField(process.env.PUBLIC_APP_URL);
-  if (referer) {
-    headers['HTTP-Referer'] = referer;
-  }
-
-  return headers;
-};
-
-const readOpenRouterResponse = async (response) => {
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(data?.error?.message || data?.message || `OpenRouter request failed with status ${response.status}`);
-  }
-  return data;
-};
-
-const toNonNegativeInteger = (value) => {
-  const parsed = Math.floor(Number(value));
-  if (!Number.isFinite(parsed) || parsed < 0) return 0;
-  return parsed;
-};
-
-const toNonNegativeNumber = (value) => {
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed < 0) return 0;
-  return parsed;
-};
-
-const getConfigValue = async (connection, key) => {
-  const hasConfigTable = await connection.schema.hasTable('config');
-  if (!hasConfigTable) return null;
-  const entry = await connection('config').where({ key }).first();
-  return entry?.value || null;
-};
-
-const getEffectiveOpenRouterEmbeddingModel = async (connection) => {
-  const configuredModel = await getConfigValue(connection, OPENROUTER_EMBEDDING_CONFIG_KEY);
-  return normalizeTextField(configuredModel) || DEFAULT_OPENROUTER_EMBEDDING_MODEL;
-};
-
-const persistOpenRouterUsage = async (connection, {
-  usageType,
-  model,
-  usage,
-  projectUrl = null,
-  backlogItemId = null
-}) => {
-  if (!usage || typeof usage !== 'object') {
-    return;
-  }
-
-  const hasUsageTable = await connection.schema.hasTable('openrouter_usage_logs');
-  if (!hasUsageTable) {
-    return;
-  }
-
-  await connection('openrouter_usage_logs').insert({
-    usage_type: normalizeTextField(usageType) || 'unknown',
-    model: normalizeTextField(model) || 'unknown',
-    project_url: normalizeTextField(projectUrl) || null,
-    backlog_item_id: backlogItemId || null,
-    prompt_tokens: toNonNegativeInteger(usage.prompt_tokens),
-    completion_tokens: toNonNegativeInteger(usage.completion_tokens),
-    total_tokens: toNonNegativeInteger(usage.total_tokens),
-    cost: toNonNegativeNumber(usage.cost),
-    is_byok: typeof usage.is_byok === 'boolean' ? usage.is_byok : null,
-    raw_usage: usage
-  });
-};
-
-const requestOpenRouterEmbedding = async (connection, inputText, { projectUrl, backlogItemId } = {}) => {
-  const normalizedInput = normalizeTextField(inputText);
-  if (!normalizedInput) {
-    throw new Error('Embedding input text is required');
-  }
-
-  const model = await getEffectiveOpenRouterEmbeddingModel(connection);
-  const response = await fetch(OPENROUTER_EMBEDDINGS_URL, {
-    method: 'POST',
-    headers: getOpenRouterHeaders(),
-    body: JSON.stringify({
-      model,
-      input: normalizedInput
-    })
-  });
-
-  const data = await readOpenRouterResponse(response);
-  await persistOpenRouterUsage(connection, {
-    usageType: 'bug_embedding',
-    model,
-    usage: data?.usage,
-    projectUrl,
-    backlogItemId
-  });
-
-  const embedding = parseEmbeddingVector(data?.data?.[0]?.embedding);
-  if (!embedding.length) {
-    throw new Error('OpenRouter embedding response did not include a valid vector');
-  }
-
-  return {
-    model,
-    embedding,
-    norm: vectorNorm(embedding)
-  };
 };
 
 const buildQuery = (connection, options) => {
@@ -331,7 +196,8 @@ const main = async () => {
           continue;
         }
 
-        const embeddingResult = await requestOpenRouterEmbedding(db, embeddingInput, {
+        const embeddingResult = await requestEmbedding(db, BUG_EMBEDDING_STRATEGY_KEY, embeddingInput, {
+          usageType: BUG_EMBEDDING_USAGE_TYPE,
           projectUrl: item.project_url,
           backlogItemId: item.id
         });

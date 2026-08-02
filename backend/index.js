@@ -38,8 +38,15 @@ const { createInitiative, setAgentRole } = require('./scripts/lib/method_bootstr
 // vectores de distinta longitud una daba `0` y la otra `NaN`—. El sitio de llamada
 // filtra por `Number.isFinite` y por el umbral, así que las dos se descartaban
 // igual; era una diferencia sin efecto esperando a tenerlo. Ahora hay una sola.
+//
+// Y `buildBugEmbeddingText`, que estaba tres veces. Ésta era la peor de las tres:
+// arma el texto que se manda a embeber, así que si dos copias se separan, un lado
+// embebe un documento y el otro embebe otro, y luego los vectores se comparan
+// entre sí como si vinieran del mismo texto. No hay filtro que lo tape —la
+// búsqueda seguiría respondiendo 200, sólo que peor—.
 const {
   requestEmbedding: requestLibraryEmbedding,
+  buildBugEmbeddingText,
   cosineSimilarity,
   parseEmbeddingVector
 } = require('./scripts/lib/semantic_embeddings');
@@ -1444,25 +1451,6 @@ const fetchOpenRouterModels = async () => {
 };
 
 const normalizeTextField = (value) => (typeof value === 'string' ? value.trim() : '');
-
-const buildBugEmbeddingText = (backlogItem) => {
-  const title = normalizeTextField(backlogItem?.title);
-  const description = normalizeTextField(backlogItem?.description);
-  const acceptanceCriteria = normalizeTextField(backlogItem?.acceptance_criteria);
-  const sourceKind = normalizeTextField(backlogItem?.source_kind);
-  const sourceRef = normalizeTextField(backlogItem?.source_ref);
-
-  return [
-    title ? `titulo: ${title}` : '',
-    description ? `descripcion: ${description}` : '',
-    acceptanceCriteria ? `criterios_aceptacion: ${acceptanceCriteria}` : '',
-    sourceKind ? `origen: ${sourceKind}` : '',
-    sourceRef ? `referencia: ${sourceRef}` : ''
-  ]
-    .filter(Boolean)
-    .join('\n\n')
-    .slice(0, 16000);
-};
 
 // Antes esta función era una **segunda implementación** del embedding: su propio
 // `fetch`, sus propias cabeceras, su propio plazo de espera y su propia lectura de
