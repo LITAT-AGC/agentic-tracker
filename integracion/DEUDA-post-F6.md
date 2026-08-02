@@ -16,6 +16,7 @@
 | **E** — Recorte de la prosa del manifiesto | ✅ Hecho: **11.034 → 8.790 unidades (-20,3%)**, con ruptura declarada en 4.0.0 |
 | **F** — El bucle de conducción del método, publicado como dato | ✅ Hecho, validado conduciendo a `phase=done` desde un cliente sin descargas |
 | **G** — Dieta II: los cuatro artefactos obsoletos, fuera del listado | ✅ Hecho: `artifacts[]` 13 → 9, sus rutas siguen en 200 |
+| **H** — Las copias en prosa del bucle, recortadas a un puntero | ✅ Hecho: **20.318 → 13.563 unidades** en cinco archivos |
 | Corrida contra PROD | ⬜ Sin tocar — todo lo de abajo está medido contra `APTS_test` |
 
 **`APTS_test` restaurado** a su estado de partida exacto: `initiatives:2`, `epics:2`,
@@ -224,6 +225,47 @@ toca.
 | Tras la dieta I (4.0.0, commit `1f496ee`) | 8.790 |
 | **Estado actual** | **9.402** |
 
+## H — Las copias en prosa del bucle, recortadas a un puntero
+
+**El planteamiento inicial estaba mal dimensionado.** Se había anotado "recortar la plantilla". Al
+medir aparecieron **seis** copias del bucle, y **dos** de ellas editables a mano:
+
+| Copia | Antes | Después | Origen |
+|---|---|---|---|
+| `method_conduction` (manifiesto) | — | 1.592 | **la fuente autoritativa** |
+| `plantillas-agentes/…orchestrator.agent.md` | 2.813 | **1.483** | copia a mano; es el artefacto servido |
+| `runtime-adapters/spec/apts-surface.json` | 9.129 | **7.760** | copia a mano; **fuente de los adaptadores** |
+| adaptador vscode | 2.827 | **1.475** | generado desde la spec |
+| adaptador claude | 2.769 | **1.417** | generado desde la spec |
+| adaptador opencode | 2.780 | **1.428** | generado desde la spec |
+
+Recortar sólo la plantilla habría dejado el bucle entero en la spec y en los tres adaptadores. Se
+comprobó que `generate-adapters.js` emite **sólo** `runtime-adapters/{claude,opencode,vscode}/` y no
+toca `plantillas-agentes/`, así que son dos fuentes independientes que hay que recortar a la vez.
+
+**Decisión del operador:** recortar **las dos fuentes** y regenerar los adaptadores; dejar en el
+hueco un **puntero con la ruta y los cinco campos**; subir `artifact_version` de los dos artefactos a
+**4.0.0**, plegado en el schema 4.0.0; y validar con **generador idempotente + diff + rutas**, sin
+reconducir (este paso no toca `method_conduction` ni el motor).
+
+**Lo que se va y lo que se queda.** Se van las cuatro secciones de motor (bootstrap, cambio de rol,
+bucle, paso generativo) y la mitad de motor de `Delegation Rule`. Se queda la mitad de cliente: el
+envoltorio de agente, la lista de herramientas, a quién se delega, el registro de resiliencia, la
+política de reintentos, los límites y el formato de informe. **Total: 20.318 → 13.563 unidades
+(−6.755).**
+
+De `Delegation Rule` se conserva una advertencia corta que no se podía perder: el worker cierra en
+`review`, que **no es terminal**, así que hay que seguir `dev_story_completion_rule` del manifiesto o
+la historia nunca llega a `done`.
+
+### Hallazgo del mismo paso: la plantilla y la spec ya no decían lo mismo
+
+Al comparar los dos cuerpos aparecieron **cuatro líneas divergentes, anteriores a este trabajo**. La
+plantilla seguía afirmando que *"the official MCP server auto-resolves `project_url` and `agent_name`
+from env / managed context / Git"*. Es **la misma afirmación falsa** que F6-3 quitó de los
+adaptadores, F6-4 del contrato y 4.0.0(a) del manifiesto: la `surface_spec` ya estaba corregida y
+**nadie había corregido la plantilla**. Ahora coinciden palabra por palabra.
+
 ## Validación
 
 Todo contra `APTS_test` (`environment:test`, puerto 47301), con el arranque haciendo su auto-chequeo
@@ -243,6 +285,10 @@ de contrato en verde (`operations: 21`).
 | **Las 13 rutas de artefacto, tras delistar cuatro** | **13 / 13 en 200** |
 | **Regresiones del repositorio, de nuevo** | `test_agent_api.js` y `test_agent_api_batch.js`, en verde |
 | **Humo por entrada/salida estándar** | 21 operaciones; `apts_status` coincide con la superficie remota |
+| **Generador de adaptadores, tras el recorte (H)** | idempotente: 2.ª corrida sin cambios |
+| **Diff de los adaptadores (H)** | −4 secciones, +1 (`Conduction Loop`); 41 inserciones, 297 borrados |
+| **Diff del manifiesto tras H** | 0 claves perdidas, 0 añadidas; sólo cambian las dos versiones |
+| **Plantilla y spec servidas tras H** | sin `## Drive Loop`, sin `auto-resolves`, con `Conduction Loop` |
 
 ### Lo medido en la conducción (F)
 
@@ -311,6 +357,17 @@ tocaron.
   completa con (a) y (b). **Es el único archivo de código tocado.**
 - `integracion/DEUDA-post-F6.md` (este).
 
+## Archivos tocados por H
+
+- `integracion/plantillas-agentes/apts-method-orchestrator.agent.md` — bucle fuera, puntero dentro, y
+  las cuatro líneas de identidad alineadas con la spec.
+- `integracion/paquete-apts/runtime-adapters/spec/apts-surface.json` — el mismo recorte en
+  `agents[].body` del orquestador del método.
+- Tres adaptadores **regenerados** con `scripts/generate-adapters.js` (claude, opencode, vscode). No
+  se editaron a mano: son archivos gestionados.
+- `backend/index.js` — `artifact_version` de `method_orchestrator_agent` y `surface_spec` a 4.0.0, y
+  el apartado (c) de la nota de 4.0.0.
+
 **El camino actual por entrada/salida estándar no cambió**: comprobado que `1f496ee..HEAD` no toca
 `apts-mcp.js` ni `apts-client.js`.
 
@@ -324,6 +381,8 @@ tocaron.
    dependiera de `artifact_sync_policy` deja de encontrarla, y con G también de los cuatro
    artefactos en `artifacts[]` — aunque sus rutas sigan sirviéndose y estén publicadas en
    `legacy_download_routes`.
-4. **La plantilla `apts-method-orchestrator.agent.md` conserva su copia del bucle**, ahora marcada
-   obsoleta. Mientras siga sirviéndose puede divergir de `method_conduction`: si interesa, el paso
-   siguiente es recortarla a la mitad que es del cliente y que apunte al manifiesto para el resto.
+4. **Nada impide que las copias en prosa vuelvan a divergir.** H las alineó a mano y comprobó que la
+   plantilla y el cuerpo de la spec son idénticos, pero **no hay nada que lo verifique de forma
+   automática**: son dos archivos que se editan por separado. Un chequeo que compare los dos cuerpos
+   —y que falle el arranque si difieren, como ya hace el auto-chequeo de contrato— cerraría el
+   agujero de raíz. No se hizo: no estaba en el alcance acordado.

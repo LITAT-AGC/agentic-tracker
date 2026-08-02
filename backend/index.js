@@ -2178,7 +2178,24 @@ const integrationRoot = path.join(__dirname, '..', 'integracion');
 //   `adapter_generator` drops `contract_check` from `depends_on_artifact_ids`: the check runs inside
 //   the backend at startup, it was never an input to the generator, and leaving it would point at an
 //   id this manifest no longer publishes.
-//   Net cost of 4.0.0 as shipped: 11.034 -> ~9.100 text units per integration.
+//   (c) the prose copies of the conduction loop are cut back to a pointer. Publishing
+//   `method_conduction` in (a) left the loop duplicated in FIVE downloadable places: the
+//   `method_orchestrator_agent` template, the `surface_spec` (which is the source the adapters are
+//   generated from), and the three generated adapters. Two of those are hand-edited, so the loop
+//   could drift from the engine in exactly the way (a) set out to prevent. The four engine sections
+//   (bootstrap, identity switching, drive loop, generative step) and the engine half of the
+//   delegation rule are replaced by a short pointer naming `method_conduction`, its five fields and
+//   the rule that the manifest wins on disagreement. What stays is the client half: the agent
+//   wrapper, the tool list, who to delegate to, the resilience log, the retry policy, the boundaries
+//   and the report format. Prose across the five files: 20.318 -> 13.563 units. `artifact_version`
+//   goes 3.1.0 -> 4.0.0 for `method_orchestrator_agent` and 3.0.0 -> 4.0.0 for `surface_spec`.
+//   Fixed in the same pass, and it predated this work: the template still told agents that "the
+//   official MCP server auto-resolves project_url and agent_name from env / managed context / Git".
+//   That is the same false identity claim F6-3 removed from the adapters, F6-4 from the contract and
+//   4.0.0(a) from the manifest — the `surface_spec` had already been corrected and the template had
+//   not, so the two disagreed. The template now matches the spec word for word.
+//   Net cost of 4.0.0 as shipped: manifest 11.034 -> ~9.400 units, plus 6.755 units off the
+//   downloadable prose.
 const integrationManifestSchemaVersion = '4.0.0';
 const publicIntegrationBasePath = '/api/public/integrar';
 
@@ -2281,8 +2298,10 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'plantillas-agentes', 'apts-method-orchestrator.agent.md'),
     fileName: 'apts-method-orchestrator.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '3.1.0',
-    updatedInSchemaVersion: '3.1.0',
+    // 4.0.0: el bucle de conducción sale de la plantilla y queda un puntero a
+    // `method_conduction`. Rompe para quien leyera aquí las reglas del motor.
+    artifactVersion: '4.0.0',
+    updatedInSchemaVersion: '4.0.0',
     kind: 'agent_template',
     recommended: false,
     usagePriority: 'entrypoint',
@@ -2392,8 +2411,11 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'runtime-adapters', 'spec', 'apts-surface.json'),
     fileName: 'apts-surface.json',
     contentType: 'application/json; charset=utf-8',
-    artifactVersion: '3.0.0',
-    updatedInSchemaVersion: '3.0.0',
+    // 4.0.0: el cuerpo del agente orquestador pierde el bucle de conducción, que
+    // ahora se lee de `method_conduction`. Los adaptadores generados heredan el
+    // recorte. Rompe para quien esperara las reglas del motor dentro de la spec.
+    artifactVersion: '4.0.0',
+    updatedInSchemaVersion: '4.0.0',
     kind: 'runtime_surface_spec',
     recommended: true,
     usagePriority: 'discovery',
