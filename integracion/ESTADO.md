@@ -35,6 +35,28 @@ El algebra del embedding —`cosineSimilarity`, `parseEmbeddingVector`, `vectorN
 llamada a OpenRouter tambien. Ni `backend/index.js` ni `reembed_bug_embeddings.js` tienen copia
 propia.
 
+## Destinos
+
+Dos, no tres, y ninguno lleva el nombre de un servidor:
+
+| destino | variable del `.env` | quien lo usa |
+|---|---|---|
+| principal | `PG_CONNECTION_STRING` (o `DATABASE_URL`) | el servidor y todo lo que no diga `test` |
+| de prueba | `PG_TEST_CONNECTION_STRING` | `migrate:test`, `seed:method:test`, `start:test` |
+
+`development` y `production` son **alias del mismo objeto**: existen porque el servidor arranca con
+`knexConfig[process.env.NODE_ENV]` y varios scripts aceptan `--target-env`, no porque sean destinos
+distintos. Donde cae la conexion principal lo decide el `.env` de la maquina donde se ejecuta, no el
+nombre del entorno.
+
+Ninguna de las dos cadenas hereda de la otra. Si falta la de prueba, `test` falla nombrando la
+variable en vez de aterrizar en la base principal; si falta la principal, falla igual. Cada destino
+se resuelve al pedirlo, asi que a una maquina sin base de prueba no le estorba no tenerla.
+
+El seed del metodo es uno solo, `seeds/bmad_seed.js`. `seed:method` va al destino principal y
+`seed:method:test` al de prueba; el argumento existe porque en Windows `NODE_ENV=x npm run ...` no se
+propaga.
+
 ## Verificado
 
 Contra `APTS_test` (puerto 47301), con el estado de partida `initiatives:2`, `epics:2`,
@@ -57,8 +79,9 @@ Contra `APTS_test` (puerto 47301), con el estado de partida `initiatives:2`, `ep
 
 ## Produccion
 
-Leido el 2026-08-02 contra `146.190.26.165:46452/APTS`, solo lectura. **Ojo: el perfil `production`
-del knexfile NO apunta ahi** (ver deuda 1).
+Leido el 2026-08-02 contra `146.190.26.165:46452/APTS`, solo lectura. Desde esta maquina, ese destino
+no se alcanza: la conexion principal la fija el `.env` de cada maquina y aqui apunta a la base de
+trabajo (ver **Destinos**).
 
 | | PROD | `APTS_test` |
 |---|---|---|
@@ -79,34 +102,25 @@ asi que el modelo de embedding resuelve al de por defecto por los dos caminos.
 
 ## Abierto
 
-1. **El perfil `production` del knexfile no apunta a produccion.** Resuelve por
-   `PG_CONNECTION_STRING`/`DATABASE_URL`, que en esta maquina es `192.168.0.240/APTS` —la misma que
-   `development`—, mientras la base productiva vive en `146.190.26.165:46452`. Cualquier comando con
-   `--env production` desde aqui toca la base equivocada, y como esa esta vacia de metodo, **parece
-   que funciona**. Quedan expuestos `migrate:prod` y `seed:method:prod`; el `deploy:prod` que los
-   encadenaba se retiro por innecesario, lo que reduce la superficie pero no cierra el agujero. Es lo
-   mas peligroso de esta lista. Se cierra con una variable dedicada para el perfil de produccion, o
-   con una guardia que se niegue a operar si la conexion cayo por el fallback.
-
-2. **`primitives_palette` esta vacia en produccion**, y solo la siembra `seeds/f1_toy_fixture.js`,
+1. **`primitives_palette` esta vacia en produccion**, y solo la siembra `seeds/f1_toy_fixture.js`,
    que es fixture de prueba y tiene doble guarda para no tocar produccion. `bmad_seed` dice
    explicitamente que no la toca. Los pasos generativos avanzan por `step_order` con `next_rules` en
    `null` y las primitivas se resuelven del registro en codigo, asi que **probablemente** no haga
    falta para el bucle publicado; no esta comprobado.
 
-3. **`contract_check.mjs` todavia nombra al cliente borrado.** `CLIENT_UTILITY_EXPORTS`,
+2. **`contract_check.mjs` todavia nombra al cliente borrado.** `CLIENT_UTILITY_EXPORTS`,
    `checkClientContract()` y el bloque de ejecucion directa importan `./apts-client.js`, que ya no
    existe: `node scripts/lib/contract_check.mjs` falla con `Cannot find module`. El arranque no lo
    usa —solo llama a `contractOperations()`—, asi que es codigo muerto que menciona una superficie
    retirada, no un fallo en servicio.
 
-4. **Volver a sembrar el metodo sigue exigiendo criterio.** La guardia de `bmad_seed` avisa y se
+3. **Volver a sembrar el metodo sigue exigiendo criterio.** La guardia de `bmad_seed` avisa y se
    planta, pero el seed sigue siendo borrar-por-`source_ref`-y-reinsertar: los UUID cambian y
    `project_state` pierde donde estaba cada agente (`entity_id`, `current_workflow_id`,
    `current_step_id` son `ON DELETE SET NULL`, y `step_status` no se toca). Hoy es inocuo porque
    produccion tiene `project_state` a 0. La solucion de fondo es un upsert contra la clave natural
    para que los UUID sobrevivan.
 
-5. **`limit` se acepta y se ignora en la busqueda semantica de bugs.** El campo del esquema es
+4. **`limit` se acepta y se ignora en la busqueda semantica de bugs.** El campo del esquema es
    `top_k`; `semanticBugSearchBodySchema` no es estricto, asi que un cliente que mande `limit` no
    recibe error y se queda con el tope por defecto de 5 creyendo que pidio otra cosa.
