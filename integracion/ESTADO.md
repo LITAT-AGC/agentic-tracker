@@ -165,38 +165,50 @@ Contra `APTS_test` (puerto 47301; la ultima ronda —la del coste de los embeddi
 
 ## Produccion
 
-Leido el 2026-08-02 contra `146.190.26.165:46452/APTS`, solo lectura. Desde esta maquina, ese destino
-no se alcanza: la conexion principal la fija el `.env` de cada maquina y aqui apunta a la base de
-trabajo (ver **Destinos**).
+Donde vive, leido el 2026-08-02:
+
+| | |
+|---|---|
+| Aplicacion | `134.122.62.55:/opt/APTS`, pm2 `apts-backend` (fork, cwd `backend/`), puerto 46315 |
+| Frontend | nginx en `apts.informaticos.ar`, servido desde `frontend/dist` |
+| Base | `10.110.0.10:46452/APTS`, PostgreSQL 17.9, usuario `apt_user` |
+| Despliegue | Manual. No lo gestiona el deploy-hub de `/opt/deploy-system` |
+
+**El servidor de base de datos es compartido; la base no.** Conviven ocho bases —entre ellas
+`prd_geronimo` y `lms_prd`, de otros sistemas productivos—, pero las tablas de `APTS` son todas de
+APTS. `apt_user` no es superusuario ni tiene `createdb`/`createrole`, y aunque las 18 tablas eran
+suyas, la base y el esquema `public` pertenecen a `postgres`: cualquier operacion queda encerrada
+dentro de `APTS`.
+
+**Se empezo de cero el 2026-08-02.** Los once proyectos anteriores eran pruebas. Copia previa con
+`pg_dump -Fc` en `/root/apts-backup-20260802-142327.dump` (613 KB, 18 tablas), hecha con un
+contenedor `postgres:17` de usar y tirar porque el servidor es Ubuntu focal y PGDG ya no lo publica.
+Despues: las 18 tablas borradas, las 17 migraciones aplicadas en un solo lote y el metodo re-sembrado.
 
 | | PROD | `APTS_test` |
 |---|---|---|
 | `entities` `bmad:v6.8.0` | 6 | 6 |
 | `workflow_definitions` `bmad:v6.8.0` | 31 | 31 |
 | `workflow_steps` | 137 | 147 |
-| `primitives_palette` | 0 (no hace falta, ver **Verificado**) | 6 |
-| `project_state` | 0 | 8 |
-| `initiatives` | 0 | 2 |
-| `backlog_items` | 461 | 361 |
-| `tasks` | 317 | 263 |
+| `projects` / `backlog_items` / `tasks` | 0 | 30 / 361 / 263 |
 
-**La biblioteca del metodo esta sembrada**, y con los numeros exactos que reporta el propio seed
-(`APTS_test` tiene mas porque le suma la fixture toy: 5 entities, 4 definiciones, 10 pasos). Ultima
-migracion aplicada `20260621000016_artifact_doc_type_spec.js`. La clave
-`embedding_strategy:bug_dedup:model` no existe, asi que el modelo de embedding resuelve al de por
-defecto por los dos caminos.
+La clave `embedding_strategy:bug_dedup:model` no existe —`config` esta vacia—, asi que el modelo de
+embedding resuelve al de por defecto por los dos caminos.
 
-Esa lectura es anterior a `20260802000017_add_bug_embedding_hash.js`, que es la unica migracion que
-produccion tiene pendiente. Añade una columna nullable a `backlog_items` y no reescribe nada: las
-filas existentes quedan con el hash a nulo, que no coincide con ninguno, asi que el primer paso por
-cada bug vuelve a embeber una vez —lo que ya ocurria siempre— y a partir de ahi corta.
+**La ruta de embeddings esta comprobada contra PROD**, con una prueba de humo que se borro al
+terminar: crear un bug gasta una llamada (`bug_embedding`, `openai/text-embedding-3-small`, norma
+1,000124) y deja el documento de cobertura escrito sin vector; el update que no toca el texto gasta
+cero; la busqueda de duplicados gasta una y encuentra el bug. `initialize` y `tools/list` responden
+21 operaciones, el manifiesto 200, y los dos auto-chequeos pasan al arrancar.
 
 ## Abierto
 
-Nada. `primitives_palette` no la lee ningun camino del runtime, el seed conserva los UUID y las
-cuatro plantillas publicadas ya no se mantienen a mano. Los numeros estan en **Verificado**.
+Nada en el repositorio, y produccion ya corre `5344d61` con las 17 migraciones aplicadas.
 
-Lo unico que queda fuera de este repositorio: produccion corre codigo anterior a esta serie de
-commits, y le falta aplicar `20260802000017_add_bug_embedding_hash.js` (ver **Produccion**). No hay
-variables nuevas en el `.env`.
+Dos cosas quedan fuera de el:
+
+- la contraseña de `apt_user` se expuso en claro durante el despliegue y conviene rotarla
+  (`ALTER ROLE`, actualizar el `.env`, reiniciar pm2);
+- el frontend de PROD sigue compilado del 21 de junio. Solo cambia `DashboardLayout.vue`, asi que
+  basta un `npm run build` cuando interese.
 
