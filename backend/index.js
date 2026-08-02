@@ -32,7 +32,17 @@ const { createInitiative, setAgentRole } = require('./scripts/lib/method_bootstr
 // Deuda de que esto cierra: la llamada de embedding estaba implementada dos
 // veces —aquí y en la librería—, con el mismo `fetch`, las mismas cabeceras y el
 // mismo plazo copiados. Se conserva una sola: la de la librería.
-const { requestEmbedding: requestLibraryEmbedding } = require('./scripts/lib/semantic_embeddings');
+//
+// Lo mismo valía para el álgebra del vector: `cosineSimilarity` y
+// `parseEmbeddingVector` estaban escritas aquí otra vez, y habían divergido —con
+// vectores de distinta longitud una daba `0` y la otra `NaN`—. El sitio de llamada
+// filtra por `Number.isFinite` y por el umbral, así que las dos se descartaban
+// igual; era una diferencia sin efecto esperando a tenerlo. Ahora hay una sola.
+const {
+  requestEmbedding: requestLibraryEmbedding,
+  cosineSimilarity,
+  parseEmbeddingVector
+} = require('./scripts/lib/semantic_embeddings');
 const rootPackage = require('../package.json');
 const db = createKnex(knexConfig[process.env.NODE_ENV || 'development']);
 
@@ -1431,32 +1441,6 @@ const fetchOpenRouterModels = async () => {
       const rightCompletion = right.completion_price ?? Number.MAX_SAFE_INTEGER;
       return leftCompletion - rightCompletion;
     });
-};
-
-const parseEmbeddingVector = (value) => {
-  const rawArray = parseJsonArray(value);
-  if (!Array.isArray(rawArray) || rawArray.length === 0) return [];
-
-  return rawArray
-    .map((entry) => Number(entry))
-    .filter((entry) => Number.isFinite(entry));
-};
-
-const vectorNorm = (vector) => Math.sqrt(vector.reduce((accumulator, value) => accumulator + (value * value), 0));
-
-const cosineSimilarity = (left, right, leftNorm = null, rightNorm = null) => {
-  if (!Array.isArray(left) || !Array.isArray(right)) return 0;
-  if (left.length === 0 || right.length === 0) return 0;
-  if (left.length !== right.length) return 0;
-
-  const numerator = left.reduce((accumulator, leftValue, index) => accumulator + (leftValue * right[index]), 0);
-  const denominator = (leftNorm ?? vectorNorm(left)) * (rightNorm ?? vectorNorm(right));
-
-  if (!Number.isFinite(denominator) || denominator <= 0) {
-    return 0;
-  }
-
-  return numerator / denominator;
 };
 
 const normalizeTextField = (value) => (typeof value === 'string' ? value.trim() : '');

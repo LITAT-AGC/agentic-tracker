@@ -18,10 +18,20 @@ const LEGACY_STRATEGY_MODEL_CONFIG = {
 
 const normalizeTextField = (value) => (typeof value === 'string' ? value.trim() : '');
 
+// Una fila con el vector corrupto es un dato malo, no un fallo del servicio: se
+// descarta. Antes el `JSON.parse` iba sin guarda, y como esto se llama dentro del
+// recorrido de candidatos de la busqueda, una sola fila ilegible tumbaba la busqueda
+// entera. Devolver `[]` la deja fuera y el resto sigue comparandose.
 const parseEmbeddingVector = (value) => {
-  const rawValue = typeof value === 'string'
-    ? JSON.parse(value)
-    : value;
+  let rawValue = value;
+
+  if (typeof value === 'string') {
+    try {
+      rawValue = JSON.parse(value);
+    } catch {
+      return [];
+    }
+  }
 
   if (!Array.isArray(rawValue)) {
     return [];
