@@ -234,7 +234,22 @@ const persistSemanticDocumentEmbedding = async (connection, document, savedDocum
   };
 };
 
-const syncBacklogCoverageDocument = async (connection, backlogItemId) => {
+// El documento de cobertura y su vector se escriben en momentos distintos, a
+// proposito. Escribir el documento es una escritura local y barata; pedir el
+// vector es una llamada de red a OpenRouter, y estaba colgada de las seis
+// operaciones de escritura del agente —crear backlog, actualizar backlog,
+// registrar tarea (dos caminos), cambiar su estado y reportar bloqueo—, que la
+// pagaban en linea sin haberla pedido.
+//
+// Nadie del lado del agente lee ese vector: el unico lector es el buscador del
+// panel, y el panel ya tiene su propio camino para indexar
+// (`/semantic/backlog/index`), que ademas estima el coste antes de gastarlo.
+//
+// Asi que el camino de escritura solo deja el documento al dia —`stage...`— y
+// `getProjectBacklogCoverageStatus` lo cuenta como `stale`, que es justo lo que
+// el panel muestra y lo que el boton de indexar recoge. `sync...` —documento y
+// vector— sigue existiendo para ese camino explicito.
+const writeBacklogCoverageDocument = async (connection, backlogItemId, { embed }) => {
   if (!backlogItemId) {
     return { status: 'skipped', reason: 'missing_backlog_item_id' };
   }
@@ -255,6 +270,16 @@ const syncBacklogCoverageDocument = async (connection, backlogItemId) => {
 
   const document = buildBacklogCoverageDocument(source);
   const savedDocument = await upsertSemanticDocument(connection, document);
+
+  if (!embed) {
+    return {
+      status: 'staged',
+      backlog_item_id: backlogItemId,
+      semantic_document_id: savedDocument.id,
+      model: null
+    };
+  }
+
   const embeddingResult = await persistSemanticDocumentEmbedding(connection, document, savedDocument);
 
   return {
@@ -265,16 +290,24 @@ const syncBacklogCoverageDocument = async (connection, backlogItemId) => {
   };
 };
 
-const syncBacklogCoverageDocuments = async (connection, backlogItemIds) => {
+const writeBacklogCoverageDocuments = async (connection, backlogItemIds, { embed }) => {
   const normalizedIds = [...new Set((backlogItemIds || []).filter(Boolean))];
   const results = [];
 
   for (const backlogItemId of normalizedIds) {
-    results.push(await syncBacklogCoverageDocument(connection, backlogItemId));
+    results.push(await writeBacklogCoverageDocument(connection, backlogItemId, { embed }));
   }
 
   return results;
 };
+
+const stageBacklogCoverageDocument = async (connection, backlogItemId) => writeBacklogCoverageDocument(connection, backlogItemId, { embed: false });
+
+const stageBacklogCoverageDocuments = async (connection, backlogItemIds) => writeBacklogCoverageDocuments(connection, backlogItemIds, { embed: false });
+
+const syncBacklogCoverageDocument = async (connection, backlogItemId) => writeBacklogCoverageDocument(connection, backlogItemId, { embed: true });
+
+const syncBacklogCoverageDocuments = async (connection, backlogItemIds) => writeBacklogCoverageDocuments(connection, backlogItemIds, { embed: true });
 
 const syncProjectBacklogCoverageDocuments = async (connection, projectUrl) => {
   const rows = await connection('backlog_items')
@@ -501,6 +534,8 @@ module.exports = {
   loadBacklogItemSemanticSource,
   loadProjectBacklogSemanticSources,
   searchProjectBacklogCoverage,
+  stageBacklogCoverageDocument,
+  stageBacklogCoverageDocuments,
   syncBacklogCoverageDocument,
   syncBacklogCoverageDocuments,
   syncProjectBacklogCoverageDocuments

@@ -16,8 +16,8 @@ const {
   estimateEmbeddingCost,
   getProjectBacklogCoverageStatus,
   searchProjectBacklogCoverage,
-  syncBacklogCoverageDocument,
-  syncBacklogCoverageDocuments,
+  stageBacklogCoverageDocument,
+  stageBacklogCoverageDocuments,
   syncProjectBacklogCoverageDocuments
 } = require('./scripts/lib/semantic_documents');
 const {
@@ -48,6 +48,8 @@ const {
   requestEmbedding: requestLibraryEmbedding,
   buildBugEmbeddingText,
   cosineSimilarity,
+  createContentHash,
+  getEffectiveEmbeddingModel,
   parseEmbeddingVector
 } = require('./scripts/lib/semantic_embeddings');
 const rootPackage = require('../package.json');
@@ -1209,7 +1211,12 @@ const mapBacklogItemRecord = (item, { view = DEFAULT_RESPONSE_VIEW } = {}) => {
     };
   }
 
-  const { bug_embedding: _bugEmbedding, ...safeItem } = item;
+  // El hash sale por la misma puerta que el vector. Es una clave de cache interna
+  // —solo la lee `persistBugEmbeddingForBacklogItem` para decidir si vuelve a
+  // embeber— y son 64 caracteres de entropia por item en el contexto de quien lea
+  // el backlog. Los tres campos hermanos que si viajan (modelo, norma y fecha)
+  // dicen algo legible; este no.
+  const { bug_embedding: _bugEmbedding, bug_embedding_hash: _bugEmbeddingHash, ...safeItem } = item;
 
   return {
     ...safeItem,
@@ -1525,6 +1532,7 @@ const persistBugEmbeddingForBacklogItem = async (backlogItemId, { connection = d
         bug_embedding: null,
         bug_embedding_model: null,
         bug_embedding_norm: null,
+        bug_embedding_hash: null,
         bug_embedding_updated_at: null,
         updated_at: connection.fn.now()
       });
@@ -1534,6 +1542,29 @@ const persistBugEmbeddingForBacklogItem = async (backlogItemId, { connection = d
   const embeddingInput = buildBugEmbeddingText(backlogItem);
   if (!embeddingInput) {
     return { status: 'skipped', backlog_item_id: backlogItemId };
+  }
+
+  // El vector se regeneraba en cada escritura del item, tocara o no el texto que
+  // se embebe: cambiar el estado, la prioridad o el orden pagaba una llamada de red
+  // para reescribir el mismo vector. Se compara por hash, igual que lleva haciendo
+  // el camino hermano —el documento de cobertura— con `generated_from_hash`.
+  //
+  // El modelo entra en la comparacion porque el hash solo habla del texto: con
+  // `embedding_strategy:bug_dedup:model` cambiado, el texto sigue siendo el mismo y
+  // el vector guardado deja de ser comparable con los que produce la busqueda.
+  // Comparar solo el hash lo dejaria pasar por bueno para siempre.
+  const embeddingHash = createContentHash(embeddingInput);
+  const effectiveModel = await getEffectiveEmbeddingModel(connection, BUG_EMBEDDING_STRATEGY_KEY);
+  const hasCurrentEmbedding = Boolean(normalizeTextField(backlogItem.bug_embedding))
+    && backlogItem.bug_embedding_hash === embeddingHash
+    && backlogItem.bug_embedding_model === effectiveModel;
+
+  if (hasCurrentEmbedding) {
+    return {
+      status: 'unchanged',
+      backlog_item_id: backlogItemId,
+      model: backlogItem.bug_embedding_model
+    };
   }
 
   const embeddingResult = await requestOpenRouterEmbedding(embeddingInput, {
@@ -1548,6 +1579,7 @@ const persistBugEmbeddingForBacklogItem = async (backlogItemId, { connection = d
       bug_embedding: JSON.stringify(embeddingResult.embedding),
       bug_embedding_model: embeddingResult.model,
       bug_embedding_norm: embeddingResult.norm,
+      bug_embedding_hash: embeddingHash,
       bug_embedding_updated_at: connection.fn.now(),
       updated_at: connection.fn.now()
     });
@@ -2836,7 +2868,7 @@ const registerTaskInternal = async (payload, { connection = db } = {}) => {
           });
 
         await runNonBlockingSemanticOperation(
-          () => syncBacklogCoverageDocument(connection, backlogItemId),
+          () => stageBacklogCoverageDocument(connection, backlogItemId),
           { action: 'register_task.resume_backlog_sync', backlog_item_id: backlogItemId, project_url: url }
         );
 
@@ -2874,7 +2906,7 @@ const registerTaskInternal = async (payload, { connection = db } = {}) => {
       });
 
     await runNonBlockingSemanticOperation(
-      () => syncBacklogCoverageDocument(connection, backlogItemId),
+      () => stageBacklogCoverageDocument(connection, backlogItemId),
       { action: 'register_task.create_backlog_sync', backlog_item_id: backlogItemId, project_url: url }
     );
   }
@@ -2913,7 +2945,7 @@ const createBacklogItemInternal = async (body, { connection = db } = {}) => {
 
   await tryPersistBugEmbeddingForBacklogItem(backlogItem.id, { connection });
   await runNonBlockingSemanticOperation(
-    () => syncBacklogCoverageDocument(connection, backlogItem.id),
+    () => stageBacklogCoverageDocument(connection, backlogItem.id),
     { action: 'create_backlog_item.semantic_sync', backlog_item_id: backlogItem.id, project_url: url }
   );
 
@@ -2953,7 +2985,7 @@ const updateBacklogItemInternal = async (backlogItemId, body, { connection = db 
 
   await tryPersistBugEmbeddingForBacklogItem(backlogItem.id, { connection });
   await runNonBlockingSemanticOperation(
-    () => syncBacklogCoverageDocument(connection, backlogItem.id),
+    () => stageBacklogCoverageDocument(connection, backlogItem.id),
     { action: 'update_backlog_item.semantic_sync', backlog_item_id: backlogItem.id, project_url: backlogItem.project_url }
   );
 
@@ -3045,7 +3077,7 @@ const updateTaskStatusInternal = async (taskId, payload, { connection = db, defe
       .returning(['id']);
 
     await runNonBlockingSemanticOperation(
-      () => syncBacklogCoverageDocuments(connection, affectedBacklogItems.map((item) => item.id)),
+      () => stageBacklogCoverageDocuments(connection, affectedBacklogItems.map((item) => item.id)),
       { action: 'update_task_status.semantic_sync', task_id: taskId, project_url: projectUrl || task.project_url || null }
     );
   }
@@ -3124,7 +3156,7 @@ const reportBlockerInternal = async (payload, { connection = db, deferredWebhook
     .update({ status: 'blocked', updated_at: connection.fn.now() })
     .returning(['id']);
   await runNonBlockingSemanticOperation(
-    () => syncBacklogCoverageDocuments(connection, blockedBacklogItems.map((item) => item.id)),
+    () => stageBacklogCoverageDocuments(connection, blockedBacklogItems.map((item) => item.id)),
     { action: 'report_blocker.semantic_sync', task_id: taskId, project_url: url }
   );
   await connection('agent_logs').insert({

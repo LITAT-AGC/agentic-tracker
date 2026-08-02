@@ -16,6 +16,7 @@ const knexConfig = require('../knexfile');
 // modelo que no es el de la busqueda es justo lo contrario de lo que hace falta.
 const {
   buildBugEmbeddingText,
+  createContentHash,
   normalizeTextField,
   requestEmbedding
 } = require('./lib/semantic_embeddings');
@@ -130,6 +131,7 @@ const buildNonBugCleanupQuery = (connection, options) => {
       builder.whereNotNull('bug_embedding')
         .orWhereNotNull('bug_embedding_model')
         .orWhereNotNull('bug_embedding_norm')
+        .orWhereNotNull('bug_embedding_hash')
         .orWhereNotNull('bug_embedding_updated_at');
     });
 
@@ -202,12 +204,17 @@ const main = async () => {
           backlogItemId: item.id
         });
 
+        // El hash acompana al vector porque es lo que deja que la escritura del
+        // item decida no volver a embeber. Si este script lo dejara sin tocar, el
+        // vector seria nuevo y el hash viejo, y la siguiente escritura pagaria una
+        // llamada para reescribir lo que acaba de escribirse aqui.
         await db('backlog_items')
           .where({ id: item.id })
           .update({
             bug_embedding: JSON.stringify(embeddingResult.embedding),
             bug_embedding_model: embeddingResult.model,
             bug_embedding_norm: embeddingResult.norm,
+            bug_embedding_hash: createContentHash(embeddingInput),
             bug_embedding_updated_at: db.fn.now(),
             updated_at: db.fn.now()
           });
@@ -225,6 +232,7 @@ const main = async () => {
           bug_embedding: null,
           bug_embedding_model: null,
           bug_embedding_norm: null,
+          bug_embedding_hash: null,
           bug_embedding_updated_at: null,
           updated_at: db.fn.now()
         });

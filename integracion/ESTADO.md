@@ -40,6 +40,28 @@ El algebra del embedding —`cosineSimilarity`, `parseEmbeddingVector`, `vectorN
 llamada a OpenRouter tambien. Ni `backend/index.js` ni `reembed_bug_embeddings.js` tienen copia
 propia.
 
+**Ninguna escritura del agente paga un embedding que no necesite.** Son dos vectores distintos y ya
+no se comportan igual de mal:
+
+- El de **dedupe** (`bug_dedup`, en `backlog_items.bug_embedding`) se regeneraba en cada escritura
+  del item, tocara o no el texto que se embebe. Ahora `backlog_items.bug_embedding_hash` guarda el
+  sha256 de ese texto y la escritura corta cuando coincide —y tambien mira el modelo efectivo, para
+  que cambiar `embedding_strategy:bug_dedup:model` no deje pasar por bueno un vector que la busqueda
+  ya no puede comparar—. El hash no viaja en las respuestas: `mapBacklogItemRecord` lo quita junto
+  con el vector, porque es una clave de cache y son 64 caracteres de entropia por item.
+- El de **cobertura funcional** (`semantic_documents`) colgaba de las seis operaciones de escritura
+  —crear backlog, actualizar backlog, registrar tarea por sus dos caminos, cambiar estado de tarea y
+  reportar bloqueo— y nadie del lado del agente lo lee: el unico lector es el buscador del panel.
+  Ahora esas seis solo dejan el documento al dia (`stageBacklogCoverageDocument`), que es una
+  escritura local; el vector lo pide el camino explicito del panel,
+  `POST /api/dashboard/projects/:url/semantic/backlog/index`, que ya estimaba el coste antes de
+  gastarlo. Entre medias el documento cuenta como `stale_documents`, que es justo lo que el panel
+  muestra.
+
+`syncBacklogCoverageDocument` sigue existiendo —documento y vector— para ese camino explicito y para
+`reindex_semantic_documents.js`. La busqueda de bugs duplicados no cambia: sigue embebiendo su
+consulta, que es su unico trabajo y no un efecto lateral.
+
 **Sin residuos ejecutables de la superficie retirada.** Ningun archivo del backend importa ya
 `apts-client.js`. `mcp_stdio_runtime.mjs` conserva el nombre por el protocolo que habla, no por un
 transporte: es el nucleo MCP, `dispatch()` devuelve la respuesta y no escribe en ningun sitio, y
@@ -82,8 +104,9 @@ corpus pertenece a otra biblioteca, en vez de pisarla en silencio.
 
 ## Verificado
 
-Contra `APTS_test` (puerto 47301), con el estado de partida `initiatives:2`, `epics:2`,
-`backlog_items:361`, `tasks:263` restaurado al terminar.
+Contra `APTS_test` (puerto 47301; la ultima ronda —la del coste de los embeddings— en 47399, porque
+47301 ya estaba ocupado), con el estado de partida `initiatives:2`, `epics:2`, `backlog_items:361`,
+`tasks:263` restaurado al terminar.
 
 - Un cliente que **no descarga nada** conduce el ciclo BMAD completo a `phase=done`: 7 workflows
   generativos, 2 unidades `dev-story` de 10 pasos, 5 cambios de rol, 3 elicitaciones, 52 submits.
@@ -113,6 +136,28 @@ Contra `APTS_test` (puerto 47301), con el estado de partida `initiatives:2`, `ep
   fuera y el resto comparandose.
 - El plazo de espera del embedding existe en el unico camino que queda: con
   `OPENROUTER_EMBEDDING_TIMEOUT_MS=1`, `timed out after 1 ms` y el elemento marcado como fallido.
+- **Lo que cada escritura del agente le cuesta a OpenRouter**, contado sobre las filas que aparecen
+  en `openrouter_usage_logs` durante la operacion:
+
+  | operacion | antes | ahora |
+  |---|---|---|
+  | `create_backlog_item` (bug) | 2 | 1 (`bug_embedding`) |
+  | `update_backlog_item` sin tocar el texto embebido | 2 | 0 |
+  | `update_backlog_item` cambiando el titulo | 2 | 1 (`bug_embedding`) |
+  | `register_task` con `backlog_item_id` | 1 | 0 |
+  | `update_task_status` | 1 | 0 |
+  | `search_similar_bug_reports` | 1 | 1 (`semantic_search_embedding`) |
+
+  En el update que no toca el texto, el documento de cobertura **si** cambia de `content_hash` —el
+  estado operativo va dentro— y aun asi no se pide vector; `bug_embedding_hash` queda intacto.
+  Cambiando el titulo, el hash cambia y se vuelve a embeber una vez.
+- La busqueda sigue encontrando el bug que acaba de escribirse: HTTP 200, un candidato escaneado y
+  una coincidencia a 0,7172 sobre el item creado.
+- El hash no se escapa por la respuesta: el JSON de `read_backlog_item` no contiene
+  `bug_embedding_hash` ni `bug_embedding`.
+- El camino del panel si embebe, y cierra la cuenta: con el documento en `stale_documents: 1` e
+  `indexed_documents: 0`, indexar el proyecto gasta exactamente una llamada
+  (`semantic_document:backlog_functional_coverage`) y lo deja en `1` y `0`.
 - `limit` se rechaza por HTTP (400) y por MCP (`isError` con el mismo mensaje); con `top_k` la
   busqueda responde igual que antes.
 - Cada destino exige su propia cadena de conexion y ninguna hereda de la otra; sin
@@ -137,9 +182,14 @@ trabajo (ver **Destinos**).
 
 **La biblioteca del metodo esta sembrada**, y con los numeros exactos que reporta el propio seed
 (`APTS_test` tiene mas porque le suma la fixture toy: 5 entities, 4 definiciones, 10 pasos). Ultima
-migracion aplicada `20260621000016_artifact_doc_type_spec.js`, la misma que la ultima del
-repositorio: no hay migraciones pendientes. La clave `embedding_strategy:bug_dedup:model` no existe,
-asi que el modelo de embedding resuelve al de por defecto por los dos caminos.
+migracion aplicada `20260621000016_artifact_doc_type_spec.js`. La clave
+`embedding_strategy:bug_dedup:model` no existe, asi que el modelo de embedding resuelve al de por
+defecto por los dos caminos.
+
+Esa lectura es anterior a `20260802000017_add_bug_embedding_hash.js`, que es la unica migracion que
+produccion tiene pendiente. Añade una columna nullable a `backlog_items` y no reescribe nada: las
+filas existentes quedan con el hash a nulo, que no coincide con ninguno, asi que el primer paso por
+cada bug vuelve a embeber una vez —lo que ya ocurria siempre— y a partir de ahi corta.
 
 ## Abierto
 
@@ -147,5 +197,6 @@ Nada. `primitives_palette` no la lee ningun camino del runtime, el seed conserva
 cuatro plantillas publicadas ya no se mantienen a mano. Los numeros estan en **Verificado**.
 
 Lo unico que queda fuera de este repositorio: produccion corre codigo anterior a esta serie de
-commits. No hay migraciones pendientes ni variables nuevas en el `.env`.
+commits, y le falta aplicar `20260802000017_add_bug_embedding_hash.js` (ver **Produccion**). No hay
+variables nuevas en el `.env`.
 

@@ -144,6 +144,7 @@ const pickBacklogColumns = (item) => ({
   bug_embedding: null,
   bug_embedding_model: null,
   bug_embedding_norm: null,
+  bug_embedding_hash: null,
   bug_embedding_updated_at: null,
   created_at: item.created_at,
   updated_at: item.updated_at,
