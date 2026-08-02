@@ -81,10 +81,12 @@ asi que el modelo de embedding resuelve al de por defecto por los dos caminos.
 
 1. **El perfil `production` del knexfile no apunta a produccion.** Resuelve por
    `PG_CONNECTION_STRING`/`DATABASE_URL`, que en esta maquina es `192.168.0.240/APTS` —la misma que
-   `development`—, mientras la base productiva vive en `146.190.26.165:46452`. `npm run deploy:prod`
-   desde aqui migraria y sembraria la base equivocada, y como esa esta vacia de metodo, **parece que
-   funciona**. Es lo mas peligroso de esta lista. Se cierra con una variable dedicada para el perfil
-   de produccion, o con una guardia que se niegue a sembrar si la conexion cayo por el fallback.
+   `development`—, mientras la base productiva vive en `146.190.26.165:46452`. Cualquier comando con
+   `--env production` desde aqui toca la base equivocada, y como esa esta vacia de metodo, **parece
+   que funciona**. Quedan expuestos `migrate:prod` y `seed:method:prod`; el `deploy:prod` que los
+   encadenaba se retiro por innecesario, lo que reduce la superficie pero no cierra el agujero. Es lo
+   mas peligroso de esta lista. Se cierra con una variable dedicada para el perfil de produccion, o
+   con una guardia que se niegue a operar si la conexion cayo por el fallback.
 
 2. **`primitives_palette` esta vacia en produccion**, y solo la siembra `seeds/f1_toy_fixture.js`,
    que es fixture de prueba y tiene doble guarda para no tocar produccion. `bmad_seed` dice
