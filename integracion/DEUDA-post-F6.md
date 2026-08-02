@@ -14,7 +14,8 @@
 | **C1** — Plazo de espera a las dos llamadas del panel | ✅ Hecho |
 | **C2** — Las dos implementaciones duplicadas del embedding | ✅ Unificada la llamada externa; queda una duplicación menor declarada abajo |
 | **E** — Recorte de la prosa del manifiesto | ✅ Hecho: **11.034 → 8.790 unidades (-20,3%)**, con ruptura declarada en 4.0.0 |
-| Publicar el bucle de conducción del método como dato | ⬜ Sin tocar |
+| **F** — El bucle de conducción del método, publicado como dato | ✅ Hecho, validado conduciendo a `phase=done` desde un cliente sin descargas |
+| **G** — Dieta II: los cuatro artefactos obsoletos, fuera del listado | ✅ Hecho: `artifacts[]` 13 → 9, sus rutas siguen en 200 |
 | Corrida contra PROD | ⬜ Sin tocar — todo lo de abajo está medido contra `APTS_test` |
 
 **`APTS_test` restaurado** a su estado de partida exacto: `initiatives:2`, `epics:2`,
@@ -158,6 +159,71 @@ en los mismos términos neutros, y `identity_requirements` dice ahora la regla r
 el valor, la llamada gana —así conmuta de rol el agente—, y un `project_url` contradictorio se
 rechaza.
 
+## F — El bucle de conducción del método, publicado como dato
+
+**El problema.** El bucle sólo existía como prosa descargable, dentro de
+`method_orchestrator_agent` (2.813 unidades, 13 secciones). Un cliente sin descargas tenía el
+transporte y las 21 operaciones, pero no sabía conducir el método: el hueco más claro que dejó F6.
+
+**Decisión del operador, nueve casos cerrados uno a uno:** publicar **sólo la mitad que es del
+motor** (1.562 de las 2.813), como **cinco cadenas de markdown** en un campo nuevo
+**`method_conduction`, hermano de `mcp_endpoint`**; marcar el artefacto **obsoleto** sin retirarlo; y
+exigir como validación **una conducción completa a `phase=done` desde un cliente fresco**.
+
+**Lo que se publica y lo que no:**
+
+| Se publica (del motor) | Unid. | Se queda en la plantilla (del cliente) | Unid. |
+|---|---|---|---|
+| `bootstrap_rule` | 318 | frontmatter del agente | 185 |
+| `identity_switching_rule` | 174 | `Mission` | 204 |
+| `drive_loop` | 330 | `Surface` (redundante con `tools/list`) | 230 |
+| `generative_step_rule` | 398 | delegación en el subagente worker | 174 |
+| `dev_story_completion_rule` | 342 | resiliencia, reintentos, límites, informe | 458 |
+
+**Coste medido: 8.790 → 9.402 unidades.** No ahorra: mueve. Lo que compra es cerrar "cero
+descargas" y que el bucle no pueda desincronizarse del motor que lo sirve.
+
+### El hueco que encontró la validación (y que no habría encontrado una revisión)
+
+`generative_step_rule` heredaba de la plantilla un "e.g. `{ title, content }` … `{ stories: [...] }`"
+y **callaba que un paso puede declarar varias salidas**. El cliente fresco condujo hasta
+`implementation` y **se colgó para siempre, con todas las llamadas en verde**:
+
+- `output` es **un objeto plano**, y el motor toma de él lo que pide **cada** entrada de `outputs[]`.
+- `bmad-create-epics-and-stories/2` declara **dos**: `{artifact: epics}` y `{backlog_items}`.
+  Contestando sólo al artefacto, el submit devuelve `ok=true` y **no crea ninguna historia**. La fase
+  avanza a `implementation` sin unidades y `dev-story` responde `wait` para siempre.
+
+La regla dice ahora el mapa completo (`artifact` → `title`+`content`, `backlog_items` → `stories[]`,
+`status` → `status`+`code_ref`, `code_ref` → `code_ref`), que hay que cubrir **todas** las
+declaraciones en la misma llamada, y que **`captured[]` es la única confirmación** de que cada salida
+se tomó. Coste de la corrección: **+191 unidades**. Sin ella, el dato publicado no bastaba.
+
+## G — Dieta II: los cuatro artefactos obsoletos, fuera del listado
+
+**Decisión del operador:** retirarlos, **plegado dentro de 4.0.0** en vez de abrir 5.0.0 — 4.0.0 no
+estaba desplegado, así que ningún cliente vio una 4.0.0 sin esto y el histórico por debajo no se
+toca.
+
+- `artifacts[]` pasa de **13 a 9**. Sus definiciones se quedan porque de ellas sale la ruta.
+- **Las cuatro rutas siguen respondiendo 200**, y se publican en corto bajo
+  **`legacy_download_routes`** (150 unidades, derivado de las mismas entradas para que no puedan
+  desalinearse). Sin ese bloque seguirían vivas pero **no descubribles**.
+- **El `recommended: true` de `mcp_server` se va con su entrada.** Se mantuvo hasta 3.4.0 para que un
+  cliente 3.1.0 conservara superficie; recomendar el camino muerto contradice esta versión.
+- **Referencia colgante corregida:** `adapter_generator` declaraba `contract_check` en
+  `depends_on_artifact_ids`. La comprobación corre ya dentro del backend al arrancar, nunca fue una
+  entrada del generador, y dejarla habría apuntado a un id que el manifiesto ya no publica.
+
+**Balance de las dos:** `artifacts[]` −1.410, `legacy_download_routes` +150, `method_conduction`
++1.592, obsolescencia del artefacto +45, corrección de la regla +191.
+
+| Hito | Unidades |
+|---|---|
+| Antes de toda dieta | 11.034 |
+| Tras la dieta I (4.0.0, commit `1f496ee`) | 8.790 |
+| **Estado actual** | **9.402** |
+
 ## Validación
 
 Todo contra `APTS_test` (`environment:test`, puerto 47301), con el arranque haciendo su auto-chequeo
@@ -172,6 +238,31 @@ de contrato en verde (`operations: 21`).
 | `scripts/test_agent_api_batch.js` (lotes, vuelta atrás estricta, regresiones) | completo, en verde |
 | Bump del manifiesto a 3.4.0, aditivo contra `HEAD` | 0 claves perdidas, 0 añadidas, 13 → 13 |
 | Dieta del manifiesto (4.0.0) | **15 / 15** |
+| **Conducción a `phase=done` desde cliente fresco (F)** | **`next=done`, dos corridas** |
+| **Diff de F y G contra el manifiesto de `HEAD`** | 0 claves perdidas, 11 añadidas, `artifacts[]` 13 → 9 |
+| **Las 13 rutas de artefacto, tras delistar cuatro** | **13 / 13 en 200** |
+| **Regresiones del repositorio, de nuevo** | `test_agent_api.js` y `test_agent_api_batch.js`, en verde |
+| **Humo por entrada/salida estándar** | 21 operaciones; `apts_status` coincide con la superficie remota |
+
+### Lo medido en la conducción (F)
+
+Un programa cliente que **sólo** lee el manifiesto público y habla por `/mcp` —sin descargar ningún
+artefacto— condujo el ciclo entero, **dos veces con el mismo resultado**:
+
+| Medición | Número |
+|---|---|
+| Estado final | **`next=done`, `phase=done`** |
+| Workflows generativos completados | 7 (`product-brief`, `prd`, `create-architecture`, `create-epics-and-stories`, `check-implementation-readiness`, `sprint-planning`, `create-story`) |
+| Unidades `dev-story` cerradas | 2, de 10 pasos cada una |
+| Cambios de identidad de rol | 5 |
+| Elicitaciones (`await_input`) resueltas | 3 |
+| `apts_submit_step` en total | 52 |
+| Claves de rol publicadas por `create_initiative` | 6 |
+
+**`APTS_test` restaurado al estado de partida exacto**, comprobado tras la limpieza:
+`initiatives:2`, `epics:2`, `backlog_items:361`, `tasks:263`. Se borró también lo que dejaron las
+regresiones del repositorio (5 tasks y 5 backlog_items de sus proyectos de prueba). Servidor apagado
+y **puerto 47301 comprobado libre por PID**, no sólo la tarea de fondo.
 
 Lo medido en las 15 de la dieta: los cinco bloques retirados ya no se publican y no queda rastro de
 `updater_contract` ni de `legacy_cleanup_targets`; **no queda ninguna afirmación de resolución
@@ -212,18 +303,27 @@ tocaron.
   `integrationManifestSchemaVersion` 3.4.0 → **4.0.0** con la nota de ruptura al final del histórico.
 - `README.md` — la sección de sincronización de artefactos describía la política retirada.
 
+## Archivos tocados por F y G
+
+- `backend/index.js` — `METHOD_CONDUCTION` y su publicación como `method_conduction`;
+  `method_orchestrator_agent` marcado obsoleto; los cuatro artefactos marcados `listed: false` y
+  `buildLegacyDownloadRoutes`; `adapter_generator` pierde `contract_check`; la nota de 4.0.0 se
+  completa con (a) y (b). **Es el único archivo de código tocado.**
+- `integracion/DEUDA-post-F6.md` (este).
+
+**El camino actual por entrada/salida estándar no cambió**: comprobado que `1f496ee..HEAD` no toca
+`apts-mcp.js` ni `apts-client.js`.
+
 ## Lo que sigue pendiente
 
-1. **Publicar el bucle de conducción del método como dato**: hoy vive en un artefacto de prosa
-   descargable de 2.813 unidades. Es el hueco más claro que dejó F6. Ojo con la expectativa: pasarlo
-   al manifiesto **no ahorra tokens**, los mueve de la descarga al manifiesto; lo que compra es
-   cerrar "cero descargas" y que el bucle no pueda desincronizarse del motor.
-2. **Seguir la dieta**, si interesa: `artifacts` es ahora el bloque mayor (3.756), y **1.410 de esos
-   son los metadatos de los cuatro artefactos obsoletos**. Retirarlos del listado deja el manifiesto
-   en ~7.400 sin dejar de servir los archivos.
-3. **Unificar `cosineSimilarity` y `parseEmbeddingVector`**, con medición de la búsqueda antes y
+1. **Unificar `cosineSimilarity` y `parseEmbeddingVector`**, con medición de la búsqueda antes y
    después.
-4. **La tercera copia del embedding** en `reembed_bug_embeddings.js`, sin plazo de espera.
-5. **Corrida contra PROD**, con la comprobación de `embedding_strategy:bug_dedup:model` **antes** de
+2. **La tercera copia del embedding** en `reembed_bug_embeddings.js`, sin plazo de espera.
+3. **Corrida contra PROD**, con la comprobación de `embedding_strategy:bug_dedup:model` **antes** de
    desplegar. Con 4.0.0 hay además una decisión de despliegue: cualquier cliente ya integrado que
-   dependiera de `artifact_sync_policy` deja de encontrarla.
+   dependiera de `artifact_sync_policy` deja de encontrarla, y con G también de los cuatro
+   artefactos en `artifacts[]` — aunque sus rutas sigan sirviéndose y estén publicadas en
+   `legacy_download_routes`.
+4. **La plantilla `apts-method-orchestrator.agent.md` conserva su copia del bucle**, ahora marcada
+   obsoleta. Mientras siga sirviéndose puede divergir de `method_conduction`: si interesa, el paso
+   siguiente es recortarla a la mitad que es del cliente y que apunte al manifiesto para el resto.
