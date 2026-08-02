@@ -38,7 +38,7 @@ After testing is completed, reset or drop the PostgreSQL test database if you ne
 
 ### 4. Shell Routing by Runtime (Windows)
 Pick the shell by the active agent runtime, not by VS Code task:
-- **Claude Code:** use the Bash tool for POSIX scripts, tests, and APTS CLI calls; use PowerShell for Windows-native operations (setup, file ops, git workflows, docs updates, local utilities). Start long-running validation servers with a non-blocking process primitive (Bash background mode, or PowerShell `Start-Job`/`Start-Process`) and stop them after tests.
+- **Claude Code:** use the Bash tool for POSIX scripts and tests; use PowerShell for Windows-native operations (setup, file ops, git workflows, docs updates, local utilities). Start long-running validation servers with a non-blocking process primitive (Bash background mode, or PowerShell `Start-Job`/`Start-Process`) and stop them after tests.
 - **opencode:** use bash; route long-running servers through a background/PTY primitive rather than relying only on `&` or `nohup`.
 - This mirrors the canonical *Shell routing by runtime* guidance shipped to client projects in the APTS integration package (`integracion/paquete-apts/runtime-adapters/spec/apts-surface.json` → `instructions.body`).
 
@@ -49,8 +49,7 @@ Pick the shell by the active agent runtime, not by VS Code task:
 - Before modifying database schemas, always create a new migration. Do not modify existing applied migrations.
 - Backend startup in PostgreSQL performs a legacy bootstrap: copy rows from sqlite_legacy (`backend/apts.db`) to PostgreSQL with upsert, delete SQLite only after successful copy, then backfill embeddings for open bugs without embedding.
 - When creating UI components, utilize the existing Tailwind CSS setup and prioritize the dark, premium aesthetic.
-- For any functional change in APTS that affects behavior exposed to integrators (API routes, payloads, statuses, auth flow, downloadable artifacts, or integration guidance), you must bump the public integration manifest `schema_version` and add a matching entry to `bootstrap.manifest_updates.notes`.
-- `bootstrap.manifest_updates.notes` is append-only version history: never replace it with only the latest change, never delete previous entries, and always prepend the new version entry.
+- For any functional change in APTS that affects behavior exposed to integrators (API routes, payloads, statuses, auth flow, downloadable artifacts, or integration guidance), you must bump the public integration manifest `schema_version`. The manifest only exposes `bootstrap.manifest_updates.current_version`; the change history lives in git, not in the manifest.
 - If any downloadable integration artifact changes (clients, skills contract, guidelines, or agent templates), you must also version that specific artifact explicitly in the public manifest metadata (for example `artifact_version` / `updated_in_schema_version`) so local updaters can detect, overwrite, and clean legacy files deterministically.
 - Any new capability added to the APTS service must be reflected in `integracion/paquete-apts/apts_skills.json`, the single source of truth, and in the in-process executor that serves the remote MCP endpoint (`backend/index.js`). The startup self-check (`backend/scripts/lib/contract_check.mjs`) aborts the boot if the two drift, so a contract change cannot be half-applied. Client integrators must not need to build ad-hoc scripts to cover base APTS integration features.
 
@@ -60,7 +59,7 @@ This section is the short operational summary for agents integrating with APTS. 
 
 ### Common Required Fields
 
-When using the official APTS client or CLI, identity fields are auto-filled from env, local managed execution context, and Git if omitted in payloads. The table below reflects raw API required fields.
+Over the remote MCP endpoint, identity fields omitted in payloads are auto-filled from the registration headers. The table below reflects raw API required fields.
 
 | Field | Required by | Notes |
 | --- | --- | --- |
@@ -68,7 +67,7 @@ When using the official APTS client or CLI, identity fields are auto-filled from
 | `agent_name` | `register_task`, `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` | Resolve it from `git config user.name`. |
 | `agent_email` | `register_task`, `update_task_status` | Resolve it from `git config user.email`. |
 | `branch` | `log_agent_progress` | Resolve it from `git branch --show-current`. |
-| `task_id` | `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` | Returned by `register_task`, or resolved from `APTS_TASK_ID`, or from managed execution context (`.apts/execution-context.json` by default). |
+| `task_id` | `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` | Returned by `register_task`; send it in each execution call (the endpoint is stateless). Calling `register_task` again with the same `backlog_item_id` resumes the task and returns the same id. |
 | `backlog_item_id` | `register_task` when executing tracked work, `update_backlog_item`, `delete_backlog_item` | Use it to bind execution to backlog and avoid duplicate work. |
 
 ### Backlog Reuse Rule
@@ -82,7 +81,7 @@ If there is no active backlog item that describes exactly the change you are abo
 
 ### Happy Path
 
-1. Ensure `APTS_BASE_URL` and `APTS_API_KEY` are available, then use the official MCP server with minimum payloads and auto-resolved identity/context (no manual identity pre-flight by default).
+1. Register the remote MCP endpoint (`APTS_API_KEY` plus the three identity values travel in the registration headers), then use its tools with minimum payloads (no manual identity pre-flight).
 2. List backlog and decide whether to reuse an existing item or create a new one.
 3. Call `register_task` and keep the returned `task_id`.
 4. Call `read_project_context` before editing.

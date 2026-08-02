@@ -1,5 +1,7 @@
 # Plan de Implementación: Agentic Project Tracking Service (APTS)
 
+> **Documento histórico.** Este es el plan original con el que se construyó APTS y se conserva como registro; varias decisiones descritas aquí ya no reflejan el sistema (hoy PostgreSQL es el motor en todos los entornos operativos, la identidad viaja en las cabeceras del registro MCP en lugar de resolverse desde Git, y la superficie de integración es el endpoint MCP remoto). El estado actual está en `README.md` y, para la superficie de integración, en `integracion/ESTADO.md`.
+
 ## 1. Visión General
 El **Agentic Project Tracking Service (APTS)** es una plataforma diseñada para que los agentes de inteligencia artificial (IA) puedan registrar, actualizar y consultar el estado de los proyectos en los que trabajan de manera autónoma. A diferencia de un tracker tradicional (como Jira o Trello) diseñado para humanos, APTS expone "Skills" (APIs) optimizadas para el consumo programático por LLMs, manteniendo una interfaz gráfica de solo lectura o gestión de alto nivel para los supervisores humanos.
 

@@ -2097,7 +2097,7 @@ const mapTaskStatusToBacklogStatus = (status) => {
 const integrationRoot = path.join(__dirname, '..', 'integracion');
 // Schema version of the public integration manifest.
 // 1.0.0: first published version. One surface: the remote MCP endpoint.
-const integrationManifestSchemaVersion = '1.0.0';
+const integrationManifestSchemaVersion = '1.0.1';
 const publicIntegrationBasePath = '/api/public/integrar';
 
 const integrationArtifacts = {
@@ -2117,7 +2117,7 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'SKILL.md'),
     fileName: 'SKILL.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '1.0.0',
+    artifactVersion: '1.0.1',
     kind: 'skill_package',
     recommended: false,
     usagePriority: 'discovery',
@@ -2128,7 +2128,7 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-agent-guidelines.md'),
     fileName: 'apts-agent-guidelines.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '1.0.0',
+    artifactVersion: '1.0.1',
     kind: 'agent_guidelines',
     recommended: true,
     usagePriority: 'discovery',
@@ -2183,7 +2183,7 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'runtime-adapters', 'spec', 'apts-surface.json'),
     fileName: 'apts-surface.json',
     contentType: 'application/json; charset=utf-8',
-    artifactVersion: '1.0.0',
+    artifactVersion: '1.0.1',
     kind: 'runtime_surface_spec',
     recommended: true,
     usagePriority: 'discovery',
@@ -2421,7 +2421,7 @@ const buildIntegrationManifest = (req) => {
         current_version: integrationManifestSchemaVersion
       },
       summary: 'APTS centralizes operational tracking for agent-executed projects and should become the source of truth for backlog and execution state.',
-      service_purpose: 'Use APTS to register backlog, active tasks, blockers, heartbeats, and technical logs through an automation-oriented REST API.',
+      service_purpose: 'Use APTS to register backlog, active tasks, blockers, heartbeats, and technical logs through the remote MCP endpoint, whose tools derive from the skills contract.',
       source_of_truth: 'Once integration starts, backlog_items and tasks in APTS should replace local mirrors or checklists as the primary operational tracker.',
       migration_goal: 'If the project still manages backlog or tracking in local files, read them first and migrate or sync those items into APTS before normal execution continues.',
       local_tracking_inputs: [
@@ -2461,13 +2461,15 @@ const buildIntegrationManifest = (req) => {
         required_secret: 'APTS_API_KEY',
         how_to_obtain: 'If APTS_API_KEY is not available in the project environment, explicitly request it from the human operator or integration owner before attempting protected calls.',
         missing_secret_behavior: 'Do not attempt register_task, read_project_context, or any other protected call until APTS_API_KEY is provided.',
-        storage_recommendation: 'Define APTS_BASE_URL and APTS_API_KEY in a .env file at the client project root, or in an equivalent secret system that exposes them as runtime environment variables. Never hardcode them in source code, versioned prompts, JSON files, or backlog documents.',
+        storage_recommendation: 'Define APTS_API_KEY and the three identity values the registration block references (APTS_PROJECT_URL, APTS_AGENT_NAME, APTS_AGENT_EMAIL) in a .env file at the client project root, or in an equivalent secret system that exposes them as runtime environment variables. Never hardcode the key in source code, versioned prompts, JSON files, or backlog documents.',
         preferred_env_file: '.env (client project root)',
         env_example: [
-          'APTS_BASE_URL=https://apts.informaticos.ar/api',
-          'APTS_API_KEY=place-your-api-key-here'
+          'APTS_API_KEY=place-your-api-key-here',
+          'APTS_PROJECT_URL=https://github.com/org/repo',
+          'APTS_AGENT_NAME=Copilot',
+          'APTS_AGENT_EMAIL=copilot@example.com'
         ],
-        companion_env: 'APTS_BASE_URL must point to the /api base URL published by this manifest.'
+        companion_env: 'The MCP endpoint URL comes embedded in mcp_endpoint.registration_by_runtime; only the static generated adapters reference it as APTS_MCP_URL.'
       },
       mutation_safety: {
         mandatory_field_reminders: {
@@ -2605,7 +2607,7 @@ const buildIntegrationManifest = (req) => {
       type: 'bearer',
       header: 'Authorization',
       scheme: 'Bearer',
-      env: ['APTS_API_KEY', 'APTS_BASE_URL'],
+      env: ['APTS_API_KEY', 'APTS_PROJECT_URL', 'APTS_AGENT_NAME', 'APTS_AGENT_EMAIL'],
       required_secret: 'APTS_API_KEY',
       request_secret_from_operator_when_missing: true,
       secret_storage: {

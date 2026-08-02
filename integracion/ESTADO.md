@@ -10,8 +10,8 @@ llego hasta aqui: eso esta en el historial de git.
 | Superficie de integracion | El endpoint MCP remoto, `POST /mcp` (Streamable HTTP, sin sesion) |
 | Operaciones | 21, derivadas de `apts_skills.json` |
 | Registro | Una URL y cuatro cabeceras; el manifiesto publica el bloque por runtime |
-| Manifiesto | `GET /api/public/integrar`, `schema_version` 1.0.0, 8.595 unidades |
-| Artefactos publicados | 9, todos en `artifact_version` 1.0.0 |
+| Manifiesto | `GET /api/public/integrar`, `schema_version` 1.0.1, 8.678 unidades |
+| Artefactos publicados | 9; `skill_markdown`, `agent_guidelines` y `surface_spec` en `artifact_version` 1.0.1, el resto en 1.0.0 |
 | Descargas necesarias para operar | Ninguna |
 
 **Identidad.** Viaja en las cabeceras del registro. El servidor no mira el sistema de archivos, el

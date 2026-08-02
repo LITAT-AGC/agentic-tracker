@@ -1,5 +1,25 @@
-# Vue 3 + Vite
+# APTS Dashboard (frontend)
 
-This template should help get you started developing with Vue 3 in Vite. The template uses Vue 3 `<script setup>` SFCs, check out the [script setup docs](https://v3.vuejs.org/api/sfc-script-setup.html#sfc-script-setup) to learn more.
+Dashboard humano de APTS: Vue 3 (Composition API) + Vite + Pinia + Vue Router + PrimeVue + Tailwind CSS + ECharts.
 
-Learn more about IDE Support for Vue in the [Vue Docs Scaling up Guide](https://vuejs.org/guide/scaling-up/tooling.html#ide-support).
+- Login por contraseña (`DASHBOARD_PASSWORD` del backend) con sesión por cookie.
+- Vista Overview con métricas, tareas y feed de actividad.
+- Vista Projects con drill-down por repositorio y gestión de backlog.
+- Resolución manual de bloqueos desde la UI.
+
+## Desarrollo
+
+```bash
+npm install
+npm run dev
+```
+
+Sirve en `http://localhost:47302` y consume el backend en `http://localhost:47301` (ver el README de la raíz para levantar todo junto con `npm run dev`).
+
+## Pruebas E2E
+
+Playwright usa el Chrome local (`channel: 'chrome'`); no ejecutar `npx playwright install`. El backend debe correr en modo test (`npm run test:e2e:prepare` y `npm run test:e2e:backend` desde la raíz). Reglas completas en `AGENTS.md`.
+
+```bash
+npx playwright test
+```

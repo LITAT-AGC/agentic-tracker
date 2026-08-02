@@ -32,7 +32,7 @@ Use `integracion/paquete-apts/apts_skills.json` as the formal contract. It is th
 
 ### Common Required Fields
 
-When using the official MCP server, missing identity fields are auto-filled from env/local context/Git. The table lists server-required fields for raw API calls.
+Over the remote MCP endpoint, missing identity fields are auto-filled from the registration headers. The table lists server-required fields for raw API calls.
 
 | Field | Required by |
 | --- | --- |
@@ -46,9 +46,9 @@ When using the official MCP server, missing identity fields are auto-filled from
 
 ### Happy Path
 
-1. Ensure `APTS_BASE_URL` and `APTS_API_KEY` are available and rely on autofill for identity/task context.
+1. Ensure the remote MCP server is registered (`APTS_API_KEY` plus the three identity values travel in the registration headers) and rely on header autofill for identity.
 2. Call `list_backlog_items` (prefer `view = compact`) and choose to reuse or create an item.
-3. Call `register_task`; the official client persists the returned `task_id` in local managed context.
+3. Call `register_task`; keep the returned `task_id` and send it in later calls (calling `register_task` again with the same `backlog_item_id` resumes the task and returns the same id).
 4. Call `read_project_context` (prefer `view = compact`) before editing.
 5. Call `heartbeat` while the task is active.
 6. Call `log_agent_progress` on meaningful milestones.

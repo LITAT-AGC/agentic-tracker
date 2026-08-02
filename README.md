@@ -1,6 +1,6 @@
 # APTS - Agentic Project Tracking Service
 
-APTS es un servicio de seguimiento de proyectos orientado a agentes de IA. En lugar de depender solo del contexto del chat o de comentarios dispersos en el codigo, APTS centraliza backlog, tareas de ejecucion, estados, heartbeats, bloqueos y logs tecnicos en una API REST pensada para automatizacion, con un dashboard web para supervision humana.
+APTS es un servicio de seguimiento de proyectos orientado a agentes de IA. En lugar de depender solo del contexto del chat o de comentarios dispersos en el codigo, APTS centraliza backlog, tareas de ejecucion, estados, heartbeats, bloqueos y logs tecnicos detras de un endpoint MCP remoto (con una API REST equivalente por debajo), con un dashboard web para supervision humana.
 
 ## Que incluye
 
@@ -27,7 +27,7 @@ APTS esta pensado para equipos que usan agentes de desarrollo y necesitan:
 
 ### Backend
 
-- API REST para agentes y dashboard.
+- Endpoint MCP remoto (`POST /mcp`) como superficie de integracion para agentes, API REST equivalente y API de dashboard.
 - Persistencia con Knex.
 - PostgreSQL en desarrollo, test y produccion mediante `PG_CONNECTION_STRING` o `DATABASE_URL`.
 - Perfil `sqlite_legacy` reservado para migrar una base SQLite historica una sola vez.
@@ -66,18 +66,31 @@ Todas las llamadas de agentes deben incluir la cabecera:
 Authorization: Bearer <APTS_API_KEY>
 ```
 
-| Skill | Metodo | Endpoint | Uso |
+Las 21 operaciones del contrato, con su endpoint REST equivalente (la fuente formal de parametros y tipos es `apts_skills.json`):
+
+| Operacion | Metodo | Endpoint | Uso |
 | --- | --- | --- | --- |
-| `register_task` | POST | `/api/projects/tasks` | Crear una tarea nueva y obtener `task_id` (opcionalmente vinculada a `backlog_item_id`). |
-| `read_project_context` | GET | `/api/projects/context?url=...&limit=...` | Leer backlog, tareas y logs recientes del proyecto. |
-| `list_backlog_items` | GET | `/api/projects/backlog?url=...&status=...` | Listar backlog por proyecto, ordenado por prioridad y orden manual. |
-| `search_similar_bug_reports` | POST | `/api/projects/backlog/semantic-search` | Buscar bugs similares semánticamente para intake sin duplicados. |
+| `register_task` | POST | `/api/projects/tasks` | Crear (o reanudar via `backlog_item_id`) una tarea y obtener `task_id`. |
+| `read_project_context` | GET | `/api/projects/context` | Leer backlog, tareas y logs recientes del proyecto. |
+| `list_backlog_items` | GET | `/api/projects/backlog` | Listar backlog por proyecto, ordenado por prioridad y orden manual. |
+| `get_backlog_item` | GET | `/api/backlog/:id` | Leer un backlog item concreto. |
+| `get_task` | GET | `/api/tasks/:id` | Leer una tarea concreta. |
+| `get_project_constraints` | GET | `/api/projects/:url/constraints` | Leer las restricciones operativas del proyecto. |
+| `search_similar_bug_reports` | POST | `/api/projects/backlog/semantic-search` | Buscar bugs similares semanticamente para intake sin duplicados. |
 | `create_backlog_item` | POST | `/api/projects/backlog` | Crear un backlog item gestionado en APTS. |
-| `update_backlog_item` | PATCH | `/api/backlog/:id` | Editar estado, prioridad o contenido de un backlog item. |
-| `update_task_status` | PATCH | `/api/tasks/:id/status` | Cambiar estado de una tarea. |
-| `log_agent_progress` | POST | `/api/tasks/:id/logs` | Registrar progreso, decisiones o cambios tecnicos. |
+| `update_backlog_item` | PATCH | `/api/backlog/:id` (batch: `/api/backlog`) | Editar estado, prioridad o contenido de un backlog item. |
+| `delete_backlog_item` | DELETE | `/api/backlog/:id` (batch: `/api/backlog`) | Eliminar (soft-delete) un backlog item. |
+| `update_task_status` | PATCH | `/api/tasks/:id/status` (batch: `/api/tasks/status`) | Cambiar estado de una tarea. |
+| `log_agent_progress` | POST | `/api/tasks/:id/logs` (batch: `/api/tasks/logs`) | Registrar progreso, decisiones o cambios tecnicos. |
 | `report_blocker` | POST | `/api/projects/blockers` | Reportar bloqueo y marcar proyecto como bloqueado. |
-| `heartbeat` | POST | `/api/tasks/:id/heartbeat` | Marcar actividad reciente del agente. |
+| `heartbeat` | POST | `/api/tasks/:id/heartbeat` (batch: `/api/tasks/heartbeat`) | Marcar actividad reciente del agente. |
+| `create_initiative` | POST | `/api/projects/initiatives` | Arrancar una iniciativa del metodo BMAD. |
+| `set_agent_role` | POST | `/api/projects/agent-roles` | Registrar o conmutar el rol de un agente en la iniciativa. |
+| `apts_next` | POST | `/api/projects/next` | Pedir al motor del metodo el siguiente paso para este agente. |
+| `apts_status` | GET | `/api/projects/method-status` | Leer el estado del metodo (fase, roles, pendientes). |
+| `apts_set_status` | PATCH | `/api/backlog/:id/method-status` | Cambiar el estado de metodo de un item. |
+| `apts_workflow_step` | POST | `/api/projects/workflow-step` | Obtener la definicion del paso de workflow en curso. |
+| `apts_submit_step` | POST | `/api/projects/submit-step` | Entregar la salida de un paso de workflow. |
 
 ## Flujo esperado de un agente
 
@@ -87,9 +100,9 @@ Authorization: Bearer <APTS_API_KEY>
 4. Leer el contexto del proyecto antes de trabajar (`read_project_context`).
 5. Registrar progreso y enviar heartbeat mientras ejecuta la tarea.
 6. Reportar blocker si no puede continuar.
-7. Marcar la tarea como `done` o `review` cuando termina; APTS sincroniza el estado del backlog vinculado.
+7. Marcar la tarea como `review` primero y `done` solo tras revision y actividad reciente; APTS sincroniza el estado del backlog vinculado.
 
-Valores que el bloque de registro del MCP remoto referencia:
+Valores que la integracion referencia (el bloque del manifiesto trae la URL embebida; `APTS_MCP_URL` solo lo usan los adaptadores estaticos generados):
 
 ```env
 APTS_MCP_URL=https://apts.example.com/mcp
@@ -115,12 +128,14 @@ Un backlog item puede enlazarse con una `active_task_id` mientras esta en ejecuc
 
 ## Agentes recomendados
 
-Este repositorio incluye plantillas de agentes de integracion en `integracion/plantillas-agentes/`:
+Este repositorio incluye cuatro plantillas de agentes de integracion en `integracion/plantillas-agentes/`:
 
-- `Orquestador Backlog APTS` (`integracion/plantillas-agentes/orquestador-backlog-apts.agent.md`): toma items `ready` del backlog en APTS, crea la task de ejecucion y delega el trabajo atomico.
-- `Ejecutor Item Backlog Dev Test Commit` (`integracion/plantillas-agentes/ejecutor-item-backlog-dev-test-commit.agent.md`): implementa un solo item del backlog, registra progreso en APTS, ejecuta validaciones relevantes del repositorio y solo committea si pasan.
+- `APTS Bugfix Intake` (`intake-bugfix-apts.agent.md`): triaje de bugs reportados por chat, en solo lectura hasta confirmacion, y registro trazado del bug en APTS.
+- `APTS Backlog Orchestrator` (`orquestador-backlog-apts.agent.md`): toma items `ready` del backlog en APTS, crea la task de ejecucion y delega el trabajo atomico.
+- `Backlog Item Executor Dev Test Commit` (`ejecutor-item-backlog-dev-test-commit.agent.md`): implementa un solo item del backlog, registra progreso en APTS, ejecuta validaciones relevantes del repositorio y solo committea si pasan.
+- `APTS Method Orchestrator` (`apts-method-orchestrator.agent.md`): arranca una iniciativa BMAD desde una spec de cliente y conduce el ciclo analisis → planificacion → solucion → implementacion → done.
 
-Las plantillas exportables viven en `integracion/plantillas-agentes/` y el repo ya no depende de borradores locales temporales.
+Las cuatro plantillas son artefactos publicados del manifiesto y **las escribe el generador** (`integracion/paquete-apts/scripts/generate-adapters.js`) desde `runtime-adapters/spec/apts-surface.json`: no se editan a mano; el arranque del backend aborta si divergen del spec.
 
 ## Requisitos
 
@@ -150,6 +165,7 @@ APTS_API_KEY=replace-with-a-secure-api-key
 DASHBOARD_PASSWORD=replace-with-a-strong-password
 PG_CONNECTION_STRING=postgresql://user:password@host:5432/apts
 PG_TEST_CONNECTION_STRING=postgresql://user:password@host:5432/apts_test
+OPENROUTER_API_KEY=replace-with-your-openrouter-key
 OPENROUTER_DEFAULT_EMBEDDING_MODEL=openai/text-embedding-3-small
 
 # Opcional: alias compatible para despliegues existentes
@@ -180,12 +196,15 @@ Ademas, al iniciar el backend en PostgreSQL, APTS ejecuta un bootstrap automatic
 - elimina el archivo SQLite solo si la copia fue correcta,
 - y realiza backfill de embeddings para bugs abiertos que aun no tengan embedding.
 
-### 3. Ejecutar migraciones
+### 3. Ejecutar migraciones y sembrar el metodo
 
 ```bash
 cd backend
 npx knex migrate:latest
+npm run seed:method
 ```
+
+`seed:method` siembra la biblioteca del metodo BMAD (entities, workflow definitions y steps) por upsert contra la clave natural, asi que re-sembrar el mismo corpus no mueve los UUID. Para el destino de prueba existe `npm run seed:method:test`.
 
 ### 4. Levantar el proyecto
 
@@ -288,22 +307,26 @@ npx playwright test
 
 Esta es la parte importante si quieres que otros repositorios reporten actividad a este servicio.
 
-### Paso 1: apuntar el proyecto integrador al servicio APTS
+### Paso 1: registrar el MCP remoto en el proyecto integrador
 
-En el proyecto cliente define al menos estas variables de entorno en tu runtime de agentes, CI o wrapper local:
+1. Lee el manifiesto publico: `GET /api/public/integrar` (sin token).
+2. Copia el bloque de tu runtime desde `mcp_endpoint.registration_by_runtime` al archivo de configuracion correspondiente (`.mcp.json` para Claude Code, `opencode.json` para opencode, `.vscode/mcp.json` para VS Code). La URL del endpoint ya viene embebida en el bloque.
+3. Define en el `.env` del proyecto cliente (o en tu gestor de secretos) los valores que ese bloque referencia:
 
 ```env
-APTS_BASE_URL=http://localhost:47301/api
 APTS_API_KEY=replace-with-the-shared-api-key
+APTS_PROJECT_URL=https://github.com/org/repo
+APTS_AGENT_NAME=Copilot
+APTS_AGENT_EMAIL=copilot@example.com
 ```
 
-Si el servicio APTS esta desplegado en otro host, reemplaza la URL base por la correspondiente.
+Con eso el runtime recibe las 21 operaciones por `tools/list`. No hay nada mas que instalar.
 
-### Paso 2: instalar las skills en el proyecto integrador
+### Paso 2 (opcional): adaptadores y material de integracion
 
-Tienes dos opciones validas.
+Si tu runtime admite agentes o comandos propios, genera los adaptadores localmente con `node integracion/paquete-apts/scripts/generate-adapters.js` desde `runtime-adapters/spec/apts-surface.json` y copialos donde el runtime los descubra (por ejemplo `.github/agents/` en VS Code). Los archivos generados son gestionados: no se editan a mano.
 
-Si quieres una base lista para descargar, copia directamente la carpeta `integracion/paquete-apts/` de este repositorio al proyecto cliente y reutiliza sus assets.
+Si quieres los assets sin clonar el repo, todos se sirven como artefactos del manifiesto publico (`/api/public/integrar`).
 
 Para VS Code en Windows, si quieres replicar el routing de shell (tests por WSL y operaciones no-test por PowerShell), toma como base `docs/vscode-tasks.windows.example.json` y copialo al proyecto cliente como `.vscode/tasks.json`.
 
@@ -325,7 +348,7 @@ Campos obligatorios mas comunes:
 | Campo | Lo usan |
 | --- | --- |
 | `project_url` | `register_task`, `create_backlog_item`, `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` |
-| `url` | `read_project_context`, `list_backlog_items` |
+| `url` | `read_project_context`, `list_backlog_items`, `search_similar_bug_reports` |
 | `agent_name` | `register_task`, `heartbeat`, `log_agent_progress`, `report_blocker`, `update_task_status` |
 | `agent_email` | `register_task`, `update_task_status` |
 | `branch` | `log_agent_progress` |
@@ -341,7 +364,7 @@ Regla de backlog:
 
 Happy path operativo:
 
-1. Configurar los valores del registro (`APTS_MCP_URL`, `APTS_API_KEY` y las tres de identidad); luego usar las tools del MCP remoto con payloads minimos.
+1. Registrar el MCP remoto copiando el bloque del manifiesto y configurar los valores que referencia (`APTS_API_KEY` y las tres de identidad); luego usar las tools con payloads minimos.
 2. Llamar `list_backlog_items` y decidir si reutilizas o creas item.
 3. Llamar `register_task` y conservar `task_id`.
 4. Llamar `read_project_context` antes de editar.
@@ -386,55 +409,13 @@ Errores frecuentes:
 | --- | --- | --- | --- |
 | `INVALID_ARGUMENT` | Falta un campo obligatorio, UUID invalido, enum invalido o JSON mal formado. | Payload contra `apts_skills.json`. | No. |
 | `401` / `403` | API key ausente o invalida. | `APTS_API_KEY` y cabecera bearer. | No. |
-| `404` | Ruta o recurso incorrecto. | `task_id`, `backlog_item_id` y `APTS_BASE_URL`. | No, salvo stale id verificable. |
+| `404` | Ruta o recurso incorrecto. | `task_id`, `backlog_item_id` y la URL del registro MCP. | No, salvo stale id verificable. |
 | `429` | Rate limit. | Politica de reintentos y frecuencia. | Si, maximo 2 veces. |
 | Error de red / `5xx` | Falla temporal del servicio o conectividad. | Reachability y salud de APTS. | Si, maximo 2 veces. |
 
-#### Opcion A: tu runtime soporta esquemas JSON o function calling
+#### Si tu runtime no puede registrar un servidor MCP
 
-1. Copia `integracion/paquete-apts/apts_skills.json` a tu proyecto integrador, por ejemplo en `tools/apts_skills.json`.
-2. Registra cada skill en tu runtime usando el mismo nombre y parametros.
-3. Haz que cada tool invoque el endpoint HTTP correspondiente en APTS.
-4. Adjunta siempre `Authorization: Bearer <APTS_API_KEY>`.
-
-Mapeo recomendado:
-
-| Skill | Endpoint backend |
-| --- | --- |
-| `register_task` | `POST {APTS_BASE_URL}/projects/tasks` |
-| `read_project_context` | `GET {APTS_BASE_URL}/projects/context?url=...&limit=...` |
-| `list_backlog_items` | `GET {APTS_BASE_URL}/projects/backlog?url=...&status=...` |
-| `create_backlog_item` | `POST {APTS_BASE_URL}/projects/backlog` |
-| `update_backlog_item` | `PATCH {APTS_BASE_URL}/backlog/:id` |
-| `update_task_status` | `PATCH {APTS_BASE_URL}/tasks/:id/status` |
-| `log_agent_progress` | `POST {APTS_BASE_URL}/tasks/:id/logs` |
-| `report_blocker` | `POST {APTS_BASE_URL}/projects/blockers` |
-| `heartbeat` | `POST {APTS_BASE_URL}/tasks/:id/heartbeat` |
-
-#### Opcion B: tu runtime no soporta importar JSON directamente
-
-Implementa un adaptador pequeno en el proyecto cliente que exponga funciones con esos mismos nombres y haga `fetch` al backend de APTS.
-
-Ejemplo minimo en Node.js:
-
-```js
-const baseUrl = process.env.APTS_BASE_URL;
-const headers = {
-  'Content-Type': 'application/json',
-  Authorization: `Bearer ${process.env.APTS_API_KEY}`,
-};
-
-async function register_task(payload) {
-  const res = await fetch(`${baseUrl}/projects/tasks`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(payload),
-  });
-  return res.json();
-}
-```
-
-Con ese patron puedes implementar las skills y publicarlas como herramientas del agente que use tu equipo.
+Es un problema de configuracion que se resuelve con el operador; no hay superficie alternativa recomendada. Los endpoints REST existen y mapean 1:1 con las operaciones (ver la tabla de **Skills disponibles**), pero no construyas wrappers paralelos por runtime: si falta una capacidad, se agrega primero a `apts_skills.json` y se regeneran los adaptadores.
 
 ### Paso 3: instalar el prompt en el proyecto integrador
 
@@ -446,31 +427,28 @@ Si el proyecto integrador usa VS Code con GitHub Copilot, la recomendacion pract
 - Prompts reutilizables para tareas puntuales: `.github/prompts/*.prompt.md`
 - Skills nativos de VS Code/Copilot: `.github/skills/<nombre>/SKILL.md`
 
-Nota importante: APTS no instala por defecto estas piezas como customizacion activa del propio repositorio. Lo que publica hoy es un paquete de integracion en `integracion/paquete-apts/`. Por eso, para integrarse con APTS, un proyecto cliente normalmente hace una de estas dos cosas:
-
-1. Usa instrucciones y prompts para obligar el flujo de trabajo del agente, y un wrapper local o MCP para ejecutar las llamadas HTTP.
-2. Crea un skill propio del proyecto que internamente invoque la API de APTS.
+Nota importante: APTS no instala por defecto estas piezas como customizacion activa del propio repositorio; publica el material como artefactos del manifiesto y en `integracion/paquete-apts/`. En el proyecto cliente, las instrucciones y prompts obligan el flujo de trabajo del agente, y las llamadas las ejecutan las tools del servidor MCP remoto registrado (nada de wrappers HTTP propios).
 
 Prompt recomendado para proyectos integrados con APTS:
 
 ```md
-Eres un agente de desarrollo integrado con APTS.
+Eres un agente de desarrollo integrado con APTS a traves del servidor MCP remoto registrado.
 
-Antes de usar cualquier skill debes resolver desde el entorno Git local:
-- project_url: `git remote get-url origin`
-- agent_name: `git config user.name`
-- agent_email: `git config user.email`
-- branch: `git branch --show-current`
+La identidad (project_url, agent_name, agent_email) viaja en las cabeceras del registro:
+no ejecutes comandos de pre-vuelo para resolverla ni la inventes en los payloads. Si a una
+llamada le falta algo, el servidor la rechaza nombrando el campo: es un problema de
+configuracion del operador, no un valor a adivinar.
 
 Reglas obligatorias:
 1. Lee backlog del proyecto (`list_backlog_items`) y toma un item apto para ejecucion.
-2. Si no tienes task_id, usa `register_task` (incluyendo `backlog_item_id` cuando exista).
+2. Si no tienes task_id, usa `register_task` (incluyendo `backlog_item_id` cuando exista;
+   si ese item ya tiene una tarea activa, APTS la reanuda en vez de duplicarla).
 3. Antes de modificar codigo, usa `read_project_context`.
 4. Mientras trabajas, envia `heartbeat` periodicamente.
-5. Cada hito importante debe registrarse con `log_agent_progress`.
+5. Cada hito importante debe registrarse con `log_agent_progress`, incluyendo `branch`.
 6. Si no puedes continuar, usa `report_blocker` y deten el trabajo.
-7. Al terminar, usa `update_task_status` con `done` o `review`.
-8. Nunca inventes `project_url`, `agent_name` ni `branch`; resuelvelos siempre desde Git.
+7. Al terminar, usa `update_task_status` con `review` primero; `done` solo tras revision
+   y con actividad reciente.
 ```
 
 ### Paso 4: estructura recomendada para un proyecto cliente
@@ -481,8 +459,6 @@ mi-proyecto/
   .github/
     prompts/
       apts-operacion.prompt.md
-  tools/
-    apts_skills.json
   .mcp.json
   .env
 ```
@@ -512,10 +488,12 @@ Si descargaste las plantillas y no aparecen como custom agents, revisa lo siguie
 4. `apts_skills.json` solo define tools/skills; no instala agentes automaticamente.
 5. Recarga VS Code con `Developer: Reload Window` luego de copiar o renombrar plantillas.
 
-Referencia de plantillas en este repo:
+Referencia de plantillas en este repo (el generador emite las variantes por runtime en `integracion/paquete-apts/runtime-adapters/`; la de intake se publica alli como `apts-bugfix-intake.agent.md`):
 
+- `integracion/plantillas-agentes/intake-bugfix-apts.agent.md`
 - `integracion/plantillas-agentes/orquestador-backlog-apts.agent.md`
 - `integracion/plantillas-agentes/ejecutor-item-backlog-dev-test-commit.agent.md`
+- `integracion/plantillas-agentes/apts-method-orchestrator.agent.md`
 
 ### Paso 5: validacion de la integracion
 
@@ -535,10 +513,7 @@ Referencia de plantillas en este repo:
 
 ## Limites actuales
 
-- No hay servidor MCP oficial en este repositorio.
-- No hay paquete NPM cliente publicado aun.
-- La instalacion final de skills en proyectos clientes sigue dependiendo del runtime del agente que use cada equipo, aunque este repo ya incluye un paquete base exportable en `integracion/paquete-apts/`.
+- Si un runtime no puede registrar servidores MCP remotos, no hay superficie alternativa recomendada: se resuelve la configuracion del runtime con el operador.
+- La instalacion de instrucciones y agentes propios en proyectos clientes sigue dependiendo de lo que soporte cada runtime; los adaptadores generados cubren Claude Code, opencode y VS Code.
 
-## Proximo paso natural
-
-Si quieres que la integracion sea casi plug-and-play para otros repositorios, el siguiente paso recomendable es crear un adaptador MCP o un cliente NPM que cargue `integracion/paquete-apts/apts_skills.json` y traduzca automaticamente cada tool a llamadas HTTP contra APTS.
+El estado al dia de la superficie de integracion, con lo verificado y lo abierto, vive en `integracion/ESTADO.md`.

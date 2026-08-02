@@ -35,7 +35,7 @@ Note: in this repository, it is published as integration material under the repo
 
 1. Read the public manifest at `GET /api/public/integrar`.
 2. Copy the block for your runtime from `mcp_endpoint.registration_by_runtime` into the runtime config file (`.mcp.json` for Claude Code, `opencode.json` for opencode, `.vscode/mcp.json` for VS Code).
-3. Provide the values that block references: `APTS_MCP_URL`, `APTS_API_KEY`, `APTS_PROJECT_URL`, `APTS_AGENT_NAME`, `APTS_AGENT_EMAIL`. Keep the key in a `.env` file at the client project root or an equivalent secret store — never in source code, versioned prompts or backlog documents.
+3. Provide the values that block references: `APTS_API_KEY`, `APTS_PROJECT_URL`, `APTS_AGENT_NAME`, `APTS_AGENT_EMAIL` (the endpoint URL comes embedded in the manifest block; only the static generated adapters reference it as `APTS_MCP_URL`). Keep the key in a `.env` file at the client project root or an equivalent secret store — never in source code, versioned prompts or backlog documents.
 4. Apply the AGENTS setup policy below: create `AGENTS.md` when no instruction file exists, or merge/update one APTS-managed section. In Claude Code add `CLAUDE.md` with `@AGENTS.md`.
 5. Validate the integration by calling `register_task`, then `read_project_context`, `log_agent_progress`, `heartbeat` and `update_task_status review`, all with minimal payloads.
 

@@ -23,7 +23,7 @@ If `APTS_API_KEY` is not available in the project environment, request it from t
 Define the integration variables in a `.env` file at the client project root:
 
 ```env
-APTS_BASE_URL=https://apts.informaticos.ar/api
+APTS_MCP_URL=https://apts.informaticos.ar/mcp
 APTS_API_KEY=place-your-api-key-here
 APTS_PROJECT_URL=https://github.com/your-org/your-repo.git
 APTS_AGENT_NAME=your-agent-name

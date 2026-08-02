@@ -22,7 +22,7 @@ Se mantiene fuera de `.github/` para evitar que VS Code/Copilot lo trate como cu
 
 1. Lee el manifiesto publico en `GET /api/public/integrar`.
 2. Copia el bloque de tu runtime desde `mcp_endpoint.registration_by_runtime` al archivo de configuracion correspondiente (`.mcp.json`, `opencode.json` o `.vscode/mcp.json`).
-3. Aporta los valores que ese bloque referencia: `APTS_MCP_URL`, `APTS_API_KEY`, `APTS_PROJECT_URL`, `APTS_AGENT_NAME` y `APTS_AGENT_EMAIL`.
+3. Aporta los valores que ese bloque referencia: `APTS_API_KEY`, `APTS_PROJECT_URL`, `APTS_AGENT_NAME` y `APTS_AGENT_EMAIL` (la URL del endpoint viene embebida en el bloque; solo los adaptadores estaticos generados la referencian como `APTS_MCP_URL`).
 4. Crea `AGENTS.md` (canonico) y, en Claude Code, `CLAUDE.md` con `@AGENTS.md`.
 5. Si el runtime admite agentes propios, genera los adaptadores con `node paquete-apts/scripts/generate-adapters.js` y copialos donde el runtime los descubra.
 
