@@ -10,7 +10,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
-const CONTRACT_PATH = path.join(moduleDir, 'apts_skills.json');
+// apts_skills.json sigue siendo la fuente del contrato y vive en el paquete
+// público, que es lo que se descarga. Este módulo es código del backend.
+const CONTRACT_PATH = path.join(moduleDir, '..', '..', '..', 'integracion', 'paquete-apts', 'apts_skills.json');
 
 // Client exports that are deliberately not contract operations (identity and
 // managed-context utilities, plus the error class).

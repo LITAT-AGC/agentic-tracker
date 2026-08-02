@@ -1,10 +1,5 @@
 {
   "name": "apts-integration-package",
-  "version": "1.0.0",
   "private": true,
-  "type": "module",
-  "description": "APTS integration core (ESM-only): contract, HTTP client, and MCP server.",
-  "bin": {
-    "apts-mcp": "./apts-mcp.js"
-  }
+  "type": "module"
 }

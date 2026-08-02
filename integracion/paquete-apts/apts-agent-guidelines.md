@@ -67,11 +67,11 @@ When using the official MCP server, missing identity fields are auto-filled from
 
 ## Anti-Patterns
 
-- Writing one-off code that imports or bootstraps `apts-client.js` directly during a chat turn.
+- Writing one-off code that talks to the APTS HTTP API directly during a chat turn.
 - Building JSON manually with string concatenation when an object payload is available.
-- Running `git remote get-url origin`, `git config user.name`, and `git branch --show-current` before every APTS call instead of relying on autofill.
-- Calling the raw HTTP API for base operations when the MCP server already covers the workflow.
-- Creating a new wrapper script per runtime interaction instead of reusing the MCP server.
+- Running `git remote get-url origin`, `git config user.name`, and `git branch --show-current` before every APTS call: identity travels in the registration headers, and a call missing something is rejected naming the field.
+- Calling the raw HTTP API for base operations when the MCP tools already cover the workflow.
+- Creating a new wrapper script per runtime interaction instead of using the registered MCP server.
 
 ### Frequent Errors
 

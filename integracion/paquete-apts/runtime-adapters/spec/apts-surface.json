@@ -1,12 +1,15 @@
 {
   "_comment": "FUENTE ÚNICA de la superficie de agentes APTS (agentes, comandos, permisos, instrucciones, hooks). Editar AQUÍ y regenerar con: node scripts/generate-adapters.js. apts_skills.json sigue siendo la fuente del CONTRATO; este spec es la fuente de la SUPERFICIE. Los cuerpos de prompting marcados WS4 se completan en el workstream 4.",
   "version": 1,
-  "binDir": ".ia/apts",
   "mcp": {
     "server": "apts",
-    "command": "node",
-    "argsRelative": [
-      "apts-mcp.js"
+    "type": "http",
+    "urlEnv": "APTS_MCP_URL",
+    "headers": [
+      { "name": "Authorization", "env": "APTS_API_KEY", "scheme": "Bearer" },
+      { "name": "X-APTS-Project-Url", "env": "APTS_PROJECT_URL" },
+      { "name": "X-APTS-Agent-Name", "env": "APTS_AGENT_NAME" },
+      { "name": "X-APTS-Agent-Email", "env": "APTS_AGENT_EMAIL" }
     ]
   },
   "instructions": {
@@ -126,12 +129,6 @@
     }
   ],
   "permissions": [
-    {
-      "capability": "execute",
-      "pattern": "node*apts-mcp.js*",
-      "action": "allow",
-      "note": "APTS MCP server"
-    },
     {
       "capability": "mcp",
       "server": "apts",

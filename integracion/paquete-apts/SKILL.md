@@ -13,103 +13,55 @@ Note: in this repository, it is published as integration material under the repo
 
 ## Surface model (read this first)
 
-- **MCP-only.** `apts-mcp` is the only supported integration surface. It exposes one native tool per contract operation and works identically in Claude Code (`.mcp.json`) and opencode (`opencode.json`), pointing to the same binary. If a runtime cannot register an MCP server, resolve the runtime setup with the operator; there is no alternative script surface.
-- **ESM-only.** A single `.js` file set runs as ESM via `package.json` `{ "type": "module" }`. The MCP server is executed as a subprocess (`node .ia/apts/apts-mcp.js`); it is never imported by the host project, so the host module system is irrelevant. There is no CJS twin and no standalone helper.
-- **Contract is the single source of truth.** `apts_skills.json` defines the operations. The client exports and the MCP tool list are derived/validated from it by `contract-check.js`. A self-check aborts startup on misalignment.
+- **One surface: the remote MCP endpoint.** Register it and every contract operation arrives through `tools/list`. Nothing is downloaded, no local process runs, and there is no artifact version to keep in sync. If a runtime cannot register an MCP server, resolve the runtime setup with the operator; there is no alternative surface.
+- **Registration is a URL plus four headers.** `Authorization` carries the access key; the three `X-APTS-*` headers carry project and agent identity. The public manifest publishes the exact block per runtime under `mcp_endpoint.registration_by_runtime` — copy it as-is.
+- **Identity comes from the registration, not from the environment.** The server does not inspect your filesystem, your environment or your Git checkout. A value sent in the call arguments wins over the header, which is how an agent switches role; a `project_url` that contradicts the header is rejected.
+- **Contract is the single source of truth.** `apts_skills.json` defines the operations. The backend validates its own surface against it at startup and refuses to serve on drift.
 
 ## When to use it
 
 - When a project needs to report agent work to APTS.
-- When you need native MCP tools for the APTS workflow in Claude Code or opencode.
+- When you need native MCP tools for the APTS workflow in Claude Code, opencode or VS Code.
 - When you want to install instructions or prompts so the agent follows the APTS workflow.
 - When you need the tools JSON contract in a downloadable format together with the skill.
 
 ## What it includes
 
-- [API contract](./references/api-contract.md)
 - [Skills JSON contract](./apts_skills.json) — single source of truth
-- [HTTP client (ESM)](./apts-client.js)
-- [MCP server (ESM)](./apts-mcp.js)
-- [Contract self-check](./contract-check.js)
 - [Base guide for AGENTS.md / CLAUDE.md / copilot-instructions.md](./apts-agent-guidelines.md)
 - [Runtime surface spec](./runtime-adapters/spec/apts-surface.json) and [adapter generator](./scripts/generate-adapters.js)
 
-## Recommended usage for AI agents
+## Recommended procedure
 
-- Use the MCP tools in any supported runtime (Claude Code, opencode). If MCP cannot be registered, resolve the runtime setup with the operator; there is no alternative surface.
-- Never generate fresh direct-client bootstrap code during an interaction. Direct `apts-client.js` import is reserved for the bundled MCP server entrypoint.
+1. Read the public manifest at `GET /api/public/integrar`.
+2. Copy the block for your runtime from `mcp_endpoint.registration_by_runtime` into the runtime config file (`.mcp.json` for Claude Code, `opencode.json` for opencode, `.vscode/mcp.json` for VS Code).
+3. Provide the values that block references: `APTS_MCP_URL`, `APTS_API_KEY`, `APTS_PROJECT_URL`, `APTS_AGENT_NAME`, `APTS_AGENT_EMAIL`. Keep the key in a `.env` file at the client project root or an equivalent secret store — never in source code, versioned prompts or backlog documents.
+4. Apply the AGENTS setup policy below: create `AGENTS.md` when no instruction file exists, or merge/update one APTS-managed section. In Claude Code add `CLAUDE.md` with `@AGENTS.md`.
+5. Validate the integration by calling `register_task`, then `read_project_context`, `log_agent_progress`, `heartbeat` and `update_task_status review`, all with minimal payloads.
 
-## Workspace installation policy (recommended)
+To drive the BMAD method lifecycle end to end, read `method_conduction` from the same manifest: it carries the conduction loop as data.
 
-- Use a workspace-local, runtime-neutral base folder: `.ia/apts/`.
-- Keep the APTS contract, the HTTP client, the MCP server, `contract-check.js`, and `package.json` (`{ "type": "module" }`) in that base folder.
-- Treat official APTS scripts and generated adapter files as managed artifacts: replace them as full files on updates and never merge legacy local wrapper code into them. The only hand-editable surface source is the spec.
-- Register the MCP server per runtime (`.mcp.json` for Claude Code, `opencode.json` `mcp` for opencode). These adapter files are generated from `runtime-adapters/spec/apts-surface.json`.
-- Avoid user-global skill installation for project integrations because it increases cross-project configuration leakage and version drift.
+## Custom agents (optional)
+
+The agent templates only matter when the runtime supports custom agents. Generate the per-runtime adapters locally with `scripts/generate-adapters.js` from `runtime-adapters/spec/apts-surface.json`, then copy them where the runtime discovers them. Generated adapters are managed output: never hand-edit them — edit the spec and regenerate.
 
 ## AGENTS.md setup policy (mandatory)
 
-- `AGENTS.md` is the canonical instructions file read by both runtimes. In Claude Code, `CLAUDE.md` only contains `@AGENTS.md`.
-- If neither `AGENTS.md` nor `.github/copilot-instructions.md` exists in the client project, create `AGENTS.md` with the APTS-managed section generated from the spec (see [apts-agent-guidelines.md](./apts-agent-guidelines.md) for the install/upgrade policy; the managed block itself is generated into `runtime-adapters/{claude,opencode,vscode}/`).
+- `AGENTS.md` is the canonical instructions file read by the runtimes. In Claude Code, `CLAUDE.md` only contains `@AGENTS.md`.
+- If neither `AGENTS.md` nor `.github/copilot-instructions.md` exists in the client project, create `AGENTS.md` with the APTS-managed section generated from the spec (see [apts-agent-guidelines.md](./apts-agent-guidelines.md) for the install/upgrade policy).
 - If either file already exists, do not replace the full file. Merge or refresh only the APTS-managed section and preserve project-specific rules.
-- Use idempotent markers (`<!-- APTS:START -->` and `<!-- APTS:END -->`) so future APTS upgrades can update guidance without duplicating content.
+- Use idempotent markers (`<!-- APTS:START -->` and `<!-- APTS:END -->`) so future upgrades update guidance without duplicating content.
 - Keep only one APTS-managed section per instruction file.
 
-## Recommended procedure
+## Installation policy
 
-1. Review the [API contract](./references/api-contract.md) to confirm variables, endpoints, and payloads.
-2. Create `.ia/apts/` in the client project and copy [apts_skills.json](./apts_skills.json), [apts-client.js](./apts-client.js), [apts-mcp.js](./apts-mcp.js), [contract-check.js](./contract-check.js), and a `package.json` with `{ "type": "module" }` there.
-3. Register the MCP server in the runtime:
-   - Claude Code: `.mcp.json` entry running `node .ia/apts/apts-mcp.js`.
-   - opencode: `opencode.json` `mcp` entry running the same binary.
-4. Apply the AGENTS setup policy: create `AGENTS.md` when no instruction file exists, or merge/update one APTS-managed section. In Claude Code add `CLAUDE.md` with `@AGENTS.md`.
-5. Configure `APTS_BASE_URL` and `APTS_API_KEY` in a `.env` file at the client project root (or an equivalent secret manager that exposes them as environment variables).
-   - Optional but recommended: set `APTS_PROJECT_URL`, `APTS_AGENT_NAME`, `APTS_AGENT_EMAIL`, `APTS_BRANCH`, `APTS_TASK_ID`, `APTS_CONTEXT_FILE`, and `APTS_ENV_FILE` to reduce repeated payload fields and make env resolution deterministic.
-6. Validate the integration by running `register_task`, then `read_project_context`, `log_agent_progress`, `heartbeat`, and `update_task_status review` via the MCP tools with minimal payloads.
+- Keep APTS integration material local to each repository and avoid user-global skill installation, which increases cross-project configuration leakage and version drift.
+- Treat generated adapter files as managed artifacts: replace them as full files on updates and never merge local wrapper code into them. The only hand-editable surface source is the spec.
+- Do not create parallel wrappers or scripts to cover base-flow operations. If a new backend capability is introduced, add it to `apts_skills.json` first, then regenerate the adapters.
 
-## Identity autofill note
+## Operational notes
 
-When payload fields are omitted, the official client resolves identity from env first, then the local managed execution context file, and then local Git (`project_url/url`, `agent_name`, `agent_email`, `branch`), and resolves `task_id` from `APTS_TASK_ID` or managed context for execution calls. The MCP server runs that same client, so this autofill applies to every MCP tool call.
-
-Protocol overhead rule: do not run manual Git identity discovery as a default step. Start with minimum payloads and only inspect execution context when a call reports missing required fields.
-
-Shell routing rule: the canonical *Shell routing by runtime* guidance lives in the APTS-managed section (`runtime-adapters/spec/apts-surface.json` → `instructions.body`, generated per runtime). In short: in Claude Code use the Bash tool for POSIX scripts and PowerShell for Windows-native operations; in opencode use bash; route long-running validation servers through the runtime's native non-blocking process primitives. Do not duplicate or override the managed section here.
-
-Managed execution context note: official scripts persist execution context at `.apts/execution-context.json` by default (override with `APTS_CONTEXT_FILE`). Inspect or edit that file directly to review or reset the managed identity state.
-
-Task recovery note: during backlog execution, call `register_task` with `backlog_item_id` so APTS can resume interrupted `todo`/`in_progress`/`stalled` tasks instead of creating duplicates.
-
-Task close note: prefer `review` first and promote to `done` only after review policy passes and recent execution activity is present.
-
-## Official surface coverage
-
-- The HTTP client (`apts-client.js`) must export exactly the operations declared in `apts_skills.json`.
-- The MCP server (`apts-mcp.js`) must expose exactly those operations; its tool table is derived from the contract, not hand-maintained.
-- `contract-check.js` fails startup if client ↔ contract ↔ MCP drift.
-- Do not create parallel wrappers or scripts to cover base-flow functions. If a new backend capability is introduced, add it first to `apts_skills.json` and the client, then regenerate adapters.
-
-## Backlog execution policy (mandatory)
-
-- For execution requests such as "next task", "continue backlog", or "run backlog", the entry point must be the APTS backlog orchestrator agent (`/apts-next`).
-- Do not execute direct implementation from the general agent when a backlog run applies.
-- If the orchestrator agent is not available in the client project, stop and ask the operator to install/fix the adapter before continuing.
-
-## Bug reporting policy (mandatory)
-
-- If a user chat asks to fix/report a bug, investigate an error, or resolve a regression/broken behavior, inspect the APTS backlog for an existing matching non-deleted bug item.
-- Before creating a new bug item, prefer `search_similar_bug_reports` with the defect symptom to detect semantic duplicates.
-- If a matching bug item already exists, reuse it instead of creating a duplicate defect entry.
-- If no matching bug item exists, create it with `create_backlog_item` using `item_type: "bug"` only after the user explicitly confirms they want it tracked.
-- Capture symptom, expected behavior, observed behavior, and reproduction evidence in that tracked bug item.
-- When the runtime exposes a stable conversation or thread identifier, store `source_kind: "chat_request"` and persist that identifier in `source_ref`.
-- For "report this solved issue as resolved bug in APTS", update the tracked bug item with `update_backlog_item` and move status to `review` or `done`, including concise resolution and validation evidence.
-- Do not start direct implementation for a newly reported defect until it is represented in the APTS backlog and execution can reference that `backlog_item_id`.
-
-## Expected result
-
-The client project ends up with:
-
-- a single tools contract for APTS,
-- native MCP tools over one ESM HTTP client,
-- runtime-aware process management guidance for server-based validations,
-- and operational instructions so agents report work consistently, including creating or reusing bug backlog items before implementing chat-triggered defect fixes and reporting solved defects with resolution evidence.
+- **Shell routing.** The canonical *Shell routing by runtime* guidance lives in the APTS-managed section (`runtime-adapters/spec/apts-surface.json` → `instructions.body`, generated per runtime). In short: in Claude Code use the Bash tool for POSIX scripts and PowerShell for Windows-native operations; in opencode use bash; route long-running validation servers through the runtime's native non-blocking process primitives. Do not duplicate or override the managed section here.
+- **Minimal payloads.** Do not run manual identity pre-flight commands. Start with minimum payloads; if a call reports a missing identity field, it is a setup issue for the operator, not a value to guess.
+- **Task recovery.** During backlog execution, call `register_task` with `backlog_item_id` so APTS resumes interrupted `todo`/`in_progress`/`stalled` tasks instead of creating duplicates.
+- **Task close.** Prefer `review` first and promote to `done` only after the review policy passes and recent execution activity is present.

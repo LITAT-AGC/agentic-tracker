@@ -23,7 +23,7 @@
 import readline from 'node:readline';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { contractOperations, checkMcpContract } from './contract-check.js';
+import { contractOperations, checkMcpContract } from './contract_check.mjs';
 
 const SERVER_NAME = 'apts-mcp';
 const SERVER_VERSION = '1.0.0';

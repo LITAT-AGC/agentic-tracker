@@ -2,7 +2,6 @@
   "_generated": "GENERADO — no editar; fuente: spec/apts-surface.json",
   "permissions": {
     "allow": [
-      "Bash(node*apts-mcp.js*)",
       "mcp__apts__register_task",
       "mcp__apts__read_project_context",
       "mcp__apts__list_backlog_items",

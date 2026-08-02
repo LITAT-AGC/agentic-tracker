@@ -2,10 +2,14 @@
   "_generated": "GENERADO — no editar; fuente: spec/apts-surface.json",
   "mcpServers": {
     "apts": {
-      "command": "node",
-      "args": [
-        ".ia/apts/apts-mcp.js"
-      ]
+      "type": "http",
+      "url": "${APTS_MCP_URL}",
+      "headers": {
+        "Authorization": "Bearer ${APTS_API_KEY}",
+        "X-APTS-Project-Url": "${APTS_PROJECT_URL}",
+        "X-APTS-Agent-Name": "${APTS_AGENT_NAME}",
+        "X-APTS-Agent-Email": "${APTS_AGENT_EMAIL}"
+      }
     }
   }
 }

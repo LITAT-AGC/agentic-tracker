@@ -3,18 +3,20 @@
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
     "apts": {
-      "type": "local",
-      "command": [
-        "node",
-        ".ia/apts/apts-mcp.js"
-      ],
-      "enabled": true
+      "type": "remote",
+      "url": "{env:APTS_MCP_URL}",
+      "enabled": true,
+      "headers": {
+        "Authorization": "Bearer {env:APTS_API_KEY}",
+        "X-APTS-Project-Url": "{env:APTS_PROJECT_URL}",
+        "X-APTS-Agent-Name": "{env:APTS_AGENT_NAME}",
+        "X-APTS-Agent-Email": "{env:APTS_AGENT_EMAIL}"
+      }
     }
   },
   "permission": {
     "edit": "allow",
     "bash": {
-      "node*apts-mcp.js*": "allow",
       "*": "ask"
     }
   }

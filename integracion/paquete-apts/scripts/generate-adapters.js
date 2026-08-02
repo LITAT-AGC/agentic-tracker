@@ -16,10 +16,19 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { operationNames } from '../contract-check.js';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const adaptersRoot = path.join(scriptDir, '..', 'runtime-adapters');
+
+// apts_skills.json is the source of truth for the CONTRACT: read it directly.
+function operationNames() {
+  const contractPath = path.join(scriptDir, '..', 'apts_skills.json');
+  const parsed = JSON.parse(fs.readFileSync(contractPath, 'utf8'));
+  if (!Array.isArray(parsed.skills) || !parsed.skills.length) {
+    throw new Error('apts_skills.json has no skills[]');
+  }
+  return parsed.skills.map((skill) => skill.name);
+}
 const SPEC_PATH = path.join(adaptersRoot, 'spec', 'apts-surface.json');
 
 const BANNER = 'GENERADO — no editar; fuente: spec/apts-surface.json';
@@ -77,9 +86,16 @@ function agentById(spec, id) {
   return spec.agents.find((a) => a.id === id);
 }
 
-function mcpArgs(spec) {
-  // POSIX-joined path to the MCP binary as runtimes will invoke it.
-  return spec.mcp.argsRelative.map((arg) => `${spec.binDir}/${arg}`);
+// The MCP surface is remote: a URL plus the identity headers. Each runtime has
+// its own way of interpolating an environment variable, so the caller passes the
+// pattern (e.g. '${%s}' for Claude Code, '{env:%s}' for opencode).
+function mcpHeaders(spec, envRef) {
+  const headers = {};
+  for (const h of spec.mcp.headers) {
+    const value = envRef(h.env);
+    headers[h.name] = h.scheme ? `${h.scheme} ${value}` : value;
+  }
+  return headers;
 }
 
 // ---- serialization helpers -------------------------------------------------
@@ -115,7 +131,13 @@ function writeFileTracked(written, absPath, content) {
 function emitClaude(spec, root, written) {
   // MCP registry
   writeFileTracked(written, path.join(root, '.mcp.json'), jsonText({
-    mcpServers: { [spec.mcp.server]: { command: spec.mcp.command, args: mcpArgs(spec) } },
+    mcpServers: {
+      [spec.mcp.server]: {
+        type: spec.mcp.type,
+        url: `\${${spec.mcp.urlEnv}}`,
+        headers: mcpHeaders(spec, (env) => `\${${env}}`),
+      },
+    },
   }));
 
   // Instructions: CLAUDE.md imports the canonical AGENTS.md and carries the managed section.
@@ -170,7 +192,14 @@ function emitOpencode(spec, root, written) {
   bash['*'] = 'ask';
   writeFileTracked(written, path.join(root, 'opencode.json'), jsonText({
     $schema: 'https://opencode.ai/config.json',
-    mcp: { [spec.mcp.server]: { type: 'local', command: [spec.mcp.command, ...mcpArgs(spec)], enabled: true } },
+    mcp: {
+      [spec.mcp.server]: {
+        type: 'remote',
+        url: `{env:${spec.mcp.urlEnv}}`,
+        enabled: true,
+        headers: mcpHeaders(spec, (env) => `{env:${env}}`),
+      },
+    },
     permission: { edit: 'allow', bash },
   }));
 

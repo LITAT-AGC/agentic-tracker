@@ -29,7 +29,7 @@ const {
   STORY_METHOD_STATUSES
 } = require('./scripts/lib/method_resolver');
 const { createInitiative, setAgentRole } = require('./scripts/lib/method_bootstrap');
-// Deuda de F6 que esto cierra: la llamada de embedding estaba implementada dos
+// Deuda de que esto cierra: la llamada de embedding estaba implementada dos
 // veces —aquí y en la librería—, con el mismo `fetch`, las mismas cabeceras y el
 // mismo plazo copiados. Se conserva una sola: la de la librería.
 const { requestEmbedding: requestLibraryEmbedding } = require('./scripts/lib/semantic_embeddings');
@@ -111,9 +111,9 @@ app.use(pinoHttp({
   autoLogging: false
 }));
 
-// Remote MCP surface (F6-1). Kept out of the /api tree on purpose: it is agent
+// Remote MCP surface. Kept out of the /api tree on purpose: it is agent
 // surface, not dashboard API. Its own body parser runs inside the route with a
-// 4 MB cap (decision #6); every other route keeps the express default (100 kb).
+// 4 MB cap; every other route keeps the express default (100 kb).
 const MCP_ROUTE_PATH = '/mcp';
 const MCP_MAX_MESSAGE_SIZE = '4mb';
 
@@ -171,7 +171,7 @@ app.use(session({
 }));
 
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 5 });
-// Single global counter shared by agent surface and dashboard (decision #6):
+// Single global counter shared by agent surface and dashboard:
 // raised from 100 to 600/min because on the remote surface every operation is
 // its own HTTP request, plus initialize + tools/list on connect.
 const apiLimiter = rateLimit({ windowMs: 60 * 1000, max: 600 });
@@ -191,7 +191,7 @@ const authenticateAgent = (req, res, next) => {
 const BACKLOG_ITEM_TYPES = ['feature', 'bug', 'chore', 'research'];
 const BACKLOG_STATUSES = ['draft', 'needs_details', 'ready', 'in_progress', 'review', 'blocked', 'done', 'archived'];
 const TASK_STATUSES = ['todo', 'in_progress', 'review', 'done', 'stalled'];
-// F6-2-T2: mismos valores que declara la migración `20260620000010_bmad_hierarchy.js`
+// mismos valores que declara la migración `20260620000010_bmad_hierarchy.js`
 // para las columnas `initiatives.track` y `initiatives.phase`. Sin comprobarlos en la
 // ruta, un valor inválido llegaba a la base y salía como 500 con el detalle interno.
 const INITIATIVE_TRACKS = ['quick', 'method', 'enterprise'];
@@ -210,7 +210,7 @@ const OPENROUTER_MODELS_URL = 'https://openrouter.ai/api/v1/models';
 const OPENROUTER_CHAT_URL = 'https://openrouter.ai/api/v1/chat/completions';
 // Plazos de espera de las llamadas externas. Sin ellos, un proveedor que no responde
 // deja al que llama esperando sin límite, y en modo lote se multiplica por elemento.
-// El del embedding vive en `scripts/lib/semantic_embeddings.js`, que es desde F6 la
+// El del embedding vive en `scripts/lib/semantic_embeddings.js`, que es desde la
 // única implementación de esa llamada; la variable de entorno sigue siendo
 // `OPENROUTER_EMBEDDING_TIMEOUT_MS`.
 //
@@ -220,7 +220,7 @@ const WEBHOOK_DELIVERY_TIMEOUT_MS = (() => {
   const configured = Number.parseInt(process.env.WEBHOOK_DELIVERY_TIMEOUT_MS || '', 10);
   return Number.isInteger(configured) && configured > 0 ? configured : 5000;
 })();
-// Las dos llamadas del panel. Estaban sin plazo: F6-2-T4 las dejó fuera a propósito
+// Las dos llamadas del panel. Estuvieron sin plazo a propósito
 // porque no se alcanzan desde las 21 operaciones, y quedaron anotadas como deuda.
 // El listado de modelos es una lectura barata; la de chat es una generación de un
 // modelo de lenguaje, que tarda legítimamente mucho más, así que no comparten valor.
@@ -559,7 +559,7 @@ const serializeErrorForLog = (error) => ({
   stack: error?.stack || null
 });
 
-// F6-2: la construcción del cuerpo de error se separa del envío por la respuesta
+// la construcción del cuerpo de error se separa del envío por la respuesta
 // HTTP, porque la superficie MCP remota ejecuta en proceso y necesita el mismo
 // cuerpo exacto (sin `res`) para traducirlo al error que devolvía el cliente.
 const buildApiErrorPayload = (error, {
@@ -764,7 +764,7 @@ const shouldUseStrictBatchMode = (req, isBatch) => {
   return parseBooleanFlag(req.query.strict);
 };
 
-// F6-2: valida los elementos de un lote con el mismo mensaje indexado que usaban
+// valida los elementos de un lote con el mismo mensaje indexado que usaban
 // las rutas. Lo comparten las rutas express y la superficie MCP remota.
 const parseBatchItems = (items, schema) => {
   const parsedItems = [];
@@ -780,7 +780,7 @@ const parseBatchItems = (items, schema) => {
   return parsedItems;
 };
 
-// F6-2: igual que arriba, el cuerpo de la respuesta de lote se construye aparte
+// igual que arriba, el cuerpo de la respuesta de lote se construye aparte
 // del envío para que la superficie remota devuelva exactamente lo mismo.
 const buildBatchOperationResponse = (results, { successStatus = 200 } = {}) => {
   const failed = results.filter((item) => !item.success).length;
@@ -803,7 +803,7 @@ const sendBatchOperationResponse = (res, results, { successStatus = 200 } = {}) 
   return res.status(statusCode).json(payload);
 };
 
-// F6-2-T2: zod 4 ignora `invalid_type_error` —la clave es `error`—, así que hasta
+// zod 4 ignora `invalid_type_error` —la clave es `error`—, así que hasta
 // ahora un campo ausente daba "Invalid input: expected string, received undefined"
 // sin decir cuál. Con `error` como función se distingue "falta el campo" de "el
 // tipo es otro"; el mensaje de un check concreto (.min, .regex) sigue mandando.
@@ -943,7 +943,7 @@ const backlogIdParamSchema = z.object({
 const registerTaskBodySchema = z.object({
   project_url: nonEmptyStringSchema('Project url is required', 'Project url is required', { unwrapQuotes: true }),
   title: nonEmptyStringSchema('Title is required', 'Title must be a string'),
-  // F6-2-T2: obligatorios en el servidor. El cliente ya los exigía; sin él en el
+  // obligatorios en el servidor. El cliente ya los exigía; sin él en el
   // camino remoto, dejarlos opcionales era perder el rastro de quién hizo qué.
   agent_name: nonEmptyStringSchema('Agent name is required', 'Agent name must be a string'),
   agent_email: nonEmptyStringSchema('Agent email is required', 'Agent email must be a string'),
@@ -959,7 +959,7 @@ const registerTaskBodySchema = z.object({
 
 const taskStatusUpdateBodySchema = z.object({
   status: enumFieldSchema(TASK_STATUSES, 'Invalid task status', 'Invalid task status'),
-  // F6-2-T2: los tres pasan a obligatorios; `agent_email` ni siquiera existía en el
+  // los tres pasan a obligatorios; `agent_email` ni siquiera existía en el
   // esquema, así que el servidor lo descartaba en silencio.
   project_url: nonEmptyStringSchema('Project url is required', 'Project url must be a string', { unwrapQuotes: true }),
   agent_name: nonEmptyStringSchema('Agent name is required', 'Agent name must be a string'),
@@ -971,9 +971,9 @@ const taskStatusUpdateBatchBodySchema = taskStatusUpdateBodySchema.extend({
 });
 
 const logAgentProgressBodySchema = z.object({
-  // F6-2-T2: `agent_name` pasa a obligatorio. `branch` NO: la rama cambia durante
+  // `agent_name` pasa a obligatorio. `branch` NO: la rama cambia durante
   // la sesión y el servidor no ve el repositorio del cliente, así que queda
-  // opcional de verdad, como preveía la decisión #1.
+  // opcional de verdad, como preveía la.
   agent_name: nonEmptyStringSchema('Agent name is required', 'Agent name must be a string'),
   branch: optionalStringSchema('Branch must be a string', { unwrapQuotes: true }),
   message: nonEmptyStringSchema('Message is required', 'Message must be a string'),
@@ -988,7 +988,7 @@ const reportBlockerBodySchema = z.object({
   project_url: nonEmptyStringSchema('Project url is required', 'Project url is required', { unwrapQuotes: true }),
   task_id: uuidFieldSchema('Task id must be a valid UUID'),
   error_message: nonEmptyStringSchema('Error message is required', 'Error message must be a string'),
-  // F6-2-T2: obligatorio en el servidor, como ya lo exigía el cliente.
+  // obligatorio en el servidor, como ya lo exigía el cliente.
   agent_name: nonEmptyStringSchema('Agent name is required', 'Agent name must be a string')
 });
 
@@ -1008,7 +1008,7 @@ const backlogIdBodySchema = z.object({
 const semanticBugSearchBodySchema = z.object({
   url: nonEmptyStringSchema('Project url is required', 'Project url is required', { unwrapQuotes: true }),
   query_text: nonEmptyStringSchema('Query text is required', 'Query text must be a string'),
-  // F6-2-T2: antes se aceptaba cualquier entero y la ruta lo recortaba en silencio,
+  // antes se aceptaba cualquier entero y la ruta lo recortaba en silencio,
   // mientras que el cliente lo rechazaba. Ahora rechazan los dos caminos.
   top_k: integerFieldSchema(`top_k must be an integer between 1 and ${MAX_SEMANTIC_SEARCH_TOP_K}`, {
     optional: true,
@@ -1483,8 +1483,8 @@ const buildBugEmbeddingText = (backlogItem) => {
 // Antes esta función era una **segunda implementación** del embedding: su propio
 // `fetch`, sus propias cabeceras, su propio plazo de espera y su propia lectura de
 // la respuesta, todo copiado de `scripts/lib/semantic_embeddings.js`. Dos copias del
-// mismo cálculo divergen en silencio: F6-2-T4 ya tuvo que poner el plazo dos veces,
-// una en cada una. Ahora esto es sólo el envoltorio HTTP de la única implementación.
+// mismo cálculo divergen en silencio: el plazo hubo que ponerlo dos veces,
+// una en cada copia. Ahora esto es sólo el envoltorio HTTP de la única implementación.
 //
 // La estrategia es `bug_dedup` —es la que alcanzan `search_similar_bug_reports` y el
 // embedding de bug de create/update_backlog_item— y su resolución de modelo cae por
@@ -2114,89 +2114,9 @@ const mapTaskStatusToBacklogStatus = (status) => {
 };
 
 const integrationRoot = path.join(__dirname, '..', 'integracion');
-// Schema version of the public integration manifest. Append-only history (do not rewrite past notes):
-// - 3.0.0: reset baseline (MCP-only surface; no prior release-notes history kept).
-// - 3.1.0: additive — publishes the `method_orchestrator_agent` template (BMAD method engine driven
-//   from a client spec via create_initiative/set_agent_role + apts_next conduction). No artifact was
-//   removed or changed shape; only a new optional agent template was added.
-// - 3.2.0: additive — publishes `mcp_endpoint`, the remote MCP surface (Streamable HTTP, stateless),
-//   with the per-runtime registration block as data so a client can register the server without
-//   downloading any file. The four stdio artifacts (mcp_server, js_client, contract_check,
-//   package_manifest) are flagged deprecated but keep being served unchanged, and their
-//   `recommended` flags are untouched: a client on 3.1.0 ignores the new fields and still gets a
-//   working surface. No artifact was removed or changed shape.
-// - 3.3.0: content fix — the `skills_json` contract stated in 16 of its 21 tool descriptions that
-//   identity "auto-resolves from env/local managed context/Git when omitted". That is false for the
-//   remote surface, where identity comes from the registration headers and task_id/branch travel in
-//   the call. Descriptions rewritten in neutral terms ("the integration layer supplies …"); no
-//   operation, schema, or verdict changed. `skills_json.artifact_version` goes 3.0.0 -> 3.3.0 so
-//   already-integrated clients pick the fix up through the existing sync policy (compare by
-//   artifact_version -> overwrite). Manifest shape is unchanged; a client on 3.1.0 or 3.2.0 keeps a
-//   working surface.
-// - 3.4.0: content fix — the method roster was not discoverable through any of the 21 operations, so
-//   the only way to learn the valid `entity_key` values was to call `set_agent_role` with an invented
-//   one and read them off the rejection. `create_initiative` now returns `roster.entity_keys` (both on
-//   creation and on resume) and `apts_next` attaches the same roster when the caller has no pointer
-//   yet — the one blocked state whose exit is registering a role. Two `skills_json` descriptions say
-//   so. Nothing else changed: same 21 operations, same parameters, same verdicts, and the rejection
-//   still enumerates the keys as a last resort. `skills_json.artifact_version` goes 3.3.0 -> 3.4.0 so
-//   already-integrated clients pick it up through the existing sync policy. Response payloads only
-//   grew a field, which JSON consumers ignore: a client on 3.1.0, 3.2.0 or 3.3.0 keeps working.
-// - 4.0.0: BREAKING, and deliberately so — decided by the operator, who does not want backward
-//   compatibility to keep shaping this manifest. Every block that existed to explain how to install
-//   and keep in sync the four downloadable executables is gone: `client_download_guidance`,
-//   `artifact_sync_policy` (with its `updater_contract` and `legacy_cleanup_targets`),
-//   `official_integration_script_policy`, `ai_agent_recommended_usage` and `opencode_ai_guidance`,
-//   plus the first steps and instructions that walked through installing them. An updater built
-//   against 3.x that reads `bootstrap.artifact_sync_policy` will not find it. **The thirteen
-//   artifacts and their download routes are untouched and keep being served**, so the stdio surface
-//   still works for anyone who already has it or fetches it by route; what disappeared is the recipe,
-//   not the files.
-//   Two things were fixed in the same pass, because they were false for the remote surface and no
-//   one had corrected them here: three `instructions[]` entries and all of `identity_requirements`
-//   still claimed the MCP server auto-fills identity from env vars, `.apts/execution-context.json`
-//   or Git. That is the same claim F6-3 removed from the adapters and F6-4 from the contract.
-//   Cost: the manifest goes from 11.034 to 8.790 text units per integration.
-//   Folded into this same 4.0.0 because it was never deployed (the append-only history below 4.0.0
-//   is untouched; no client ever saw a 4.0.0 without these):
-//   (a) `method_conduction` is published as a new top-level field, sibling of `mcp_endpoint`. It
-//   carries the engine half of the BMAD conduction loop that until now only existed as prose inside
-//   the downloadable `method_orchestrator_agent` template: bootstrap + roster, role switching, the
-//   drive loop dispatch, the generative step rule, and the dev-story completion rule (dev-story is
-//   multi-step and does not auto-release; a story left at `review` is never `done`). The client half
-//   —agent wrapper, tool list, worker delegation, resilience log, retry policy, report format— was
-//   deliberately left in the template. This does NOT save tokens: it moves ~1.6k units from the
-//   download to the manifest. What it buys is closing "zero downloads" and making it impossible for
-//   the loop to drift from the engine. `method_orchestrator_agent` is flagged deprecated with
-//   `replacedBy: method_conduction` and keeps being served unchanged.
-//   (b) the four stdio artifacts (`mcp_server`, `js_client`, `contract_check`, `package_manifest`)
-//   leave `artifacts[]`: 1.410 units of metadata describing a path 4.0.0 already broke with. Their
-//   four routes keep answering 200 and are published in short form under the new
-//   `legacy_download_routes`, so they stay discoverable instead of merely alive. `mcp_server`'s
-//   `recommended: true` goes with the entry — it was kept through 3.4.0 so a 3.1.0 client would
-//   still find a working surface, and recommending the dead path contradicts this release.
-//   `adapter_generator` drops `contract_check` from `depends_on_artifact_ids`: the check runs inside
-//   the backend at startup, it was never an input to the generator, and leaving it would point at an
-//   id this manifest no longer publishes.
-//   (c) the prose copies of the conduction loop are cut back to a pointer. Publishing
-//   `method_conduction` in (a) left the loop duplicated in FIVE downloadable places: the
-//   `method_orchestrator_agent` template, the `surface_spec` (which is the source the adapters are
-//   generated from), and the three generated adapters. Two of those are hand-edited, so the loop
-//   could drift from the engine in exactly the way (a) set out to prevent. The four engine sections
-//   (bootstrap, identity switching, drive loop, generative step) and the engine half of the
-//   delegation rule are replaced by a short pointer naming `method_conduction`, its five fields and
-//   the rule that the manifest wins on disagreement. What stays is the client half: the agent
-//   wrapper, the tool list, who to delegate to, the resilience log, the retry policy, the boundaries
-//   and the report format. Prose across the five files: 20.318 -> 13.563 units. `artifact_version`
-//   goes 3.1.0 -> 4.0.0 for `method_orchestrator_agent` and 3.0.0 -> 4.0.0 for `surface_spec`.
-//   Fixed in the same pass, and it predated this work: the template still told agents that "the
-//   official MCP server auto-resolves project_url and agent_name from env / managed context / Git".
-//   That is the same false identity claim F6-3 removed from the adapters, F6-4 from the contract and
-//   4.0.0(a) from the manifest — the `surface_spec` had already been corrected and the template had
-//   not, so the two disagreed. The template now matches the spec word for word.
-//   Net cost of 4.0.0 as shipped: manifest 11.034 -> ~9.400 units, plus 6.755 units off the
-//   downloadable prose.
-const integrationManifestSchemaVersion = '4.0.0';
+// Schema version of the public integration manifest.
+// 1.0.0: first published version. One surface: the remote MCP endpoint.
+const integrationManifestSchemaVersion = '1.0.0';
 const publicIntegrationBasePath = '/api/public/integrar';
 
 const integrationArtifacts = {
@@ -2205,17 +2125,10 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts_skills.json'),
     fileName: 'apts_skills.json',
     contentType: 'application/json; charset=utf-8',
-    // 3.3.0: descripciones reescritas en términos neutros (ya no afirman resolución automática de
-    // identidad). 3.4.0: `create_initiative` y `set_agent_role` dicen de dónde salen las claves de
-    // rol, que antes solo se aprendían leyendo un rechazo. Sube la versión para que la política de
-    // sincronización propague la corrección.
-    artifactVersion: '3.4.0',
-    updatedInSchemaVersion: '3.4.0',
+    artifactVersion: '1.0.0',
     kind: 'skills_contract',
     recommended: true,
     usagePriority: 'discovery',
-    syncAction: 'overwrite',
-    deprecatedFilenames: [],
     description: 'Machine-readable tool contract for APTS integration.'
   },
   skill_markdown: {
@@ -2223,13 +2136,10 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'SKILL.md'),
     fileName: 'SKILL.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '3.0.0',
-    updatedInSchemaVersion: '3.0.0',
+    artifactVersion: '1.0.0',
     kind: 'skill_package',
     recommended: false,
     usagePriority: 'discovery',
-    syncAction: 'overwrite',
-    deprecatedFilenames: [],
     description: 'Copilot skill packaging guide for APTS integration.'
   },
   agent_guidelines: {
@@ -2237,13 +2147,10 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-agent-guidelines.md'),
     fileName: 'apts-agent-guidelines.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '3.0.0',
-    updatedInSchemaVersion: '3.0.0',
+    artifactVersion: '1.0.0',
     kind: 'agent_guidelines',
     recommended: true,
     usagePriority: 'discovery',
-    syncAction: 'overwrite',
-    deprecatedFilenames: [],
     description: 'Base operating rules for any agent that reports work to APTS.'
   },
   intake_bugfix_agent: {
@@ -2251,13 +2158,10 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'plantillas-agentes', 'intake-bugfix-apts.agent.md'),
     fileName: 'intake-bugfix-apts.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '3.0.0',
-    updatedInSchemaVersion: '3.0.0',
+    artifactVersion: '1.0.0',
     kind: 'agent_template',
     recommended: false,
     usagePriority: 'optional_entrypoint',
-    syncAction: 'overwrite',
-    deprecatedFilenames: [],
     description: 'Bugfix intake agent template for read-only triage and tracked bug registration.'
   },
   executor_agent: {
@@ -2265,15 +2169,10 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'plantillas-agentes', 'ejecutor-item-backlog-dev-test-commit.agent.md'),
     fileName: 'ejecutor-item-backlog-dev-test-commit.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '3.0.0',
-    updatedInSchemaVersion: '3.0.0',
+    artifactVersion: '1.0.0',
     kind: 'agent_template',
     recommended: false,
     usagePriority: 'worker',
-    syncAction: 'overwrite',
-    deprecatedFilenames: [
-      'ejecutor-dev-test-commit.agent.md'
-    ],
     description: 'Worker agent template for one backlog item end-to-end.'
   },
   orchestrator_agent: {
@@ -2281,16 +2180,10 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'plantillas-agentes', 'orquestador-backlog-apts.agent.md'),
     fileName: 'orquestador-backlog-apts.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '3.0.0',
-    updatedInSchemaVersion: '3.0.0',
+    artifactVersion: '1.0.0',
     kind: 'agent_template',
     recommended: false,
     usagePriority: 'entrypoint',
-    syncAction: 'overwrite',
-    deprecatedFilenames: [
-      'orquestador.agent.md',
-      'orquestador-agent.md'
-    ],
     description: 'Orchestrator agent template that pulls ready backlog items from APTS.'
   },
   method_orchestrator_agent: {
@@ -2298,130 +2191,22 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'plantillas-agentes', 'apts-method-orchestrator.agent.md'),
     fileName: 'apts-method-orchestrator.agent.md',
     contentType: 'text/markdown; charset=utf-8',
-    // 4.0.0: el bucle de conducción sale de la plantilla y queda un puntero a
-    // `method_conduction`. Rompe para quien leyera aquí las reglas del motor.
-    artifactVersion: '4.0.0',
-    updatedInSchemaVersion: '4.0.0',
+    artifactVersion: '1.0.0',
     kind: 'agent_template',
     recommended: false,
     usagePriority: 'entrypoint',
-    syncAction: 'overwrite',
-    deprecatedFilenames: [],
-    deprecated: true,
-    deprecatedInSchemaVersion: '4.0.0',
-    replacedBy: 'method_conduction',
-    deprecationReason: 'The conduction loop it carried as prose is now published as data in method_conduction, where it cannot drift from the engine that serves it. Still served unchanged for runtimes that want the agent wrapper (frontmatter, tool list, worker delegation, report format), which is the part that was deliberately not moved.',
     description: 'Method orchestrator agent template that bootstraps a BMAD initiative and conducts the analysis→…→done lifecycle from a client spec.'
-  },
-  mcp_server: {
-    route: `${publicIntegrationBasePath}/apts-mcp.js`,
-    filePath: path.join(integrationRoot, 'paquete-apts', 'apts-mcp.js'),
-    fileName: 'apts-mcp.js',
-    contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '3.0.0',
-    updatedInSchemaVersion: '3.0.0',
-    kind: 'reference_mcp_server',
-    // 4.0.0: fuera del listado publicado. La definición se queda porque de aquí
-    // sale la ruta que se sigue sirviendo; lo que desaparece es su entrada en
-    // `artifacts[]`. Con ella se va su `recommended: true`, que hasta 3.4.0 se
-    // dejaba a propósito para que un cliente 3.1.0 conservara superficie:
-    // recomendar el camino obsoleto contradice la ruptura de 4.0.0.
-    listed: false,
-    recommended: true,
-    usagePriority: 'primary',
-    optional: false,
-    syncAction: 'overwrite',
-    deprecatedFilenames: ['apts-cli.js', 'apts-cli.mjs'],
-    dependsOnArtifactIds: ['js_client', 'contract_check'],
-    module_system: 'esm',
-    deprecated: true,
-    deprecatedInSchemaVersion: '3.2.0',
-    replacedBy: 'mcp_endpoint',
-    deprecationReason: 'Superseded by the remote MCP endpoint published in mcp_endpoint, which needs no download. Still served unchanged for clients already on it; recommended is deliberately left as it was so 3.1.0 clients keep a working surface.',
-    selection_rule: 'Only supported integration surface. Zero-dependency stdio JSON-RPC MCP server that exposes one tool per contract operation. Register it in .mcp.json (Claude Code) or opencode.json (opencode), both pointing at this file run with node. If the runtime cannot register an MCP server, resolve the runtime setup with the operator; there is no alternative script surface.',
-    description: 'Official MCP (stdio) server for APTS; the cross-runtime integration surface for Claude Code and opencode.'
-  },
-  js_client: {
-    route: `${publicIntegrationBasePath}/apts-client.js`,
-    filePath: path.join(integrationRoot, 'paquete-apts', 'apts-client.js'),
-    fileName: 'apts-client.js',
-    contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '3.0.0',
-    updatedInSchemaVersion: '3.0.0',
-    kind: 'reference_client',
-    listed: false,
-    recommended: false,
-    usagePriority: 'internal_dependency',
-    optional: true,
-    syncAction: 'overwrite',
-    deprecatedFilenames: ['apts-client.mjs', 'apts-helper.js', 'apts-helper.mjs'],
-    module_system: 'esm',
-    deprecated: true,
-    deprecatedInSchemaVersion: '3.2.0',
-    replacedBy: 'mcp_endpoint',
-    deprecationReason: 'Internal dependency of the deprecated stdio server. The remote endpoint executes in the backend process and no longer goes through this client. Still served unchanged.',
-    selection_rule: 'Single ESM HTTP client (named exports). It is an internal dependency of the MCP server, executed as a Node subprocess rather than imported by the host project. The former CommonJS/ESM twins and the standalone helper were retired in 2.1.0.',
-    description: 'Official ESM-only JavaScript HTTP client for APTS (internal dependency of the MCP server).'
-  },
-  contract_check: {
-    route: `${publicIntegrationBasePath}/contract-check.js`,
-    filePath: path.join(integrationRoot, 'paquete-apts', 'contract-check.js'),
-    fileName: 'contract-check.js',
-    contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '3.0.0',
-    updatedInSchemaVersion: '3.0.0',
-    kind: 'reference_contract_check',
-    listed: false,
-    recommended: false,
-    usagePriority: 'internal_dependency',
-    optional: true,
-    syncAction: 'overwrite',
-    deprecatedFilenames: [],
-    module_system: 'esm',
-    deprecated: true,
-    deprecatedInSchemaVersion: '3.2.0',
-    replacedBy: 'mcp_endpoint',
-    deprecationReason: 'The same check now runs inside the backend at startup, so the remote surface cannot drift from the contract. Still served unchanged for clients that keep the downloadable stdio server.',
-    selection_rule: 'Startup self-check used by the MCP server to verify that the client and the MCP tool list stay aligned with apts_skills.json (19 operations). Install it beside apts-mcp.js.',
-    description: 'Contract self-check that validates client/MCP alignment with apts_skills.json.'
-  },
-  package_manifest: {
-    route: `${publicIntegrationBasePath}/package.json`,
-    filePath: path.join(integrationRoot, 'paquete-apts', 'package.json'),
-    fileName: 'package.json',
-    contentType: 'application/json; charset=utf-8',
-    artifactVersion: '3.0.0',
-    updatedInSchemaVersion: '3.0.0',
-    kind: 'package_manifest',
-    listed: false,
-    recommended: false,
-    usagePriority: 'internal_dependency',
-    optional: true,
-    syncAction: 'overwrite',
-    deprecatedFilenames: [],
-    deprecated: true,
-    deprecatedInSchemaVersion: '3.2.0',
-    replacedBy: 'mcp_endpoint',
-    deprecationReason: 'Only needed to make the downloadable scripts run as ES modules. A remote registration downloads no scripts. Still served unchanged.',
-    selection_rule: 'Marks the workspace-local APTS folder as ESM ({ "type": "module" }) and declares the apts-mcp bin. Install it alongside the scripts so Node treats them as ES modules.',
-    description: 'ESM package manifest ({ type: module }) for the workspace-local APTS scripts.'
   },
   surface_spec: {
     route: `${publicIntegrationBasePath}/runtime-adapters/spec/apts-surface.json`,
     filePath: path.join(integrationRoot, 'paquete-apts', 'runtime-adapters', 'spec', 'apts-surface.json'),
     fileName: 'apts-surface.json',
     contentType: 'application/json; charset=utf-8',
-    // 4.0.0: el cuerpo del agente orquestador pierde el bucle de conducción, que
-    // ahora se lee de `method_conduction`. Los adaptadores generados heredan el
-    // recorte. Rompe para quien esperara las reglas del motor dentro de la spec.
-    artifactVersion: '4.0.0',
-    updatedInSchemaVersion: '4.0.0',
+    artifactVersion: '1.0.0',
     kind: 'runtime_surface_spec',
     recommended: true,
     usagePriority: 'discovery',
     optional: false,
-    syncAction: 'overwrite',
-    deprecatedFilenames: [],
     selection_rule: 'Single source of the agent surface (agents, commands, permissions, unified instructions, hooks). Feed it to generate-adapters.js to materialize the per-runtime adapters locally; never hand-edit the generated adapters.',
     description: 'Single runtime-surface spec; input to the adapter generator.'
   },
@@ -2430,18 +2215,11 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'scripts', 'generate-adapters.js'),
     fileName: 'generate-adapters.js',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '3.0.0',
-    updatedInSchemaVersion: '3.0.0',
+    artifactVersion: '1.0.0',
     kind: 'adapter_generator',
     recommended: true,
     usagePriority: 'primary',
     optional: false,
-    syncAction: 'overwrite',
-    deprecatedFilenames: ['intake-bugfix-apts.agent.md'],
-    // 4.0.0: `contract_check` sale de esta dependencia. El generador lee la spec
-    // y emite adaptadores; la comprobación de contrato corre ya dentro del
-    // backend al arrancar, así que no era una entrada del generador — y dejarla
-    // apuntaría a un id que este manifiesto ya no publica.
     dependsOnArtifactIds: ['surface_spec'],
     module_system: 'esm',
     selection_rule: 'Idempotent generator that reads apts-surface.json and emits runtime-adapters/{claude,opencode,vscode}/. Run it locally to (re)generate adapters; the generated files are managed and must not be hand-edited. It renames the former intake adapter intake-bugfix-apts.agent.md to apts-bugfix-intake.agent.md.',
@@ -2451,16 +2229,16 @@ const integrationArtifacts = {
 
 const buildAbsoluteUrl = (req, route) => `${req.protocol}://${req.get('host')}${route}`;
 
-// --- Registro del MCP remoto (F6-3-T1) -------------------------------------
+// --- Registro del MCP remoto -------------------------------------
 //
 // Se publica como DATO, por programa cliente: un cliente puede registrar el
 // servidor copiando `config` en `config_file`, sin descargar ningún archivo.
 // Las tres cabeceras de identidad son parte del registro, no un extra: sustituyen
-// a la resolución automática que hacía el script local (decisión #1). Sin ellas el
+// a la resolución automática que hacía el script local. Sin ellas el
 // cliente remoto se queda sin identidad y la superficie queda peor que la actual.
 //
 // La URL se deriva del host de la petición, igual que `api_base_url`, porque `/mcp`
-// vive fuera del árbol `/api` y no puede componerse a partir de él (decisión A1 de F6-3).
+// vive fuera del árbol `/api` y no puede componerse a partir de él .
 const MCP_IDENTITY_HEADER_SPEC = [
   { header: 'Authorization', purpose: 'access_key', env: 'APTS_API_KEY', scheme: 'Bearer' },
   { header: 'X-APTS-Project-Url', purpose: 'identity', field: 'project_url', env: 'APTS_PROJECT_URL' },
@@ -2552,13 +2330,13 @@ const buildMcpEndpoint = (req) => {
       { field: 'branch', note: 'Optional. It cannot travel in a header because it changes during the session, and the server never sees the client repository.' }
     ],
     registration_by_runtime: buildMcpRuntimeRegistrations(url),
-    surface_note: 'This endpoint exposes the same contract operations as the downloadable stdio server, which stays available. Registering it needs a URL and headers only: no file download, no local Node process, no artifact version to keep in sync.'
+    surface_note: 'This endpoint is the integration surface: all contract operations arrive through tools/list. Registering it needs a URL and headers only — no file to download, no local process, no artifact version to keep in sync.'
   };
 };
 
 // --- El bucle de conducción del método, como dato ---------------------------
 //
-// Hasta 4.0.0 esto sólo existía como prosa descargable
+// Esto vivía como prosa descargable
 // (`method_orchestrator_agent`, 2.813 unidades). Un cliente sin descargas tenía
 // el transporte y las 21 operaciones, pero no sabía conducir el método.
 //
@@ -2615,27 +2393,6 @@ const METHOD_CONDUCTION = {
   ].join('\n')
 };
 
-// `buildLegacyCleanupTargets` vivía aquí y alimentaba `artifact_sync_policy`, que se
-// retiró en 4.0.0 junto con el resto de la política de instalación local. Los
-// `deprecated_filenames` de cada artefacto se siguen publicando en `artifacts[]`, así
-// que quien todavía haga limpieza local tiene el dato; lo que ya no se publica es la
-// receta para hacerla.
-
-// Los cuatro artefactos del camino por entrada/salida estándar salen de
-// `artifacts[]` en 4.0.0: eran 1.410 unidades de metadatos describiendo con
-// detalle un camino obsoleto. Sus rutas se siguen sirviendo sin cambios, así que
-// aquí quedan publicadas en corto (~150 unidades): sin ellas seguirían vivas
-// pero no serían descubribles, y "siguen sirviéndose" pasaría a ser cierto pero
-// no comprobable desde el manifiesto. Se derivan de las mismas entradas de
-// `integrationArtifacts`, para que no puedan quedar desalineadas.
-const buildLegacyDownloadRoutes = (req) => ({
-  status: 'unsupported; served unchanged',
-  replaced_by: 'mcp_endpoint',
-  note: 'The stdio download path. Delisted from artifacts[] in 4.0.0 and no longer described there; these routes keep answering 200 for clients that already run it.',
-  routes: Object.entries(integrationArtifacts)
-    .filter(([, artifact]) => artifact.listed === false)
-    .map(([id, artifact]) => ({ id, url: buildAbsoluteUrl(req, artifact.route) }))
-});
 
 const normalizeManifestRuntime = (runtime) => {
   if (typeof runtime !== 'string') return null;
@@ -2903,27 +2660,13 @@ const buildIntegrationManifest = (req) => {
       { field: 'branch', resolve_with: 'the call, when the operation accepts it; optional' },
       { field: 'task_id', resolve_with: 'the call; register_task returns it, and calling register_task again with the same backlog_item_id returns it back' }
     ],
-    legacy_download_routes: buildLegacyDownloadRoutes(req),
-    artifacts: Object.entries(integrationArtifacts).filter(([, artifact]) => artifact.listed !== false).map(([id, artifact]) => ({
+    artifacts: Object.entries(integrationArtifacts).map(([id, artifact]) => ({
       runtime_compatible: isArtifactRuntimeCompatible(artifact, activeRuntime),
       id,
       kind: artifact.kind,
       artifact_version: artifact.artifactVersion,
-      updated_in_schema_version: artifact.updatedInSchemaVersion,
-      sync_action: artifact.syncAction,
-      deprecated_filenames: artifact.deprecatedFilenames || [],
-      // Obsoleto no significa retirado: los 4 artefactos del camino por entrada/salida
-      // estándar se siguen sirviendo sin cambios, y su `recommended` se deja como estaba
-      // para que un cliente en 3.1.0 —que no conoce `mcp_endpoint`— conserve una
-      // superficie que funciona (decisión #7, convivencia).
-      deprecated: artifact.deprecated || false,
-      deprecated_in_schema_version: artifact.deprecatedInSchemaVersion || null,
-      deprecation_reason: artifact.deprecationReason || null,
-      replaced_by: artifact.replacedBy || null,
-      still_served: true,
       description: artifact.description,
       recommended: artifact.recommended && isArtifactRuntimeCompatible(artifact, activeRuntime),
-      recommended_unfiltered: artifact.recommended,
       optional: artifact.optional || false,
       usage_priority: artifact.usagePriority || null,
       module_system: artifact.module_system || null,
@@ -2983,10 +2726,6 @@ app.get(`${publicIntegrationBasePath}/agentes/intake-bugfix-apts.agent.md`, asyn
 app.get(`${publicIntegrationBasePath}/agentes/ejecutor-item-backlog-dev-test-commit.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'executor_agent'));
 app.get(`${publicIntegrationBasePath}/agentes/orquestador-backlog-apts.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'orchestrator_agent'));
 app.get(`${publicIntegrationBasePath}/agentes/apts-method-orchestrator.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'method_orchestrator_agent'));
-app.get(`${publicIntegrationBasePath}/apts-mcp.js`, async (req, res) => sendIntegrationArtifact(req, res, 'mcp_server'));
-app.get(`${publicIntegrationBasePath}/apts-client.js`, async (req, res) => sendIntegrationArtifact(req, res, 'js_client'));
-app.get(`${publicIntegrationBasePath}/contract-check.js`, async (req, res) => sendIntegrationArtifact(req, res, 'contract_check'));
-app.get(`${publicIntegrationBasePath}/package.json`, async (req, res) => sendIntegrationArtifact(req, res, 'package_manifest'));
 app.get(`${publicIntegrationBasePath}/runtime-adapters/spec/apts-surface.json`, async (req, res) => sendIntegrationArtifact(req, res, 'surface_spec'));
 app.get(`${publicIntegrationBasePath}/scripts/generate-adapters.js`, async (req, res) => sendIntegrationArtifact(req, res, 'adapter_generator'));
 
@@ -3000,7 +2739,7 @@ const notifyWebhook = async (project_url, payload) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
-        // F6-2-T4: sin plazo, un webhook del cliente que no responde colgaba la
+        // sin plazo, un webhook del cliente que no responde colgaba la
         // escritura que lo dispara (update_task_status y compañía).
         signal: AbortSignal.timeout(WEBHOOK_DELIVERY_TIMEOUT_MS)
       }).catch((err) => {
@@ -3449,13 +3188,13 @@ app.get('/api/health', async (_req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// F6-2-T1: piezas que hasta ahora vivían dentro de la ruta express.
+// piezas que hasta ahora vivían dentro de la ruta express.
 //
 // La superficie MCP remota ejecuta en proceso: no tiene `req.query` ni
 // `req.params`, así que el parseo de parámetros y las tres lecturas que llevaban
 // la consulta incrustada en la ruta se extraen aquí. Las rutas y la superficie
 // remota llaman a las mismas funciones, que es lo que hace que la igualdad de
-// F6-2-T5 sea por construcción y no por casualidad.
+// sea por construcción y no por casualidad.
 // ---------------------------------------------------------------------------
 
 const parseReadProjectContextOptions = (raw = {}) => {
@@ -3674,7 +3413,7 @@ const getTaskInternal = async (taskId, { view, logsLimit }) => {
   };
 };
 
-// F6-2-T5: `create_backlog_item` era la única de las siete operaciones de lote que
+// `create_backlog_item` era la única de las siete operaciones de lote que
 // validaba *dentro* del bucle, o sea después de haber escrito los elementos
 // anteriores: un lote con un elemento malo dejaba escritos los buenos y devolvía un
 // resultado parcial. Se valida por adelantado, como ya hacían las otras seis. Solo
@@ -3694,7 +3433,7 @@ const assertBacklogCreateBatchItems = (items) => {
   }
 };
 
-// F6-2-T2: la validación de create_initiative vive aquí para que la hereden las dos
+// la validación de create_initiative vive aquí para que la hereden las dos
 // superficies. Además de lo que ya comprobaba la ruta (project_url, title y que
 // spec_artifact sea un objeto), ahora se comprueban `track`, `phase` y
 // `spec_artifact.content`, que iban directos al insert o a createHash().
@@ -3755,7 +3494,7 @@ const searchSimilarBugReportsOperation = async (parsedBody) => {
     exclude_backlog_item_id: excludeBacklogItemId
   } = parsedBody;
 
-  // Sin recorte: el esquema ya acota top_k a 1..MAX_SEMANTIC_SEARCH_TOP_K (F6-2-T2).
+  // Sin recorte: el esquema ya acota top_k a 1..MAX_SEMANTIC_SEARCH_TOP_K.
   const topK = requestedTopK ?? DEFAULT_SEMANTIC_SEARCH_TOP_K;
   const threshold = requestedThreshold ?? DEFAULT_SEMANTIC_SEARCH_THRESHOLD;
 
@@ -3791,14 +3530,14 @@ const searchSimilarBugReportsOperation = async (parsedBody) => {
 };
 
 // ---------------------------------------------------------------------------
-// Remote MCP surface: POST /mcp (Streamable HTTP, stateless). F6-1 + F6-2.
+// Remote MCP surface: POST /mcp (Streamable HTTP, stateless).
 //
-// F6-2: la ejecución ya no pasa por apts-client.js ni por el salto HTTP interno.
+// la ejecución ya no pasa por apts-client.js ni por el salto HTTP interno.
 // dispatch() recibe un ejecutor en proceso con las mismas 21 funciones que
 // exportaba el cliente, y cada una llama directamente a la función de negocio.
 // ---------------------------------------------------------------------------
 
-// Identity headers set once in the client's MCP registration block (decision #1).
+// Identity headers set once in the client's MCP registration block.
 // The call always wins over the header; when neither has a field we reject.
 const MCP_IDENTITY_HEADERS = {
   project_url: 'x-apts-project-url',
@@ -3813,8 +3552,8 @@ const MCP_IDENTITY_HEADER_LABELS = {
 
 // Campos de identidad que el cliente autorellenaba por operación. Con la ejecución
 // en proceso el cliente ya no está en el camino, así que la tabla vive aquí y es la
-// que decide qué se exige antes de ejecutar (decisión #1). Mientras el archivo
-// descargable siga publicándose, la prueba interna de contrato (F6-2-T3) comprueba
+// que decide qué se exige antes de ejecutar. Mientras el archivo
+// descargable siga publicándose, la prueba interna de contrato comprueba
 // que esta tabla y la del cliente no se separen.
 const MCP_IDENTITY_FIELDS_BY_OPERATION = {
   register_task: ['project_url', 'agent_name', 'agent_email'],
@@ -3824,8 +3563,8 @@ const MCP_IDENTITY_FIELDS_BY_OPERATION = {
   search_similar_bug_reports: ['url'],
   create_backlog_item: ['project_url'],
   update_task_status: ['task_id', 'project_url', 'agent_name', 'agent_email'],
-  // `branch` sale de la lista en F6-2: sin cliente por medio no hay resolución
-  // automática que cortar, y la decisión #1 la daba por opcional de verdad.
+  // `branch` sale de la lista: sin cliente por medio no hay resolución
+  // automática que cortar, y siempre fue opcional de verdad.
   log_agent_progress: ['task_id', 'project_url', 'agent_name'],
   report_blocker: ['task_id', 'project_url', 'agent_name'],
   heartbeat: ['task_id', 'project_url', 'agent_name'],
@@ -3843,7 +3582,7 @@ let mcpRuntimePromise = null;
 const loadMcpRuntime = () => {
   if (mcpRuntimePromise) return mcpRuntimePromise;
 
-  mcpRuntimePromise = import(pathToFileURL(path.join(integrationRoot, 'paquete-apts', 'apts-mcp.js')).href)
+  mcpRuntimePromise = import(pathToFileURL(path.join(__dirname, 'scripts', 'lib', 'mcp_stdio_runtime.mjs')).href)
     .then((server) => ({ server }))
     .catch((error) => {
       mcpRuntimePromise = null;
@@ -3853,7 +3592,7 @@ const loadMcpRuntime = () => {
   return mcpRuntimePromise;
 };
 
-// --- Ejecutor en proceso (F6-2-T1) ----------------------------------------
+// --- Ejecutor en proceso ----------------------------------------
 //
 // dispatch() llama a `client[clientExport](payload)`. Antes ese objeto era el
 // módulo apts-client.js, que hablaba HTTP contra este mismo servidor. Ahora es el
@@ -3863,7 +3602,7 @@ const loadMcpRuntime = () => {
 // Cada función reproduce **la ruta concreta que el cliente habría llamado** con
 // ese mismo payload: mismo esquema de validación, mismo cuerpo de respuesta y,
 // cuando falla, el mismo error que el cliente habría construido a partir de la
-// respuesta HTTP. Es lo que hace comparable el resultado en F6-2-T5.
+// respuesta HTTP. Es lo que hace comparable el resultado en .
 
 const mcpStatusToErrorCode = (statusCode) => {
   if (statusCode === 400) return 'BAD_REQUEST';
@@ -4119,7 +3858,7 @@ const mcpLocalExecutor = {
 
       const { task_id: rawTaskId, ...rawBody } = payload || {};
       const taskId = parseMcpPathUuid(rawTaskId, taskIdParamSchema);
-      // Diferencia declarada (decisión #4): el servidor valida el resto del cuerpo
+      // Diferencia declarada: el servidor valida el resto del cuerpo
       // y luego lo descarta; heartbeatInternal solo usa el identificador.
       parseMcpBody(rawBody, heartbeatBodySchema);
       return heartbeatInternal(taskId);
@@ -4230,7 +3969,7 @@ const readMcpHeaderIdentity = (req) => {
 
 // Rellena la identidad desde la llamada primero y la cabecera después. Lo que
 // siga faltando se informa para que la ruta rechace: sin project_url una llamada
-// escribiría contra el proyecto equivocado (decisión #1).
+// escribiría contra el proyecto equivocado.
 const injectMcpIdentity = (payload, autoFillFields, headerIdentity) => {
   const fields = autoFillFields || [];
   if (!fields.length) return { payload, missing: [], sources: {} };
@@ -4262,7 +4001,7 @@ const injectMcpIdentity = (payload, autoFillFields, headerIdentity) => {
   for (const field of fields) {
     if (hasMcpIdentityValue(enriched[field])) {
       sources[field] = 'call';
-      // F6-4 — "la llamada gana a la cabecera" (decisión #1) existe para el cambio de rol,
+      // "la llamada gana a la cabecera" existe para el cambio de rol,
       // que va por `agent_name`. Aplicado a la identidad de PROYECTO abre otra puerta: un
       // cliente real (opencode 1.18.10) mandó `project_url` con la ruta del sistema de
       // archivos del cliente y pisó la cabecera correcta. Ahí no se pisa en silencio ni se
@@ -4404,7 +4143,7 @@ app.post('/mcp', apiLimiter, authenticateAgent, mcpJsonParser, async (req, res) 
   const headerIdentity = readMcpHeaderIdentity(req);
 
   // Logged for every message, not just tool calls, so `initialize` shows whether
-  // the client program actually sends the registration headers (F6-1-T4).
+  // the client program actually sends the registration headers.
   logger.info({
     mcp_request: {
       method: message.method,
@@ -4738,7 +4477,7 @@ app.delete('/api/backlog', apiLimiter, authenticateAgent, async (req, res) => {
   }
 });
 
-// F5-1 — create_initiative: operación de bootstrap del método conducible desde el
+// create_initiative: operación de bootstrap del método conducible desde el
 // cliente. Forward fino hacia scripts/lib/method_bootstrap.js. Crea —idempotente
 // por (project_url, status='active')— la iniciativa en 'analysis' + 1 epic vacío
 // plegado + (opcional) la spec del cliente como semantic_documents tipado. Tras el
@@ -4757,7 +4496,7 @@ app.post('/api/projects/initiatives', apiLimiter, authenticateAgent, async (req,
   }
 });
 
-// F5-1-T2 — set_agent_role: registra/actualiza el puntero de un rol del roster en
+// set_agent_role: registra/actualiza el puntero de un rol del roster en
 // project_state para la iniciativa activa. Forward fino hacia method_bootstrap.js.
 // Upsert idempotente sobre unique(initiative_id, agent_name); resuelve
 // entity_key→entity_id contra la librería de la iniciativa y lo persiste no-null
@@ -4793,7 +4532,7 @@ app.post('/api/projects/agent-roles', apiLimiter, authenticateAgent, async (req,
   }
 });
 
-// F1-T4: motor de método (servidor-autoritativo). Forwards finos hacia el
+// motor de método (servidor-autoritativo). Forwards finos hacia el
 // resolver/máquina de estados en scripts/lib/method_resolver.js.
 // apts_next: resuelve la próxima directiva determinista para el agente.
 app.post('/api/projects/next', apiLimiter, authenticateAgent, async (req, res) => {
@@ -4865,7 +4604,7 @@ app.patch('/api/backlog/:id/method-status', apiLimiter, authenticateAgent, async
   }
 });
 
-// F3-T2/T3 — apts_workflow_step: goteo modelo B. Sirve el paso actual reconstruido
+// apts_workflow_step: goteo modelo B. Sirve el paso actual reconstruido
 // desde el estado (rewire en serve-time + needs acotados); `answers` reanuda una
 // elicitación pausada (await_input). Server-autoritativo (lee/inicializa el cursor).
 app.post('/api/projects/workflow-step', apiLimiter, authenticateAgent, async (req, res) => {
@@ -4894,7 +4633,7 @@ app.post('/api/projects/workflow-step', apiLimiter, authenticateAgent, async (re
   }
 });
 
-// F3-T4 — apts_submit_step: captura el output del paso (doc→semantic_documents
+// apts_submit_step: captura el output del paso (doc→semantic_documents
 // tipados / código→referencia / iterable→status de story) y avanza el cursor.
 app.post('/api/projects/submit-step', apiLimiter, authenticateAgent, async (req, res) => {
   const projectUrl = typeof req.body?.project_url === 'string' ? req.body.project_url.trim() : '';
@@ -5666,24 +5405,14 @@ const startBackgroundJobs = () => {
   }, 60 * 1000);
 };
 
-// F6-2-T3: `contract-check` pasa a prueba interna del backend. Se ejecuta en el
-// arranque, antes de escuchar, y aborta si la superficie remota se ha separado del
-// contrato — el mismo criterio estricto que ya aplica `apts-mcp.js` al arrancar
-// (`checkMcpContract`, código de salida 3). El archivo descargable se sigue
-// publicando mientras dure la convivencia (decisión #7).
+// Auto-chequeo de contrato. Se ejecuta en el arranque, antes de escuchar, y aborta
+// si la superficie remota se ha separado de `apts_skills.json`.
 //
-// Comprueba tres cosas que ningún otro sitio comprueba:
+// Comprueba dos cosas que ningún otro sitio comprueba:
 //   1. el ejecutor en proceso expone exactamente una función por operación;
-//   2. la tabla de identidad no nombra operaciones que no existen;
-//   3. esa tabla no se ha separado de la del cliente descargable, salvo en la
-//      diferencia declarada (`branch` fuera de `log_agent_progress`, decisión #1).
-const DECLARED_IDENTITY_DIFFERENCES = {
-  log_agent_progress: ['branch']
-};
-
+//   2. la tabla de identidad no nombra operaciones que no existen.
 const checkRemoteMcpContract = async () => {
-  const packageDir = path.join(integrationRoot, 'paquete-apts');
-  const { contractOperations } = await import(pathToFileURL(path.join(packageDir, 'contract-check.js')).href);
+  const { contractOperations } = await import(pathToFileURL(path.join(__dirname, 'scripts', 'lib', 'contract_check.mjs')).href);
   const operations = contractOperations();
   const operationNames = new Set(operations.map((operation) => operation.name));
   const problems = [];
@@ -5709,29 +5438,6 @@ const checkRemoteMcpContract = async () => {
       surface: 'mcp_identity_table',
       unexpected: unknownIdentityOperations
     });
-  }
-
-  // La comparación con el cliente es tolerante a que el archivo desaparezca: está
-  // marcado para retirarse, y su ausencia no debe tumbar el backend.
-  try {
-    const clientModule = await import(pathToFileURL(path.join(packageDir, 'apts-client.js')).href);
-    const clientTable = clientModule.AUTO_FILL_FIELDS_BY_OPERATION || {};
-    const drifted = [];
-
-    for (const name of new Set([...Object.keys(clientTable), ...Object.keys(MCP_IDENTITY_FIELDS_BY_OPERATION)])) {
-      const declared = DECLARED_IDENTITY_DIFFERENCES[name] || [];
-      const fromClient = (clientTable[name] || []).filter((field) => !declared.includes(field)).sort();
-      const fromServer = (MCP_IDENTITY_FIELDS_BY_OPERATION[name] || []).sort();
-      if (JSON.stringify(fromClient) !== JSON.stringify(fromServer)) {
-        drifted.push({ operation: name, client: fromClient, server: fromServer });
-      }
-    }
-
-    if (drifted.length) {
-      problems.push({ surface: 'mcp_identity_table_vs_client', drifted });
-    }
-  } catch (error) {
-    logger.warn({ err: error }, 'Contract self-check skipped the downloadable client comparison');
   }
 
   if (problems.length) {
