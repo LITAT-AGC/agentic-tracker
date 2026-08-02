@@ -26,9 +26,11 @@ cinco reglas: `bootstrap_rule`, `identity_switching_rule`, `drive_loop`, `genera
 `exit 3` si algo se ha separado:
 
 - el contrato, contra `apts_skills.json` (`backend/scripts/lib/contract_check.mjs`);
-- los cuerpos de los cuatro artefactos `agent_template`, contra `apts-surface.json`
-  (`checkPublishedAgentTemplates` en `backend/index.js`). Compara solo el cuerpo; la cabecera YAML de
-  cada plantilla sigue a mano.
+- los cuatro artefactos `agent_template`, cuerpo **y** cabecera, contra `apts-surface.json`
+  (`checkPublishedAgentTemplates` en `backend/index.js`). Los siete campos de la cabecera salen del
+  spec —la misma derivacion que hace el generador de adaptadores—, asi que no queda ninguno fuera del
+  contrato. Se compara campo a campo ya normalizado, no el texto crudo, porque la diferencia de
+  comillas entre el generador y estas plantillas no es una divergencia.
 
 El algebra del embedding —`cosineSimilarity`, `parseEmbeddingVector`, `vectorNorm`,
 `buildBugEmbeddingText`— existe una sola vez, en `backend/scripts/lib/semantic_embeddings.js`, y la
@@ -86,8 +88,11 @@ Contra `APTS_test` (puerto 47301), con el estado de partida `initiatives:2`, `ep
 - Las 9 rutas de artefacto responden 200.
 - `scripts/test_agent_api.js` y `scripts/test_agent_api_batch.js`, en verde.
 - El generador de adaptadores es idempotente: una segunda corrida no cambia nada.
-- El cerrojo de plantillas: arranque limpio con `agent_templates: 4`; alterando una plantilla a
-  proposito, `exit 3` nombrando el artefacto y el motivo.
+- El cerrojo de plantillas, en sus dos mitades: arranque limpio con `agent_templates: 4`; alterando
+  el cuerpo, `exit 3` nombrando el artefacto y el motivo; y en la cabecera, las tres clases de
+  divergencia —campo que falta, valor que difiere y campo que el spec no declara— dan `exit 3`
+  nombrando artefacto, agente, campo y el valor que el spec exige. Se reportan todas juntas, no solo
+  la primera.
 - **El bucle publicado no necesita `primitives_palette`.** Con la tabla vaciada —la condicion exacta
   de produccion— un cliente que no descarga nada vuelve a llegar a `phase=done` con los mismos seis
   numeros que con la tabla poblada: 52 submits, 7 workflows generativos, 2 unidades `dev-story` de 10
@@ -148,6 +153,11 @@ Nada. Los dos puntos que quedaban se cerraron, y lo que aparecio al cerrarlos es
    UUID sobreviven (ver **Destinos** y **Verificado**). La guardia sigue, acotada a lo que de verdad
    desaparece del corpus, que es el unico caso en que un puntero se pierde.
 
-Queda una asimetria conocida, sin consecuencia hoy: el cerrojo de plantillas compara solo el cuerpo
-del artefacto contra `apts-surface.json`; la cabecera YAML de cada plantilla sigue a mano.
+La asimetria que quedaba anotada aqui —el cerrojo miraba solo el cuerpo— ya no existe: se cerro, y al
+cerrarla resulto que no era teorica. Dos de las cuatro plantillas publicadas habian perdido el
+`argument-hint` que el spec declara, una de ellas invocable por el usuario. Corregidas y vigiladas.
+
+Las cuatro plantillas publicadas siguen manteniendose a mano; lo que cambia es que ahora el arranque
+no deja que se separen del spec. Hacerlas salir del generador —que hoy solo escribe dentro de
+`runtime-adapters/`— sigue siendo posible y no esta hecho.
 

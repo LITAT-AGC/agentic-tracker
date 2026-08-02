@@ -5441,12 +5441,68 @@ const checkRemoteMcpContract = async () => {
 // describía el MCP remoto. Un cliente recibía las dos versiones del manifiesto y
 // se contradecían.
 //
-// Aquí sólo se compara el CUERPO, que es donde vive la instrucción operativa. La
-// cabecera YAML de cada plantilla se mantiene a mano; lo que este chequeo
-// garantiza es que nadie vuelva a publicar instrucciones que el spec desmiente.
+// Se comparan el CUERPO y la CABECERA. Al principio sólo el cuerpo, y la mitad
+// sin vigilar se desvió igual que se había desviado la vigilada: dos de las
+// cuatro plantillas publicadas perdieron el `argument-hint` que el spec declara,
+// y una de ellas es invocable por el usuario, así que quien copiaba la plantilla
+// se quedaba sin la pista de argumentos que el manifiesto promete.
+//
+// Los siete campos de la cabecera salen del spec —es lo mismo que hace el
+// generador de adaptadores para VS Code—, así que no hay ninguno que quede fuera
+// del contrato y no hace falta lista de excepciones. Se compara campo a campo y
+// ya normalizado, no el texto crudo: el generador cita los valores y estas
+// plantillas no siempre, y esa diferencia de comillas no es una divergencia.
+const AGENT_FRONTMATTER_FIELDS = [
+  'name', 'description', 'tools', 'agents', 'argument-hint',
+  'user-invocable', 'disable-model-invocation'
+];
+
+// Parser mínimo de la cabecera: `clave: valor` por línea, con tres formas de
+// valor —lista entre corchetes, booleano y cadena, con o sin comillas—. Es todo
+// lo que el generador emite; cualquier otra cosa se queda como texto y fallará
+// la comparación, que es lo que se quiere.
+const parseAgentFrontmatter = (text) => {
+  const fields = {};
+  for (const line of text.split('\n')) {
+    const separator = line.indexOf(':');
+    if (separator < 0) continue;
+    const key = line.slice(0, separator).trim();
+    const raw = line.slice(separator + 1).trim();
+    if (/^\[.*\]$/.test(raw)) {
+      fields[key] = raw.slice(1, -1).split(',')
+        .map((item) => item.trim().replace(/^['"](.*)['"]$/s, '$1'))
+        .filter((item) => item.length);
+    } else if (raw === 'true' || raw === 'false') {
+      fields[key] = raw === 'true';
+    } else {
+      fields[key] = raw.replace(/^["'](.*)["']$/s, '$1');
+    }
+  }
+  return fields;
+};
+
+// La cabecera que el spec exige para un agente. Misma derivación que
+// `generate-adapters.js` hace para VS Code, y por el mismo motivo: el spec es
+// quien manda.
+const expectedAgentFrontmatter = (agent, agentsById) => {
+  const expected = {
+    name: agent.name,
+    description: agent.description,
+    tools: agent.tools
+  };
+  if (agent.subagents && agent.subagents.length) {
+    expected.agents = agent.subagents.map((id) => (agentsById.get(id) || {}).name);
+  }
+  if (agent.argumentHint) expected['argument-hint'] = agent.argumentHint;
+  expected['user-invocable'] = agent.userInvocable !== false;
+  if (agent.userInvocable === false) expected['disable-model-invocation'] = false;
+  return expected;
+};
+
 const checkPublishedAgentTemplates = async () => {
   const surfaceSpec = JSON.parse(await fs.readFile(integrationArtifacts.surface_spec.filePath, 'utf8'));
   const agentByName = new Map(surfaceSpec.agents.map((agent) => [agent.name, agent]));
+  const agentsById = new Map(surfaceSpec.agents.map((agent) => [agent.id, agent]));
   const normalize = (text) => String(text).replace(/\r/g, '').trim();
   const problems = [];
   let checked = 0;
@@ -5461,7 +5517,8 @@ const checkPublishedAgentTemplates = async () => {
       continue;
     }
 
-    const name = (parts[1].match(/^name: (.*)$/m) || [])[1];
+    const frontmatter = parseAgentFrontmatter(parts[1].replace(/^---\n|\n---\n$/g, ''));
+    const name = frontmatter.name;
     const agent = name ? agentByName.get(name) : null;
     if (!agent) {
       problems.push({ artifact: artifactId, reason: `frontmatter name "${name}" is not an agent in apts-surface.json` });
@@ -5475,6 +5532,38 @@ const checkPublishedAgentTemplates = async () => {
         reason: 'body differs from apts-surface.json',
         template_length: normalize(parts[2]).length,
         spec_length: normalize(agent.body).length
+      });
+      continue;
+    }
+
+    // Cabecera: campo a campo contra lo que el spec declara. Un campo de más
+    // pesa igual que uno de menos —la cabecera entera sale del spec—, así que
+    // los dos se reportan.
+    const expected = expectedAgentFrontmatter(agent, agentsById);
+    const fieldProblems = [];
+    for (const field of AGENT_FRONTMATTER_FIELDS) {
+      const inTemplate = Object.prototype.hasOwnProperty.call(frontmatter, field);
+      const inSpec = Object.prototype.hasOwnProperty.call(expected, field);
+      if (!inTemplate && !inSpec) continue;
+      if (!inTemplate) {
+        fieldProblems.push({ field, reason: 'missing in template', spec: expected[field] });
+      } else if (!inSpec) {
+        fieldProblems.push({ field, reason: 'not declared in apts-surface.json', template: frontmatter[field] });
+      } else if (JSON.stringify(frontmatter[field]) !== JSON.stringify(expected[field])) {
+        fieldProblems.push({ field, reason: 'differs', template: frontmatter[field], spec: expected[field] });
+      }
+    }
+    const unknownFields = Object.keys(frontmatter).filter((field) => !AGENT_FRONTMATTER_FIELDS.includes(field));
+    for (const field of unknownFields) {
+      fieldProblems.push({ field, reason: 'unknown frontmatter field', template: frontmatter[field] });
+    }
+
+    if (fieldProblems.length) {
+      problems.push({
+        artifact: artifactId,
+        agent: name,
+        reason: 'frontmatter differs from apts-surface.json',
+        fields: fieldProblems
       });
       continue;
     }
