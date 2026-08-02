@@ -1032,6 +1032,15 @@ const semanticBugSearchBodySchema = z.object({
     min: 1,
     max: MAX_SEMANTIC_SEARCH_TOP_K
   }),
+  // `limit` es el nombre que se le ocurre a cualquiera para pedir un tope, y aquí
+  // no existe: el esquema no es estricto, así que se aceptaba, se descartaba sin
+  // decir nada y el cliente se quedaba con `DEFAULT_SEMANTIC_SEARCH_TOP_K` (5)
+  // creyendo que había pedido otra cosa. Ahora se rechaza nombrando el campo
+  // bueno. Es el mismo criterio que el comentario de arriba: mejor un 400 que
+  // hacer algo distinto de lo que pidieron.
+  limit: z.never({
+    error: `limit is not a field of this operation: use top_k (integer between 1 and ${MAX_SEMANTIC_SEARCH_TOP_K})`
+  }).optional(),
   threshold: numberFieldSchema('threshold must be a number between 0 and 1', { optional: true, min: 0, max: 1 }),
   include_closed: z.preprocess(
     (value) => {

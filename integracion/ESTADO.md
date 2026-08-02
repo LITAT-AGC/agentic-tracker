@@ -35,6 +35,16 @@ El algebra del embedding —`cosineSimilarity`, `parseEmbeddingVector`, `vectorN
 llamada a OpenRouter tambien. Ni `backend/index.js` ni `reembed_bug_embeddings.js` tienen copia
 propia.
 
+**Sin residuos ejecutables de la superficie retirada.** Ningun archivo del backend importa ya
+`apts-client.js`. `mcp_stdio_runtime.mjs` conserva el nombre por el protocolo que habla, no por un
+transporte: es el nucleo MCP, `dispatch()` devuelve la respuesta y no escribe en ningun sitio, y
+quien llama le pasa el ejecutor. `contract_check.mjs` ejecutado directamente vuelve a funcionar y
+lista las 21 operaciones.
+
+**Un campo que no existe se rechaza, no se ignora.** `limit` era el nombre que cualquiera le pone al
+tope de la busqueda semantica de bugs; el campo es `top_k`. Como el esquema no es estricto, `limit`
+se aceptaba y se descartaba en silencio. Ahora da 400 nombrando el campo bueno, por los dos caminos.
+
 ## Destinos
 
 Dos, no tres, y ninguno lleva el nombre de un servidor:
@@ -76,6 +86,10 @@ Contra `APTS_test` (puerto 47301), con el estado de partida `initiatives:2`, `ep
   fuera y el resto comparandose.
 - El plazo de espera del embedding existe en el unico camino que queda: con
   `OPENROUTER_EMBEDDING_TIMEOUT_MS=1`, `timed out after 1 ms` y el elemento marcado como fallido.
+- `limit` se rechaza por HTTP (400) y por MCP (`isError` con el mismo mensaje); con `top_k` la
+  busqueda responde igual que antes.
+- Cada destino exige su propia cadena de conexion y ninguna hereda de la otra; sin
+  `PG_TEST_CONNECTION_STRING`, `test` falla nombrando la variable en vez de resolver a la principal.
 
 ## Produccion
 
@@ -108,19 +122,10 @@ asi que el modelo de embedding resuelve al de por defecto por los dos caminos.
    `null` y las primitivas se resuelven del registro en codigo, asi que **probablemente** no haga
    falta para el bucle publicado; no esta comprobado.
 
-2. **`contract_check.mjs` todavia nombra al cliente borrado.** `CLIENT_UTILITY_EXPORTS`,
-   `checkClientContract()` y el bloque de ejecucion directa importan `./apts-client.js`, que ya no
-   existe: `node scripts/lib/contract_check.mjs` falla con `Cannot find module`. El arranque no lo
-   usa —solo llama a `contractOperations()`—, asi que es codigo muerto que menciona una superficie
-   retirada, no un fallo en servicio.
-
-3. **Volver a sembrar el metodo sigue exigiendo criterio.** La guardia de `bmad_seed` avisa y se
+2. **Volver a sembrar el metodo sigue exigiendo criterio.** La guardia de `bmad_seed` avisa y se
    planta, pero el seed sigue siendo borrar-por-`source_ref`-y-reinsertar: los UUID cambian y
    `project_state` pierde donde estaba cada agente (`entity_id`, `current_workflow_id`,
    `current_step_id` son `ON DELETE SET NULL`, y `step_status` no se toca). Hoy es inocuo porque
    produccion tiene `project_state` a 0. La solucion de fondo es un upsert contra la clave natural
    para que los UUID sobrevivan.
 
-4. **`limit` se acepta y se ignora en la busqueda semantica de bugs.** El campo del esquema es
-   `top_k`; `semanticBugSearchBodySchema` no es estricto, asi que un cliente que mande `limit` no
-   recibe error y se queda con el tope por defecto de 5 creyendo que pidio otra cosa.

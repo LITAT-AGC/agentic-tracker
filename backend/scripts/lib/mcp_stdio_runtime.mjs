@@ -1,28 +1,22 @@
-#!/usr/bin/env node
+// Núcleo MCP del backend: una herramienta por operación del contrato, con el
+// `inputSchema` tomado tal cual de `apts_skills.json`.
+//
+// No es un transporte. `dispatch()` **devuelve** el objeto de respuesta JSON-RPC
+// (o `null` para las notificaciones) y no escribe en ningún sitio; quien llama
+// decide qué hacer con él. Hoy sólo hay un llamante: el endpoint MCP remoto de
+// `backend/index.js`, que además le pasa el ejecutor en proceso —`dispatch` no
+// resuelve por sí mismo dónde ejecutar—.
+//
+// El archivo se llamó `apts-mcp.js` y fue el servidor por entrada/salida
+// estándar. De aquello quedaba un `main()` con su bucle de `readline` que
+// importaba `apts-client.js`: se ejecutaba sólo al invocar el archivo
+// directamente, y como ese cliente se retiró con la superficie, llevaba tiempo
+// fallando con `Cannot find module`. Se ha ido. El nombre del archivo conserva
+// `stdio` por el protocolo que habla, no por un transporte que ya no existe.
+//
+// Al importarlo se comprueba el contrato: si la lista de herramientas derivada se
+// separa de `apts_skills.json`, aborta antes de que nadie se conecte.
 
-// APTS MCP server (stdio, zero-deps).
-//
-// Primary cross-runtime surface: exposes one MCP tool per contract operation,
-// with inputSchema taken straight from apts_skills.json and execution handled by
-// apts-client.js (so identity autofill from env -> .apts/execution-context.json ->
-// Git is reused as-is). Implements the minimum JSON-RPC 2.0 / MCP stdio protocol
-// by hand to avoid a runtime dependency: the package ships as downloadable files
-// run with `node`, with no install step. (Decision WS2-T1, see TRACKING.)
-//
-// Transport: newline-delimited JSON-RPC over stdin/stdout. Logs go to stderr so
-// stdout stays a clean message stream. Startup runs checkMcpContract() in strict
-// mode, so a drift between the contract and the exposed tool list aborts with a
-// non-zero exit code before any client connects.
-//
-// Transport-agnostic core (F6-1): dispatch() *returns* the JSON-RPC response
-// object (or null for notifications) instead of writing it anywhere. The stdio
-// loop below serializes what it returns; the remote HTTP surface reuses the same
-// dispatch(). The stdio entrypoint only runs when this file is executed directly,
-// so importing the module (from the backend) does not read stdin.
-
-import readline from 'node:readline';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { contractOperations, checkMcpContract } from './contract_check.mjs';
 
 const SERVER_NAME = 'apts-mcp';
@@ -51,14 +45,6 @@ const TOOL_BY_NAME = new Map(TOOLS.map((tool) => [tool.name, tool]));
 
 // Fail fast (exit 3) if the derived tool list drifts from the contract.
 checkMcpContract(TOOLS.map((tool) => tool.name));
-
-function log(message) {
-  process.stderr.write(`[${SERVER_NAME}] ${message}\n`);
-}
-
-function send(message) {
-  process.stdout.write(`${JSON.stringify(message)}\n`);
-}
 
 function buildResult(id, result) {
   return { jsonrpc: '2.0', id, result };
@@ -123,7 +109,9 @@ async function handleToolsCall(message, client) {
   const payload = args === undefined || args === null ? {} : args;
 
   try {
-    // The client autofills identity and validates against the contract internally.
+    // `client` es el ejecutor que pasa quien llama, no un cliente que salga a la
+    // red: hoy es el ejecutor en proceso de `backend/index.js`, que valida el
+    // payload con el mismo esquema que la ruta HTTP equivalente.
     const data = await client[tool.clientExport](payload);
     return buildResult(message.id, {
       content: [{ type: 'text', text: JSON.stringify(data) }],
@@ -159,62 +147,6 @@ async function dispatch(message, client) {
       if (!isRequest) return null;
       return buildError(id, -32601, `Method not found: ${method}`);
   }
-}
-
-async function main() {
-  const client = await import('./apts-client.js');
-  log(`ready: ${TOOLS.length} tools (stdio, protocol ${PROTOCOL_VERSION})`);
-
-  const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
-
-  // Serialize handling so responses are emitted in request order.
-  let queue = Promise.resolve();
-
-  rl.on('line', (line) => {
-    const text = line.trim();
-    if (!text) return;
-
-    let message;
-    try {
-      message = JSON.parse(text);
-    } catch {
-      send(buildError(null, -32700, 'Parse error: invalid JSON'));
-      return;
-    }
-
-    if (!message || typeof message !== 'object' || message.jsonrpc !== '2.0' || typeof message.method !== 'string') {
-      send(buildError(message?.id ?? null, -32600, 'Invalid Request'));
-      return;
-    }
-
-    queue = queue
-      .then(async () => {
-        const response = await dispatch(message, client);
-        if (response) send(response);
-      })
-      .catch((error) => {
-        log(`unhandled dispatch error: ${error?.message || error}`);
-        if (message.id !== undefined && message.id !== null) {
-          send(buildError(message.id, -32603, 'Internal error', { message: error?.message || String(error) }));
-        }
-      });
-  });
-
-  rl.on('close', () => {
-    queue.finally(() => process.exit(0));
-  });
-}
-
-// Only run the stdio loop when executed directly. Imported (remote HTTP surface),
-// the module exposes dispatch()/listTools() without touching stdin or stdout.
-const isDirectRun = process.argv[1]
-  && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-
-if (isDirectRun) {
-  main().catch((error) => {
-    log(`fatal: ${error?.message || error}`);
-    process.exit(error?.exitCode || 1);
-  });
 }
 
 export {
