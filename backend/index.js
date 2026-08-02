@@ -2169,6 +2169,16 @@ const integrationRoot = path.join(__dirname, '..', 'integracion');
 //   download to the manifest. What it buys is closing "zero downloads" and making it impossible for
 //   the loop to drift from the engine. `method_orchestrator_agent` is flagged deprecated with
 //   `replacedBy: method_conduction` and keeps being served unchanged.
+//   (b) the four stdio artifacts (`mcp_server`, `js_client`, `contract_check`, `package_manifest`)
+//   leave `artifacts[]`: 1.410 units of metadata describing a path 4.0.0 already broke with. Their
+//   four routes keep answering 200 and are published in short form under the new
+//   `legacy_download_routes`, so they stay discoverable instead of merely alive. `mcp_server`'s
+//   `recommended: true` goes with the entry — it was kept through 3.4.0 so a 3.1.0 client would
+//   still find a working surface, and recommending the dead path contradicts this release.
+//   `adapter_generator` drops `contract_check` from `depends_on_artifact_ids`: the check runs inside
+//   the backend at startup, it was never an input to the generator, and leaving it would point at an
+//   id this manifest no longer publishes.
+//   Net cost of 4.0.0 as shipped: 11.034 -> ~9.100 text units per integration.
 const integrationManifestSchemaVersion = '4.0.0';
 const publicIntegrationBasePath = '/api/public/integrar';
 
@@ -2292,6 +2302,12 @@ const integrationArtifacts = {
     artifactVersion: '3.0.0',
     updatedInSchemaVersion: '3.0.0',
     kind: 'reference_mcp_server',
+    // 4.0.0: fuera del listado publicado. La definición se queda porque de aquí
+    // sale la ruta que se sigue sirviendo; lo que desaparece es su entrada en
+    // `artifacts[]`. Con ella se va su `recommended: true`, que hasta 3.4.0 se
+    // dejaba a propósito para que un cliente 3.1.0 conservara superficie:
+    // recomendar el camino obsoleto contradice la ruptura de 4.0.0.
+    listed: false,
     recommended: true,
     usagePriority: 'primary',
     optional: false,
@@ -2314,6 +2330,7 @@ const integrationArtifacts = {
     artifactVersion: '3.0.0',
     updatedInSchemaVersion: '3.0.0',
     kind: 'reference_client',
+    listed: false,
     recommended: false,
     usagePriority: 'internal_dependency',
     optional: true,
@@ -2335,6 +2352,7 @@ const integrationArtifacts = {
     artifactVersion: '3.0.0',
     updatedInSchemaVersion: '3.0.0',
     kind: 'reference_contract_check',
+    listed: false,
     recommended: false,
     usagePriority: 'internal_dependency',
     optional: true,
@@ -2356,6 +2374,7 @@ const integrationArtifacts = {
     artifactVersion: '3.0.0',
     updatedInSchemaVersion: '3.0.0',
     kind: 'package_manifest',
+    listed: false,
     recommended: false,
     usagePriority: 'internal_dependency',
     optional: true,
@@ -2397,7 +2416,11 @@ const integrationArtifacts = {
     optional: false,
     syncAction: 'overwrite',
     deprecatedFilenames: ['intake-bugfix-apts.agent.md'],
-    dependsOnArtifactIds: ['surface_spec', 'contract_check'],
+    // 4.0.0: `contract_check` sale de esta dependencia. El generador lee la spec
+    // y emite adaptadores; la comprobación de contrato corre ya dentro del
+    // backend al arrancar, así que no era una entrada del generador — y dejarla
+    // apuntaría a un id que este manifiesto ya no publica.
+    dependsOnArtifactIds: ['surface_spec'],
     module_system: 'esm',
     selection_rule: 'Idempotent generator that reads apts-surface.json and emits runtime-adapters/{claude,opencode,vscode}/. Run it locally to (re)generate adapters; the generated files are managed and must not be hand-edited. It renames the former intake adapter intake-bugfix-apts.agent.md to apts-bugfix-intake.agent.md.',
     description: 'Idempotent generator that emits the per-runtime adapters from the surface spec.'
@@ -2574,6 +2597,22 @@ const METHOD_CONDUCTION = {
 // `deprecated_filenames` de cada artefacto se siguen publicando en `artifacts[]`, así
 // que quien todavía haga limpieza local tiene el dato; lo que ya no se publica es la
 // receta para hacerla.
+
+// Los cuatro artefactos del camino por entrada/salida estándar salen de
+// `artifacts[]` en 4.0.0: eran 1.410 unidades de metadatos describiendo con
+// detalle un camino obsoleto. Sus rutas se siguen sirviendo sin cambios, así que
+// aquí quedan publicadas en corto (~150 unidades): sin ellas seguirían vivas
+// pero no serían descubribles, y "siguen sirviéndose" pasaría a ser cierto pero
+// no comprobable desde el manifiesto. Se derivan de las mismas entradas de
+// `integrationArtifacts`, para que no puedan quedar desalineadas.
+const buildLegacyDownloadRoutes = (req) => ({
+  status: 'unsupported; served unchanged',
+  replaced_by: 'mcp_endpoint',
+  note: 'The stdio download path. Delisted from artifacts[] in 4.0.0 and no longer described there; these routes keep answering 200 for clients that already run it.',
+  routes: Object.entries(integrationArtifacts)
+    .filter(([, artifact]) => artifact.listed === false)
+    .map(([id, artifact]) => ({ id, url: buildAbsoluteUrl(req, artifact.route) }))
+});
 
 const normalizeManifestRuntime = (runtime) => {
   if (typeof runtime !== 'string') return null;
@@ -2841,7 +2880,8 @@ const buildIntegrationManifest = (req) => {
       { field: 'branch', resolve_with: 'the call, when the operation accepts it; optional' },
       { field: 'task_id', resolve_with: 'the call; register_task returns it, and calling register_task again with the same backlog_item_id returns it back' }
     ],
-    artifacts: Object.entries(integrationArtifacts).map(([id, artifact]) => ({
+    legacy_download_routes: buildLegacyDownloadRoutes(req),
+    artifacts: Object.entries(integrationArtifacts).filter(([, artifact]) => artifact.listed !== false).map(([id, artifact]) => ({
       runtime_compatible: isArtifactRuntimeCompatible(artifact, activeRuntime),
       id,
       kind: artifact.kind,
