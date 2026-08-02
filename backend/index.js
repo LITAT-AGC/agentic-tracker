@@ -2142,7 +2142,22 @@ const integrationRoot = path.join(__dirname, '..', 'integracion');
 //   still enumerates the keys as a last resort. `skills_json.artifact_version` goes 3.3.0 -> 3.4.0 so
 //   already-integrated clients pick it up through the existing sync policy. Response payloads only
 //   grew a field, which JSON consumers ignore: a client on 3.1.0, 3.2.0 or 3.3.0 keeps working.
-const integrationManifestSchemaVersion = '3.4.0';
+// - 4.0.0: BREAKING, and deliberately so — decided by the operator, who does not want backward
+//   compatibility to keep shaping this manifest. Every block that existed to explain how to install
+//   and keep in sync the four downloadable executables is gone: `client_download_guidance`,
+//   `artifact_sync_policy` (with its `updater_contract` and `legacy_cleanup_targets`),
+//   `official_integration_script_policy`, `ai_agent_recommended_usage` and `opencode_ai_guidance`,
+//   plus the first steps and instructions that walked through installing them. An updater built
+//   against 3.x that reads `bootstrap.artifact_sync_policy` will not find it. **The thirteen
+//   artifacts and their download routes are untouched and keep being served**, so the stdio surface
+//   still works for anyone who already has it or fetches it by route; what disappeared is the recipe,
+//   not the files.
+//   Two things were fixed in the same pass, because they were false for the remote surface and no
+//   one had corrected them here: three `instructions[]` entries and all of `identity_requirements`
+//   still claimed the MCP server auto-fills identity from env vars, `.apts/execution-context.json`
+//   or Git. That is the same claim F6-3 removed from the adapters and F6-4 from the contract.
+//   Cost: the manifest goes from 11.034 to ~9.150 text units per integration.
+const integrationManifestSchemaVersion = '4.0.0';
 const publicIntegrationBasePath = '/api/public/integrar';
 
 const integrationArtifacts = {
@@ -2470,7 +2485,7 @@ const buildMcpEndpoint = (req) => {
     get: 'Answers 405: this endpoint is stateless and has no server-to-client stream. Clients that probe it may ignore the 405 and continue over POST.',
     max_message_size: MCP_MAX_MESSAGE_SIZE,
     headers: MCP_IDENTITY_HEADER_SPEC,
-    identity_rule: 'The three identity headers are part of the registration, not an option: they replace the local autofill the downloadable script used to do. Values sent in the call arguments win over the header; when both are missing the call is rejected with a named field.',
+    identity_rule: 'The three identity headers are part of the registration, not an option: they are how the server knows who is calling and about which project. A value sent in the call arguments wins over the header, which is how an agent switches role; a project_url that contradicts the header is rejected. When both are missing the call is rejected naming the field.',
     call_supplied_fields: [
       { field: 'task_id', note: 'Returned by register_task; send it in the execution calls that need it.' },
       { field: 'branch', note: 'Optional. It cannot travel in a header because it changes during the session, and the server never sees the client repository.' }
@@ -2480,11 +2495,11 @@ const buildMcpEndpoint = (req) => {
   };
 };
 
-const buildLegacyCleanupTargets = () => Object.entries(integrationArtifacts)
-  .flatMap(([id, artifact]) => (artifact.deprecatedFilenames || []).map((fileName) => ({
-    artifact_id: id,
-    file_name: fileName
-  })));
+// `buildLegacyCleanupTargets` vivía aquí y alimentaba `artifact_sync_policy`, que se
+// retiró en 4.0.0 junto con el resto de la política de instalación local. Los
+// `deprecated_filenames` de cada artefacto se siguen publicando en `artifacts[]`, así
+// que quien todavía haga limpieza local tiene el dato; lo que ya no se publica es la
+// receta para hacerla.
 
 const normalizeManifestRuntime = (runtime) => {
   if (typeof runtime !== 'string') return null;
@@ -2580,51 +2595,6 @@ const buildIntegrationManifest = (req) => {
         ],
         companion_env: 'APTS_BASE_URL must point to the /api base URL published by this manifest.'
       },
-      client_download_guidance: {
-        decision_input: 'The package is ESM-only and single-source. The official MCP server (apts-mcp.js) is the only supported surface; it runs the ESM client as a Node subprocess.',
-        module_system: 'esm_only',
-        priority_order: ['official_mcp', 'direct_client'],
-        choose_mcp_when: [
-          'the runtime supports MCP servers (for example Claude Code via .mcp.json or opencode via opencode.json)',
-          'you want native tools backed by the contract, identical across runtimes',
-          'the integration is driven by an AI agent that can register an stdio MCP server'
-        ],
-        runtime_without_mcp_rule: 'If the active runtime cannot register an MCP server, that is a runtime setup issue to resolve with the operator. APTS no longer ships a CLI or any alternative script surface as a fallback.',
-        ai_agent_rule: 'For AI agents, the official MCP server (apts-mcp.js) is the only supported interface.',
-        mcp_dependency_rule: 'apts-mcp.js depends on apts-client.js and contract-check.js. Install package.json so Node treats the folder as ESM, and keep all of these files together in the same workspace-local folder.',
-        direct_client_rule: 'Direct apts-client usage is allowed only inside the official MCP server or thin project wrappers. Do not generate fresh direct-client bootstrap code during each interaction.',
-        env_resolution_rule: 'When the runtime does not execute from the project root, set APTS_ENV_FILE so environment lookup stays deterministic.',
-        official_script_integrity_rule: 'For base APTS operations, use only official scripts published by this manifest (apts-mcp.js, apts-client.js, contract-check.js). Do not merge legacy wrapper snippets into those files.',
-        adapter_exception_rule: 'If runtime-specific glue is still needed, keep it as a thin adapter that delegates to the official MCP server unchanged.',
-        legacy_wrapper_cleanup_rule: 'After installing the official MCP server, remove older project-local scripts that only wrapped base APTS operations such as register_task, read_project_context, update_task_status, log_agent_progress, report_blocker, or heartbeat. Keep only thin runtime-specific adapters when discovery requires them.',
-        anti_patterns: [
-          'Generating ad-hoc code snippets that import or bootstrap apts-client during each interaction.',
-          'Hand-building raw JSON strings when a file-backed or object-backed payload is available.',
-          'Running manual Git identity pre-flight before every APTS call.'
-        ],
-        default_rule: 'Register the official MCP server. If the runtime cannot run MCP, resolve the runtime setup with the operator instead of looking for an alternative surface.'
-      },
-      ai_agent_recommended_usage: {
-        title: 'Uso recomendado para Agentes de IA',
-        priority_order: ['MCP', 'Direct Client'],
-        rules: [
-          'Use the official MCP server (apts-mcp.js) registered as an stdio MCP server in the runtime.',
-          'If the runtime cannot register an MCP server, resolve the runtime setup with the operator; there is no script fallback.',
-          'Instantiate or import the raw APTS client directly only inside the official MCP server or predefined project wrappers.',
-          'Never generate new per-interaction code that bootstraps the client from scratch.',
-          'Use contract-first JSON object payloads and avoid manual JSON string assembly whenever a safer transport exists.'
-        ]
-      },
-      opencode_ai_guidance: {
-        title: 'opencode.ai',
-        recommended_skill_path: '.agents/skills/apts',
-        mcp_strategy: 'Register apts-mcp.js as an stdio MCP server in opencode.json so the contract tools are available natively. opencode supports MCP, so this is the supported path; if MCP cannot be registered, resolve the runtime setup with the operator.',
-        skill_strategy: 'Expose SKILL.md and apts_skills.json for discovery and keep them delegating to the MCP server stored in .ia/apts.',
-        anti_patterns: [
-          'Duplicating the client bootstrap logic inside a Custom Tool implementation.',
-          'Embedding raw HTTP calls or handwritten JSON string assembly when the official MCP server already covers the operation.'
-        ]
-      },
       mutation_safety: {
         mandatory_field_reminders: {
           update_backlog_item: 'Use backlog_item_id in payloads. Do not send id for update_backlog_item or delete_backlog_item operations.',
@@ -2635,24 +2605,6 @@ const buildIntegrationManifest = (req) => {
           'Apply multi-step updates for high-risk text: first a minimal field update, then the full content update after the first call succeeds.'
         ],
         post_write_verification: 'After mutating calls, read backlog/task state and confirm persisted fields match expected values instead of relying only on the call returning success.'
-      },
-      artifact_sync_policy: {
-        source_of_truth: 'manifest_artifacts',
-        compare_strategy: 'by_artifact_id_and_artifact_version',
-        when_version_changes: 'overwrite_local_file',
-        delete_known_legacy_files: true,
-        runtime_filtering_required_before_recommended: true,
-        runtime_filtering_rule: 'Before applying recommended artifacts, keep only entries where runtime is null or equals the active runtime. Then apply recommended=true on that filtered set.',
-        runtime_filter_query_param: 'runtime',
-        legacy_cleanup_targets: buildLegacyCleanupTargets(),
-        managed_artifact_integrity: 'Treat downloaded official APTS scripts as managed artifacts. Do not hand-edit them or splice legacy wrapper code into them; replace the full file when artifact_version changes.',
-        manual_cleanup_note: 'Automatic cleanup only applies to filenames explicitly published by APTS in legacy_cleanup_targets. If the client project previously created custom APTS wrapper scripts for base operations, remove them manually during migration unless APTS later publishes those filenames as deprecated.',
-        updater_contract: [
-          'For each manifest artifact id, compare local metadata with artifact_version from this manifest.',
-          'If local version differs from artifact_version, re-download and overwrite the local managed file.',
-          'Never compose mixed scripts by merging legacy local wrappers with downloaded official APTS artifacts.',
-          'If delete_known_legacy_files is true, remove local files listed under legacy_cleanup_targets before finishing sync.'
-        ]
       },
       skill_installation_paths: {
         preferred_scope: 'workspace_local',
@@ -2719,14 +2671,6 @@ const buildIntegrationManifest = (req) => {
           'Do not duplicate multiple APTS managed sections in the same file.'
         ]
       },
-      official_integration_script_policy: {
-        required: true,
-        scope: 'base_apts_contract_operations',
-        allowed_artifact_ids: ['mcp_server', 'js_client', 'contract_check'],
-        single_source_of_truth: 'For base integration operations, invoke only official scripts published by APTS in this manifest, using the official MCP server as the single surface.',
-        mixed_script_forbidden: 'Do not merge, splice, or partially reuse legacy local wrapper code inside downloaded official scripts.',
-        migration_rule: 'If legacy wrappers still contain project-specific logic, extract that logic into a thin adapter and keep official scripts unchanged.'
-      },
       task_recovery_policy: {
         register_task_resume_rule: 'When register_task includes backlog_item_id and the linked backlog item already has an active task in todo, in_progress, or stalled, APTS resumes that task instead of creating a duplicate.',
         done_transition_rule: 'Task status done is accepted only from review and only when recent execution activity exists (heartbeat or progress log within the freshness window).',
@@ -2763,18 +2707,12 @@ const buildIntegrationManifest = (req) => {
         forbidden_content: ['APTS_API_KEY', 'other secrets', 'tokens', 'credentials']
       },
       recommended_first_steps: [
-        'Install the ESM-only scripts (apts-client.js, apts-mcp.js, contract-check.js, package.json) in a workspace-local folder such as .ia/apts; register apts-mcp.js as the MCP surface.',
-        'If the runtime cannot register an MCP server, resolve the runtime setup with the operator; APTS no longer ships a CLI or any alternative script surface.',
-        'Use the MCP server with minimal payloads first; avoid manual Git identity discovery unless a required-field error forces protocol debugging.',
-        'If APTS_API_KEY is not yet present in the environment, request APTS_API_KEY from the operator and confirm APTS_BASE_URL as well.',
-        'Create or update a .env file at the client project root with APTS_BASE_URL and APTS_API_KEY before using protected APIs.',
+        'Register the remote MCP server: copy the block for your runtime from mcp_endpoint.registration_by_runtime as-is. No file has to be downloaded to use the 21 operations.',
+        'If APTS_API_KEY is not yet present in the environment, request it from the operator, together with the project identity values the registration block references.',
+        'Call the tools with minimal payloads: the integration layer supplies project_url and agent identity through the registration headers.',
         'Ensure the project has AGENTS.md or .github/copilot-instructions.md. Create AGENTS.md from apts-agent-guidelines.md if neither file exists, or merge/update one APTS-managed section if an instruction file already exists.',
-        'Create a workspace-local integration folder such as .ia/apts, place the APTS contract and matching scripts there, and only then wire runtime-specific adapters if needed.',
         'If the runtime is VS Code and custom agents are required, generate the adapters locally with scripts/generate-adapters.js, copy runtime-adapters/vscode/agents/*.agent.md into .github/agents, and reload the editor window after sync.',
-        'If the runtime is opencode.ai, register apts-mcp.js in opencode.json and install discovery assets under .agents/skills/apts.',
         'Treat interrupted execution as resumable work: call register_task with backlog_item_id so APTS can resume existing stalled/todo/in_progress tasks for that backlog item instead of creating duplicates.',
-        'Do not merge legacy local wrappers into official APTS scripts; keep official scripts unchanged and move extra project logic to thin adapters when needed.',
-        'If the project previously used ad-hoc APTS wrapper scripts, the retired CLI, or the retired CommonJS/helper artifacts (apts-cli.js, apts-cli.mjs, apts-client.mjs, apts-helper.js, apts-helper.mjs), remove them once the official MCP server is installed and keep only thin discovery adapters when the runtime still needs them.',
         'Prepare a local append-only resilience journal, for example at .apts/agent-resilience-log.jsonl, without treating it as a source of truth.',
         'Inspect local files that currently contain backlog, planning, or operational tracking.',
         'If the runtime supports custom agents and the current chat may be a new defect report, install or invoke the APTS Bugfix Intake agent before direct execution.',
@@ -2783,7 +2721,7 @@ const buildIntegrationManifest = (req) => {
         'Create or update backlog_items in APTS to reflect that initial state.',
         'From that point onward, use APTS as the primary tracking system and do not invent work outside APTS.'
       ],
-      operator_prompt_template: 'Read this public manifest, understand that APTS is the tracking source of truth, install the ESM-only scripts in .ia/apts and register apts-mcp.js as the integration surface for AI agents, request APTS_BASE_URL and APTS_API_KEY from the operator if missing, store them in a .env file at the client project root (or equivalent secret store), prepare a local append-only resilience journal, and if the current user request may describe a new bug, error, or regression from chat, first confirm whether the user wants it registered as a bug in APTS before creating or updating any tracked bug item.'
+      operator_prompt_template: 'Read this public manifest, understand that APTS is the tracking source of truth, register the remote MCP server by copying the block for this runtime from mcp_endpoint.registration_by_runtime, request APTS_API_KEY and the project identity values from the operator if missing, store them in a .env file at the client project root (or equivalent secret store), prepare a local append-only resilience journal, and if the current user request may describe a new bug, error, or regression from chat, first confirm whether the user wants it registered as a bug in APTS before creating or updating any tracked bug item.'
     },
     entrypoint: buildAbsoluteUrl(req, publicIntegrationBasePath),
     api_base_url: buildAbsoluteUrl(req, '/api'),
@@ -2803,16 +2741,12 @@ const buildIntegrationManifest = (req) => {
     instructions: [
       'Read the bootstrap section first to understand the service purpose and the migration goal from local tracking to APTS.',
       'If APTS_API_KEY is missing, request it from the operator before any protected API call.',
-      'Store APTS_BASE_URL and APTS_API_KEY in a .env file at the root of the client project, or in an equivalent project secret store.',
-      'Install APTS integration artifacts in a workspace-local base folder such as .ia/apts.',
-      'For AI agents, install the ESM-only scripts and register apts-mcp.js as the MCP surface.',
-      'If the runtime cannot register an MCP server, resolve the runtime setup with the operator; APTS no longer ships a CLI or any alternative script surface.',
+      'Store APTS_API_KEY in a .env file at the root of the client project, or in an equivalent project secret store, together with the project identity values the registration block references.',
+      'Register the remote MCP server from mcp_endpoint.registration_by_runtime; the 21 contract operations arrive through tools/list, with no file to download or keep in sync.',
       'When consuming manifest artifacts, filter by runtime first (runtime query param or client-side equivalent), then apply recommended entries from that compatible subset.',
       'Use runtime-specific adapter paths only when needed for discovery (.github/skills/apts, .agents/skills/apts, or .claude/skills/apts), and avoid user-global skill installation.',
-      'If the runtime is opencode.ai, register apts-mcp.js in opencode.json and expose SKILL.md and apts_skills.json under .agents/skills/apts.',
       'If using VS Code custom agents, generate the runtime adapters locally with scripts/generate-adapters.js, copy runtime-adapters/vscode/agents/*.agent.md into .github/agents, and reload the window so those agents become discoverable.',
       'Maintain the local resilience log described in the bootstrap section; it is append-only and must not replace APTS as the source of truth.',
-      'Download and install the skills contract first.',
       'Read the base agent guidelines before the first APTS API call.',
       'Ensure AGENTS.md or .github/copilot-instructions.md exists before protected calls: create AGENTS.md if neither exists, or merge/update one APTS-managed section if an instruction file already exists.',
       'If the runtime supports custom agents and the current chat is a bugfix/reporting request or might be one, install or invoke the APTS Bugfix Intake agent before direct execution.',
@@ -2820,24 +2754,17 @@ const buildIntegrationManifest = (req) => {
       'Only after that explicit confirmation should the issue be represented in APTS backlog as a bug item before registering execution work or starting implementation.',
       'If the current chat asks to report a solved bug, update the tracked bug backlog item and add resolution details with verification evidence.',
       'If the runtime is VS Code on Windows, route tests through WSL terminals/tasks and route non-test operations through PowerShell terminals/tasks.',
-      'The package is ESM-only and single-source: install apts-client.js (the single ESM client), apts-mcp.js, contract-check.js, and package.json together so Node treats them as ES modules.',
-      'Keep the MCP server beside apts-client.js and contract-check.js.',
-      'Do not run manual identity pre-flight commands by default; let the official MCP server auto-fill protocol fields and inspect execution context only when a call reports missing required data.',
-      'The official MCP server auto-fills missing identity fields from environment variables first, local managed execution context second, and local Git as fallback; provide explicit identity fields only when raw API calls are used.',
-      'The official MCP server persists managed execution context in .apts/execution-context.json by default (override with APTS_CONTEXT_FILE) so repeated execution calls can omit task_id and identity fields.',
+      'Do not run manual identity pre-flight commands: the integration layer supplies project_url and agent identity, and a call that is missing something is rejected naming the field.',
       'Use register_task with backlog_item_id to resume interrupted work for that backlog item before creating additional execution tasks.',
       'Do not force task status done for interrupted executions: pass through review first and ensure recent heartbeat or progress logs exist before closing as done.',
-      'For base APTS operations, use only official scripts published by this manifest and never merge legacy wrapper code into downloaded managed scripts.',
-      'After installing the official MCP server, remove older local APTS wrapper scripts and the retired CLI/CommonJS/helper artifacts (apts-cli.js, apts-cli.mjs, apts-client.mjs, apts-helper.js, apts-helper.mjs) to avoid drift. Keep only thin runtime-specific discovery adapters when required.',
-      'Download the optional agent templates only if your runtime supports custom agents.',
-      'Use APTS_BASE_URL with the published /api base path.'
+      'Download the optional agent templates only if your runtime supports custom agents.'
     ],
     identity_requirements: [
-      { field: 'project_url', resolve_with: 'APTS_PROJECT_URL, managed execution context, or git remote get-url origin' },
-      { field: 'agent_name', resolve_with: 'APTS_AGENT_NAME, managed execution context, or git config user.name' },
-      { field: 'agent_email', resolve_with: 'APTS_AGENT_EMAIL, managed execution context, or git config user.email' },
-      { field: 'branch', resolve_with: 'APTS_BRANCH, managed execution context, or git branch --show-current' },
-      { field: 'task_id', resolve_with: 'APTS_TASK_ID or managed execution context (for repeated execution calls)' }
+      { field: 'project_url', resolve_with: 'the integration layer (registration header); a value in the call that contradicts it is rejected' },
+      { field: 'agent_name', resolve_with: 'the integration layer (registration header); a value in the call wins, which is how role switching works' },
+      { field: 'agent_email', resolve_with: 'the integration layer (registration header)' },
+      { field: 'branch', resolve_with: 'the call, when the operation accepts it; optional' },
+      { field: 'task_id', resolve_with: 'the call; register_task returns it, and calling register_task again with the same backlog_item_id returns it back' }
     ],
     artifacts: Object.entries(integrationArtifacts).map(([id, artifact]) => ({
       runtime_compatible: isArtifactRuntimeCompatible(artifact, activeRuntime),

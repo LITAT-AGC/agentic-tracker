@@ -57,7 +57,9 @@ Ademas, el backend puede publicar un punto de entrada publico para agentes en `/
 
 Politica de mantenimiento del manifiesto: cada cambio funcional, estructural o semantico en `/api/public/integrar` debe actualizar `schema_version` y agregar una entrada nueva en `bootstrap.manifest_updates.notes` explicando que cambio, desde que version aplica y por que importa para los clientes del manifiesto. Ese historial es append-only: no reemplazar notas anteriores por la ultima version.
 
-Sincronizacion de artefactos de integracion: el manifiesto ahora publica metadatos por artefacto (`artifact_version`, `updated_in_schema_version`, `sync_action` y `deprecated_filenames`) mas una politica global en `bootstrap.artifact_sync_policy`. Con eso, un actualizador local puede detectar que scripts/agentes cambiaron, sobreescribir archivos gestionados cuando cambia la version y borrar archivos legacy declarados por APTS.
+Sincronizacion de artefactos de integracion: el manifiesto publica metadatos por artefacto (`artifact_version`, `updated_in_schema_version`, `sync_action` y `deprecated_filenames`). La politica global `bootstrap.artifact_sync_policy`, con su `updater_contract` y sus `legacy_cleanup_targets`, **se retiro en `schema_version` 4.0.0** junto con el resto de la prosa que explicaba como instalar y mantener sincronizados los cuatro ejecutables descargables: desde el MCP remoto no hay copia local que sincronizar. Los trece artefactos y sus rutas de descarga siguen sirviendose sin cambios, y los metadatos por artefacto siguen publicandose, asi que un actualizador propio conserva el dato; lo que ya no se publica es la receta.
+
+Superficie recomendada: registrar el servidor MCP remoto copiando el bloque de `mcp_endpoint.registration_by_runtime` que corresponda al runtime. No hace falta descargar ningun archivo para usar las 21 operaciones.
 
 Todas las llamadas de agentes deben incluir la cabecera:
 

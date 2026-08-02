@@ -13,7 +13,7 @@
 | **D** — El roster del método, descubrible sin fallar primero | ✅ Hecho, validado contra `APTS_test` |
 | **C1** — Plazo de espera a las dos llamadas del panel | ✅ Hecho |
 | **C2** — Las dos implementaciones duplicadas del embedding | ✅ Unificada la llamada externa; queda una duplicación menor declarada abajo |
-| Recorte de la prosa del manifiesto | ⬜ Sin tocar |
+| **E** — Recorte de la prosa del manifiesto | ✅ Hecho: **11.034 → 8.790 unidades (-20,3%)**, con ruptura declarada en 4.0.0 |
 | Publicar el bucle de conducción del método como dato | ⬜ Sin tocar |
 | Corrida contra PROD | ⬜ Sin tocar — todo lo de abajo está medido contra `APTS_test` |
 
@@ -123,6 +123,41 @@ El informe de cierre de F6 decía "las **dos** implementaciones duplicadas del e
 mantenimiento fuera de línea, no lo alcanzan ni las 21 operaciones ni el panel, así que **no se tocó**
 y queda anotado aquí.
 
+## E — Dieta del manifiesto (schema_version 4.0.0, con ruptura)
+
+**Decisión del operador: no interesa la compatibilidad hacia atrás.** Eso quitó la restricción que
+mantenía viva toda la prosa de instalación local, así que no hizo falta ni parámetro de perfil ni dos
+formas del manifiesto: se recorta de verdad y se sube a **4.0.0** declarando la ruptura.
+
+**Alcance elegido, entre tres:** el manifiesto deja de explicar la instalación local, pero **los trece
+artefactos y sus rutas de descarga se quedan intactos**. Descartadas: retirar además los cuatro
+ejecutables del listado (-29%) y la retirada completa del camino de descarga (-39%), que habría
+tocado el camino por entrada/salida estándar para clientes nuevos, contra la regla vigente.
+
+**Lo que se fue:**
+
+| Bloque | Unidades |
+|---|---|
+| `bootstrap.client_download_guidance` | 638 |
+| `bootstrap.artifact_sync_policy` (con `updater_contract` y `legacy_cleanup_targets`) | 507 |
+| `bootstrap.opencode_ai_guidance` | 168 |
+| `bootstrap.ai_agent_recommended_usage` | 158 |
+| `bootstrap.official_integration_script_policy` | 146 |
+| `recommended_first_steps`: 12 pasos → 7, e `instructions[]`: 30 → 21 | resto |
+
+**Resultado medido: 11.034 → 8.790 unidades por integración (-20,3%)**, mejor que el -16% previsto.
+`bootstrap` pasa de 5.017 a 3.107. La función `buildLegacyCleanupTargets` quedó huérfana y se retiró;
+los `deprecated_filenames` **se siguen publicando por artefacto**, así que quien mantenga su propio
+actualizador conserva el dato: lo que desapareció es la receta, no los archivos.
+
+**Hallazgo del mismo paso, corregido:** tres entradas de `instructions[]` y **todo
+`identity_requirements`** seguían afirmando que el servidor MCP resuelve la identidad solo, desde
+variables de entorno, `.apts/execution-context.json` o Git. Es la misma afirmación falsa que F6-3
+quitó de los adaptadores y F6-4 del contrato; **nadie la había quitado del manifiesto**. Reescritas
+en los mismos términos neutros, y `identity_requirements` dice ahora la regla real: la cabecera pone
+el valor, la llamada gana —así conmuta de rol el agente—, y un `project_url` contradictorio se
+rechaza.
+
 ## Validación
 
 Todo contra `APTS_test` (`environment:test`, puerto 47301), con el arranque haciendo su auto-chequeo
@@ -135,7 +170,14 @@ de contrato en verde (`operations: 21`).
 | Humo por entrada/salida estándar — el camino actual | **7 / 7** |
 | `scripts/test_agent_api.js` (regresión del repositorio) | completo, en verde |
 | `scripts/test_agent_api_batch.js` (lotes, vuelta atrás estricta, regresiones) | completo, en verde |
-| Bump del manifiesto, aditivo contra `HEAD` | 0 claves perdidas, 0 añadidas, 13 → 13 |
+| Bump del manifiesto a 3.4.0, aditivo contra `HEAD` | 0 claves perdidas, 0 añadidas, 13 → 13 |
+| Dieta del manifiesto (4.0.0) | **15 / 15** |
+
+Lo medido en las 15 de la dieta: los cinco bloques retirados ya no se publican y no queda rastro de
+`updater_contract` ni de `legacy_cleanup_targets`; **no queda ninguna afirmación de resolución
+automática de identidad** en todo el manifiesto; `mcp_endpoint` sigue con sus tres runtimes; siguen
+los 13 artefactos, los 4 obsoletos siguen listados y **sus cuatro rutas de descarga siguen
+respondiendo 200**; y un cliente registrado con el bloque publicado **recibe las 21 operaciones**.
 
 Lo medido en las 14 del roster: el roster llega en alta y en resume; `apts_next` sin puntero lo trae
 y dice dónde está la salida; una clave del roster publicado **es aceptada** por `set_agent_role`; el
@@ -162,13 +204,26 @@ tocaron.
   rol. Ninguna operación, esquema ni veredicto cambia.
 - `integracion/DEUDA-post-F6.md` (este), `integracion/TRACKING-mcp-remoto.md`.
 
+## Archivos tocados por la dieta
+
+- `backend/index.js` — cinco bloques de `bootstrap` retirados; `recommended_first_steps` de 12 a 7 y
+  `instructions[]` de 30 a 21; `identity_requirements` reescrito; `buildLegacyCleanupTargets`
+  retirada; `operator_prompt_template` y `mcp_endpoint.identity_rule` reescritos;
+  `integrationManifestSchemaVersion` 3.4.0 → **4.0.0** con la nota de ruptura al final del histórico.
+- `README.md` — la sección de sincronización de artefactos describía la política retirada.
+
 ## Lo que sigue pendiente
 
-1. **Recortar la prosa del manifiesto** (~11.035 unidades por integración; el bump de hoy no lo mueve).
-2. **Publicar el bucle de conducción del método como dato**: hoy vive en un artefacto de prosa
-   descargable. Es el hueco más claro que dejó F6.
+1. **Publicar el bucle de conducción del método como dato**: hoy vive en un artefacto de prosa
+   descargable de 2.813 unidades. Es el hueco más claro que dejó F6. Ojo con la expectativa: pasarlo
+   al manifiesto **no ahorra tokens**, los mueve de la descarga al manifiesto; lo que compra es
+   cerrar "cero descargas" y que el bucle no pueda desincronizarse del motor.
+2. **Seguir la dieta**, si interesa: `artifacts` es ahora el bloque mayor (3.756), y **1.410 de esos
+   son los metadatos de los cuatro artefactos obsoletos**. Retirarlos del listado deja el manifiesto
+   en ~7.400 sin dejar de servir los archivos.
 3. **Unificar `cosineSimilarity` y `parseEmbeddingVector`**, con medición de la búsqueda antes y
    después.
 4. **La tercera copia del embedding** en `reembed_bug_embeddings.js`, sin plazo de espera.
 5. **Corrida contra PROD**, con la comprobación de `embedding_strategy:bug_dedup:model` **antes** de
-   desplegar.
+   desplegar. Con 4.0.0 hay además una decisión de despliegue: cualquier cliente ya integrado que
+   dependiera de `artifact_sync_policy` deja de encontrarla.
