@@ -5,9 +5,9 @@
 //   - workflow_definitions (uno por workflow/agente-skill)
 //   - workflow_steps       (BALDE 2: kind=generative, ADN verbatim por step)
 //
-// Separado de la fixture toy (source_ref distinto). Idempotente: borra-por
-// source_ref `bmad:v6.8.0` y reinserta, SIN pisar la fixture (`fixture:f1-toy`)
-// ni las primitivas implementadas (este loader NO toca primitives_palette = T3).
+// Separado de la fixture toy (source_ref distinto). Idempotente por UPSERT contra
+// la clave natural, SIN pisar la fixture (`fixture:f1-toy`) ni las primitivas
+// implementadas (este loader NO toca primitives_palette = T3).
 //
 // Alcance: ADN generativo (baldes 1–2) + wiring per-step del goteo (F3-T2).
 // Lo que queda explícitamente para fases posteriores (anotado en coverage/tracking):
@@ -84,25 +84,60 @@ const defPhase = (phase) =>
   ['analysis', 'planning', 'solutioning', 'implementation'].includes(phase) ? phase : null;
 
 // ---- 0. Guardia: este seed tira del bucle a quien esté conduciendo ----
-// La limpieza del paso 1 borra las filas `bmad:v6.8.0` y las reinserta con UUID
-// nuevos. `project_state` apunta al método con tres FK `ON DELETE SET NULL`
-// (entity_id, current_workflow_id, current_step_id), así que el borrado no falla:
-// deja los punteros en NULL sin tocar `step_status`. Un agente que estaba en
-// `running` queda en `running` apuntando a nada. Medido en APTS_test.
+// `project_state` apunta al método con tres FK `ON DELETE SET NULL` (entity_id,
+// current_workflow_id, current_step_id): borrar una fila del método no falla,
+// deja el puntero en NULL sin tocar `step_status`. Un agente que estaba en
+// `running` queda en `running` apuntando a nada.
 //
-// Se cuentan solo los punteros que este seed va a destruir de verdad —los que
-// caen en `bmad:v6.8.0`—; los de la fixture toy sobreviven y no son motivo de
-// aborto. Con `--force` se sigue adelante, pero diciendo a quién se lleva por
-// delante.
-const agentesEnRiesgo = async (connection) => {
+// Antes esto pasaba en CADA siembra, porque el seed borraba todo lo de
+// `bmad:v6.8.0` y lo reinsertaba con UUID nuevos. Ahora el paso 1 hace upsert
+// contra la clave natural y los UUID sobreviven, así que re-sembrar el mismo
+// corpus ya no rompe ningún puntero y la guardia no tiene por qué plantarse.
+//
+// Lo único que sigue destruyendo punteros es lo que DESAPARECE: filas que están
+// en la base y ya no están en el corpus. La guardia se calcula contra esa
+// diferencia, no contra el `source_ref` entero. Los punteros de la fixture toy
+// nunca son motivo de aborto. Con `--force` se sigue adelante, pero diciendo a
+// quién se lleva por delante.
+const agentesEnRiesgo = async (connection, corpusKeys, stepKeysByWorkflow) => {
   const hasTable = await connection.schema.hasTable('project_state');
   if (!hasTable) return [];
 
-  return connection('project_state as ps')
+  const filas = await connection('project_state as ps')
     .leftJoin('entities as e', 'e.id', 'ps.entity_id')
     .leftJoin('workflow_definitions as wd', 'wd.id', 'ps.current_workflow_id')
-    .where((q) => q.where('e.source_ref', SOURCE_REF).orWhere('wd.source_ref', SOURCE_REF))
-    .select('ps.agent_name', 'ps.step_status', 'ps.initiative_id');
+    .leftJoin('workflow_steps as ws', 'ws.id', 'ps.current_step_id')
+    .leftJoin('workflow_definitions as sw', 'sw.id', 'ws.workflow_id')
+    .where((q) => q
+      .where('e.source_ref', SOURCE_REF)
+      .orWhere('wd.source_ref', SOURCE_REF)
+      .orWhere('sw.source_ref', SOURCE_REF))
+    .select(
+      'ps.agent_name', 'ps.step_status', 'ps.initiative_id',
+      'e.key as entity_key', 'e.source_ref as entity_source',
+      'wd.key as workflow_key', 'wd.source_ref as workflow_source',
+      'ws.key as step_key', 'sw.key as step_workflow_key', 'sw.source_ref as step_source'
+    );
+
+  // Un puntero está en riesgo solo si la fila a la que apunta se va a borrar.
+  const enRiesgo = [];
+  for (const r of filas) {
+    const motivos = [];
+    if (r.entity_source === SOURCE_REF && !corpusKeys.has(r.entity_key)) {
+      motivos.push(`entity '${r.entity_key}'`);
+    }
+    if (r.workflow_source === SOURCE_REF && !corpusKeys.has(r.workflow_key)) {
+      motivos.push(`workflow '${r.workflow_key}'`);
+    }
+    if (r.step_source === SOURCE_REF) {
+      const vivas = stepKeysByWorkflow.get(r.step_workflow_key);
+      if (!vivas || !vivas.has(r.step_key)) {
+        motivos.push(`paso '${r.step_workflow_key}#${r.step_key}'`);
+      }
+    }
+    if (motivos.length) enRiesgo.push({ ...r, motivos });
+  }
+  return enRiesgo;
 };
 
 async function run() {
@@ -110,16 +145,22 @@ async function run() {
   const agents = corpus.filter((ir) => ir.kind === 'agent');
   const workflows = corpus.filter((ir) => ir.kind === 'workflow');
 
-  const enRiesgo = await agentesEnRiesgo(knex);
+  // Claves naturales que trae el corpus: lo que no esté aquí es lo que desaparece.
+  const corpusKeys = new Set(corpus.map((ir) => ir.key));
+  const stepKeysByWorkflow = new Map(
+    corpus.map((ir) => [ir.key, new Set(ir.steps.map((s) => String(s.n)))])
+  );
+
+  const enRiesgo = await agentesEnRiesgo(knex, corpusKeys, stepKeysByWorkflow);
   if (enRiesgo.length) {
     const lista = enRiesgo
-      .map((r) => `  - ${r.agent_name} (step_status=${r.step_status}, iniciativa ${r.initiative_id})`)
+      .map((r) => `  - ${r.agent_name} (step_status=${r.step_status}, iniciativa ${r.initiative_id}) pierde ${r.motivos.join(', ')}`)
       .join('\n');
 
     if (!FORCE) {
       throw new Error(
-        `${enRiesgo.length} agente(s) están conduciendo el método sobre la biblioteca ${SOURCE_REF}.\n`
-        + `Volver a sembrar los dejaría sin rol, sin workflow y sin paso, conservando su step_status:\n`
+        `${enRiesgo.length} agente(s) están conduciendo el método sobre filas de ${SOURCE_REF} que este corpus ya no trae.\n`
+        + `Sembrar las borraría y los dejaría apuntando a nada, conservando su step_status:\n`
         + `${lista}\n`
         + 'Si aun así querés sembrar, repetí el comando con --force.'
       );
@@ -129,14 +170,37 @@ async function run() {
   }
 
   return knex.transaction(async (trx) => {
-    // ---- 1. Limpieza idempotente por source_ref (no toca fixture ni primitivas) ----
-    await trx('workflow_definitions').where({ source_ref: SOURCE_REF }).del(); // cascade → workflow_steps
-    await trx('entities').where({ source_ref: SOURCE_REF }).del();
+    const borrados = { entities: 0, workflow_definitions: 0, steps: 0 };
 
-    // ---- 2. BALDE 1 — entities (personas de agentes) ----
+    // ---- 1. Guarda: ninguna clave del corpus puede ser de otra biblioteca ----
+    // El upsert del paso siguiente casa por `key`, que es UNIQUE global y no
+    // lleva el `source_ref` dentro. Si una clave del corpus ya existiera bajo
+    // otro `source_ref` —la fixture toy, por ejemplo—, el upsert la pisaría y le
+    // cambiaría el `source_ref` sin decir nada. Se aborta nombrándola.
+    const agentKeys = agents.map((ir) => ir.key);
+    const ajenas = [
+      ...(await trx('entities').whereIn('key', agentKeys).whereNot({ source_ref: SOURCE_REF })
+        .select('key', 'source_ref')).map((r) => `entities.${r.key} (${r.source_ref})`),
+      ...(await trx('workflow_definitions').whereIn('key', [...corpusKeys]).whereNot({ source_ref: SOURCE_REF })
+        .select('key', 'source_ref')).map((r) => `workflow_definitions.${r.key} (${r.source_ref})`),
+    ];
+    if (ajenas.length) {
+      throw new Error(
+        `${ajenas.length} clave(s) del corpus ya existen bajo otra biblioteca y el upsert las pisaría:\n`
+        + ajenas.map((a) => `  - ${a}`).join('\n')
+      );
+    }
+
+    // ---- 2. BALDE 1 — entities (personas de agentes), por upsert ----
+    // `onConflict('key').merge()` actualiza la fila en su sitio: el UUID que ya
+    // tenía sobrevive, y con él los `project_state.entity_id` que lo apuntan.
     const entityIdByKey = {};
     for (const ir of agents) {
-      const [row] = await trx('entities').insert(entityRow(ir)).returning('id');
+      const [row] = await trx('entities')
+        .insert({ ...entityRow(ir), updated_at: trx.fn.now() })
+        .onConflict('key')
+        .merge()
+        .returning('id');
       entityIdByKey[ir.key] = row.id;
     }
 
@@ -161,6 +225,7 @@ async function run() {
     for (const ir of corpus) {
       const [wrow] = await trx('workflow_definitions')
         .insert({
+          updated_at: trx.fn.now(),
           key: ir.key,
           name: ir.frontmatter.name || ir.key,
           description: ir.frontmatter.description || null,
@@ -183,6 +248,8 @@ async function run() {
           }),
           source_ref: SOURCE_REF,
         })
+        .onConflict('key')
+        .merge()
         .returning('id');
 
       // F3-T2 — wiring per-step derivado de la IR (needs/outputs/iterable).
@@ -193,6 +260,7 @@ async function run() {
       for (const s of ir.steps) {
         const tmpl = (s.generative.template_outputs || []).map((t) => t.text).filter(Boolean).join('\n\n');
         await trx('workflow_steps').insert({
+          updated_at: trx.fn.now(),
           workflow_id: wrow.id,
           key: String(s.n), // único por workflow_id (unique(workflow_id,key))
           step_order: order++, // secuencial: ordena aunque los n de BMAD no lo sean (0,20,30)
@@ -213,13 +281,36 @@ async function run() {
             control: s.control || [],
             tag: s.tag || null,
           }),
-        });
+        })
+          .onConflict(['workflow_id', 'key'])
+          .merge();
         stepIdx++;
         stepTotal++;
       }
+
+      // Pasos que este workflow ya no trae. El upsert actualiza y agrega, pero no
+      // quita: sin esto, un step retirado del corpus seguiría vivo para siempre.
+      const vivos = ir.steps.map((s) => String(s.n));
+      borrados.steps += await trx('workflow_steps')
+        .where({ workflow_id: wrow.id })
+        .whereNotIn('key', vivos)
+        .del();
     }
 
-    return { agents: agents.length, workflows: workflows.length, defs: corpus.length, steps: stepTotal };
+    // ---- 4. Lo que el corpus ya no trae ----
+    // Único punto donde este seed borra. La guardia del paso 0 se calcula justo
+    // sobre esto, así que si algo de aquí estuviera bajo un puntero, no habríamos
+    // llegado a ejecutarlo sin `--force`.
+    borrados.workflow_definitions = await trx('workflow_definitions')
+      .where({ source_ref: SOURCE_REF })
+      .whereNotIn('key', [...corpusKeys])
+      .del(); // cascade → workflow_steps
+    borrados.entities = await trx('entities')
+      .where({ source_ref: SOURCE_REF })
+      .whereNotIn('key', agentKeys)
+      .del();
+
+    return { agents: agents.length, workflows: workflows.length, defs: corpus.length, steps: stepTotal, borrados };
   });
 }
 
@@ -239,6 +330,7 @@ run()
     const fixtureDefs = await cnt('workflow_definitions', { source_ref: 'fixture:f1-toy' });
     console.log('OK — importado bmad:', JSON.stringify({ entities: ent, workflow_definitions: defs, workflow_steps: steps }));
     console.log('OK — fixture intacta:', JSON.stringify({ entities: fixtureEnt, workflow_definitions: fixtureDefs }));
+    console.log('OK — borrado (lo que el corpus ya no trae):', JSON.stringify(r.borrados));
     await knex.destroy();
   })
   .catch(async (err) => {
