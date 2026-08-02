@@ -67,6 +67,14 @@ El seed del metodo es uno solo, `seeds/bmad_seed.js`. `seed:method` va al destin
 `seed:method:test` al de prueba; el argumento existe porque en Windows `NODE_ENV=x npm run ...` no se
 propaga.
 
+**Sembrar el metodo no mueve los UUID.** El seed hace upsert contra la clave natural —`key` en
+`entities` y `workflow_definitions`, `(workflow_id, key)` en `workflow_steps`, las tres ya `UNIQUE`
+en el esquema, sin migracion— asi que cada fila se actualiza en su sitio y `project_state` conserva
+donde estaba cada agente. Lo unico que borra es lo que el corpus ya no trae, y la guardia se calcula
+justo sobre esa diferencia: re-sembrar el mismo corpus ya no es motivo de aborto. Como `key` es
+`UNIQUE` global y no lleva el `source_ref` dentro, el seed aborta antes de tocar nada si una clave del
+corpus pertenece a otra biblioteca, en vez de pisarla en silencio.
+
 ## Verificado
 
 Contra `APTS_test` (puerto 47301), con el estado de partida `initiatives:2`, `epics:2`,
@@ -80,8 +88,18 @@ Contra `APTS_test` (puerto 47301), con el estado de partida `initiatives:2`, `ep
 - El generador de adaptadores es idempotente: una segunda corrida no cambia nada.
 - El cerrojo de plantillas: arranque limpio con `agent_templates: 4`; alterando una plantilla a
   proposito, `exit 3` nombrando el artefacto y el motivo.
-- La guardia del seed: sin agentes conduciendo siembra normal; con uno, `exit 1` sin tocar nada; con
-  `--force`, avisa por stderr y sigue.
+- **El bucle publicado no necesita `primitives_palette`.** Con la tabla vaciada —la condicion exacta
+  de produccion— un cliente que no descarga nada vuelve a llegar a `phase=done` con los mismos seis
+  numeros que con la tabla poblada: 52 submits, 7 workflows generativos, 2 unidades `dev-story` de 10
+  pasos, 5 cambios de rol, 3 elicitaciones. La tabla siguio a 0 durante toda la corrida.
+- **Re-sembrar el metodo conserva los UUID.** Los 174 de la biblioteca (6 entities, 31 definiciones,
+  137 pasos) sobreviven intactos a `seed:method:test`, igual que los de la fixture y
+  `primitives_palette`; un agente en `running` que apuntaba a los tres campos los conserva.
+- La guardia del seed, ahora calculada sobre lo que desaparece: re-sembrar el mismo corpus no aborta
+  y no borra nada; retirando del corpus un workflow que un agente esta conduciendo, `exit 1`
+  nombrando el workflow y el paso que pierde, sin tocar nada; con `--force`, avisa por stderr, sigue,
+  y deja los punteros exactamente como habia advertido —`entity_id` incluido, que sobrevive porque
+  esa entity no desaparecia.
 - La busqueda de bugs duplicados sobrevive a una fila con el vector corrupto: HTTP 200, esa fila
   fuera y el resto comparandose.
 - El plazo de espera del embedding existe en el unico camino que queda: con
@@ -102,7 +120,7 @@ trabajo (ver **Destinos**).
 | `entities` `bmad:v6.8.0` | 6 | 6 |
 | `workflow_definitions` `bmad:v6.8.0` | 31 | 31 |
 | `workflow_steps` | 137 | 147 |
-| `primitives_palette` | 0 | 6 |
+| `primitives_palette` | 0 (no hace falta, ver **Verificado**) | 6 |
 | `project_state` | 0 | 8 |
 | `initiatives` | 0 | 2 |
 | `backlog_items` | 461 | 361 |
@@ -116,16 +134,20 @@ asi que el modelo de embedding resuelve al de por defecto por los dos caminos.
 
 ## Abierto
 
-1. **`primitives_palette` esta vacia en produccion**, y solo la siembra `seeds/f1_toy_fixture.js`,
-   que es fixture de prueba y tiene doble guarda para no tocar produccion. `bmad_seed` dice
-   explicitamente que no la toca. Los pasos generativos avanzan por `step_order` con `next_rules` en
-   `null` y las primitivas se resuelven del registro en codigo, asi que **probablemente** no haga
-   falta para el bucle publicado; no esta comprobado.
+Nada. Los dos puntos que quedaban se cerraron, y lo que aparecio al cerrarlos esta anotado arriba:
 
-2. **Volver a sembrar el metodo sigue exigiendo criterio.** La guardia de `bmad_seed` avisa y se
-   planta, pero el seed sigue siendo borrar-por-`source_ref`-y-reinsertar: los UUID cambian y
-   `project_state` pierde donde estaba cada agente (`entity_id`, `current_workflow_id`,
-   `current_step_id` son `ON DELETE SET NULL`, y `step_status` no se toca). Hoy es inocuo porque
-   produccion tiene `project_state` a 0. La solucion de fondo es un upsert contra la clave natural
-   para que los UUID sobrevivan.
+1. **`primitives_palette` vacia en produccion** ya no es una pregunta. La tabla no la lee ningun
+   camino del runtime: `evaluatePrimitive` resuelve del registro en codigo (`PRIMITIVES`), la
+   completitud por routing toma la key de `WORKFLOW_COMPLETION` —tambien en codigo—, y el unico que
+   escribe la tabla es `reconcilePrimitiveRegistry`, que solo llama la fixture toy. Los 137 pasos de
+   la biblioteca publicada son todos `generative` con `primitive_key` en `null`; los unicos 5 que
+   nombran una primitiva son de la fixture. Comprobado ademas con la tabla vaciada (ver
+   **Verificado**). Sigue siendo catalogo para UI, no autoridad.
+
+2. **Volver a sembrar el metodo ya no exige criterio** en el caso normal: el seed hace upsert y los
+   UUID sobreviven (ver **Destinos** y **Verificado**). La guardia sigue, acotada a lo que de verdad
+   desaparece del corpus, que es el unico caso en que un puntero se pierde.
+
+Queda una asimetria conocida, sin consecuencia hoy: el cerrojo de plantillas compara solo el cuerpo
+del artefacto contra `apts-surface.json`; la cabecera YAML de cada plantilla sigue a mano.
 
