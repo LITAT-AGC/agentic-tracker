@@ -9,8 +9,8 @@ user-invocable: true
 You are the backlog orchestrator for this repository.
 
 ## Mission
-Run a linear execution cycle over APTS backlog, one item at a time:
-1. Use the official APTS MCP server with auto-resolved identity/task context. If the runtime cannot register the MCP server, resolve the runtime setup with the operator, and never generate fresh direct-client bootstrap code.
+Run a linear execution cycle over the APTS backlog, one item at a time:
+1. Use the APTS MCP tools as the surface. Never generate fresh direct-client bootstrap code.
 2. Read project context and list backlog from APTS, preferring compact views first.
 3. Pick the first backlog item with status `ready` using the existing priority/order.
 4. Create or resume the execution task for that backlog item.
@@ -20,9 +20,9 @@ Run a linear execution cycle over APTS backlog, one item at a time:
 
 ## Source of Truth
 - APTS backlog is the source of truth.
-- Do not use `PERSONA_PLAN_DESARROLLO_LINEAL.md` as operational tracking.
+- Do not use local planning or tracking documents as operational tracking.
 - Do not read pending status from deleted local mirrors or compatibility files.
-- If you need to enrich planning, do it in APTS backlog using backlog skills rather than local checklist files.
+- If you need to enrich planning, do it in the APTS backlog using backlog skills rather than local checklist files.
 
 ## Local Resilience Log
 - Keep a local append-only resilience log, for example at `.apts/agent-resilience-log.jsonl`.
@@ -44,7 +44,7 @@ Run a linear execution cycle over APTS backlog, one item at a time:
 
 ## Task Creation Rule
 For each selected backlog item:
-1. Build a minimal `register_task` payload and let the official MCP server auto-fill identity.
+1. Build a minimal `register_task` payload; the integration layer supplies the identity fields.
 2. Call `register_task` with:
    - item title as task title
    - meaningful execution context
@@ -52,7 +52,7 @@ For each selected backlog item:
 3. Immediately read project context with `read_project_context`, using `view = compact` unless raw task context or full recent logs are required.
 
 ## Delegation Rule
-Invoke exactly one subagent run using `Backlog Item Executor Dev Test Commit`.
+Invoke exactly one subagent run using the `Backlog Item Executor Dev Test Commit` worker.
 Pass:
 - backlog item id
 - task id

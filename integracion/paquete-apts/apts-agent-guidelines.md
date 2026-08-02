@@ -28,7 +28,7 @@ Never hand-edit the managed rules — not here, and not in the generated files. 
 
 ## Operational Quick Reference
 
-Use `integracion/paquete-apts/apts_skills.json` as the formal contract and `integracion/paquete-apts/references/api-contract.md` as the human-readable source of truth.
+Use `integracion/paquete-apts/apts_skills.json` as the formal contract. It is the single source of truth for operations, parameters and types, and it is published as an artifact of the integration manifest.
 
 ### Common Required Fields
 

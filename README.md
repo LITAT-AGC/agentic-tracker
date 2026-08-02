@@ -318,7 +318,7 @@ Importante: si APTS cambia endpoints, payloads o manejo de errores, el ajuste de
 
 ### Contrato operativo minimo
 
-La fuente formal para parametros y tipos vive en `integracion/paquete-apts/apts_skills.json`. La referencia humana detallada vive en `integracion/paquete-apts/references/api-contract.md`.
+La fuente formal para parametros y tipos vive en `integracion/paquete-apts/apts_skills.json`, y es la unica: no hay una segunda referencia en prosa que pueda contradecirla.
 
 Campos obligatorios mas comunes:
 

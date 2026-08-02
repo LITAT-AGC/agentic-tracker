@@ -5421,6 +5421,68 @@ const checkRemoteMcpContract = async () => {
   return { operations: operations.length };
 };
 
+// Auto-chequeo de las plantillas de agente publicadas.
+//
+// Los cuatro artefactos `agent_template` que se sirven por HTTP contienen las
+// mismas instrucciones que `apts-surface.json` publica como dato. Son dos copias
+// del mismo texto, y ya se separaron una vez sin que nadie lo notara: tres de las
+// cuatro plantillas siguieron ordenando cosas de la superficie retirada —mirar
+// `.apts/execution-context.json`, dejar que el servidor autocompletara la
+// identidad, levantar servidores con primitivas de OpenCode— mientras el spec ya
+// describía el MCP remoto. Un cliente recibía las dos versiones del manifiesto y
+// se contradecían.
+//
+// Aquí sólo se compara el CUERPO, que es donde vive la instrucción operativa. La
+// cabecera YAML de cada plantilla se mantiene a mano; lo que este chequeo
+// garantiza es que nadie vuelva a publicar instrucciones que el spec desmiente.
+const checkPublishedAgentTemplates = async () => {
+  const surfaceSpec = JSON.parse(await fs.readFile(integrationArtifacts.surface_spec.filePath, 'utf8'));
+  const agentByName = new Map(surfaceSpec.agents.map((agent) => [agent.name, agent]));
+  const normalize = (text) => String(text).replace(/\r/g, '').trim();
+  const problems = [];
+  let checked = 0;
+
+  for (const [artifactId, artifact] of Object.entries(integrationArtifacts)) {
+    if (artifact.kind !== 'agent_template') continue;
+
+    const raw = (await fs.readFile(artifact.filePath, 'utf8')).replace(/\r/g, '');
+    const parts = raw.match(/^(---\n[\s\S]*?\n---\n)([\s\S]*)$/);
+    if (!parts) {
+      problems.push({ artifact: artifactId, reason: 'missing YAML frontmatter' });
+      continue;
+    }
+
+    const name = (parts[1].match(/^name: (.*)$/m) || [])[1];
+    const agent = name ? agentByName.get(name) : null;
+    if (!agent) {
+      problems.push({ artifact: artifactId, reason: `frontmatter name "${name}" is not an agent in apts-surface.json` });
+      continue;
+    }
+
+    if (normalize(parts[2]) !== normalize(agent.body)) {
+      problems.push({
+        artifact: artifactId,
+        agent: name,
+        reason: 'body differs from apts-surface.json',
+        template_length: normalize(parts[2]).length,
+        spec_length: normalize(agent.body).length
+      });
+      continue;
+    }
+
+    checked += 1;
+  }
+
+  if (problems.length) {
+    const templateError = new Error('Published agent templates are out of sync with apts-surface.json');
+    templateError.code = 'AGENT_TEMPLATE_MISMATCH';
+    templateError.details = problems;
+    throw templateError;
+  }
+
+  return { agent_templates: checked };
+};
+
 const startServer = async () => {
   try {
     const contractCheckResult = await checkRemoteMcpContract().catch((error) => {
@@ -5428,6 +5490,15 @@ const startServer = async () => {
       process.exit(3);
     });
     logger.info(contractCheckResult, 'Remote MCP contract self-check passed');
+
+    let templateCheckResult;
+    try {
+      templateCheckResult = await checkPublishedAgentTemplates();
+    } catch (error) {
+      logger.fatal({ err: error, details: error?.details || null }, 'Agent template self-check failed');
+      process.exit(3);
+    }
+    logger.info(templateCheckResult, 'Published agent templates self-check passed');
 
     const [batchNo, migrationNames] = await db.migrate.latest();
 

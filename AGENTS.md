@@ -56,7 +56,7 @@ Pick the shell by the active agent runtime, not by VS Code task:
 
 ## APTS Operational Contract Quick Reference
 
-This section is the short operational summary for agents integrating with APTS. The formal machine-readable contract lives in `integracion/paquete-apts/apts_skills.json` and the endpoint reference lives in `integracion/paquete-apts/references/api-contract.md`.
+This section is the short operational summary for agents integrating with APTS. The formal machine-readable contract lives in `integracion/paquete-apts/apts_skills.json`, which is the single source of truth for the 21 operations.
 
 ### Common Required Fields
 
