@@ -2156,7 +2156,19 @@ const integrationRoot = path.join(__dirname, '..', 'integracion');
 //   one had corrected them here: three `instructions[]` entries and all of `identity_requirements`
 //   still claimed the MCP server auto-fills identity from env vars, `.apts/execution-context.json`
 //   or Git. That is the same claim F6-3 removed from the adapters and F6-4 from the contract.
-//   Cost: the manifest goes from 11.034 to ~9.150 text units per integration.
+//   Cost: the manifest goes from 11.034 to 8.790 text units per integration.
+//   Folded into this same 4.0.0 because it was never deployed (the append-only history below 4.0.0
+//   is untouched; no client ever saw a 4.0.0 without these):
+//   (a) `method_conduction` is published as a new top-level field, sibling of `mcp_endpoint`. It
+//   carries the engine half of the BMAD conduction loop that until now only existed as prose inside
+//   the downloadable `method_orchestrator_agent` template: bootstrap + roster, role switching, the
+//   drive loop dispatch, the generative step rule, and the dev-story completion rule (dev-story is
+//   multi-step and does not auto-release; a story left at `review` is never `done`). The client half
+//   —agent wrapper, tool list, worker delegation, resilience log, retry policy, report format— was
+//   deliberately left in the template. This does NOT save tokens: it moves ~1.6k units from the
+//   download to the manifest. What it buys is closing "zero downloads" and making it impossible for
+//   the loop to drift from the engine. `method_orchestrator_agent` is flagged deprecated with
+//   `replacedBy: method_conduction` and keeps being served unchanged.
 const integrationManifestSchemaVersion = '4.0.0';
 const publicIntegrationBasePath = '/api/public/integrar';
 
@@ -2266,6 +2278,10 @@ const integrationArtifacts = {
     usagePriority: 'entrypoint',
     syncAction: 'overwrite',
     deprecatedFilenames: [],
+    deprecated: true,
+    deprecatedInSchemaVersion: '4.0.0',
+    replacedBy: 'method_conduction',
+    deprecationReason: 'The conduction loop it carried as prose is now published as data in method_conduction, where it cannot drift from the engine that serves it. Still served unchanged for runtimes that want the agent wrapper (frontmatter, tool list, worker delegation, report format), which is the part that was deliberately not moved.',
     description: 'Method orchestrator agent template that bootstraps a BMAD initiative and conducts the analysis→…→done lifecycle from a client spec.'
   },
   mcp_server: {
@@ -2493,6 +2509,64 @@ const buildMcpEndpoint = (req) => {
     registration_by_runtime: buildMcpRuntimeRegistrations(url),
     surface_note: 'This endpoint exposes the same contract operations as the downloadable stdio server, which stays available. Registering it needs a URL and headers only: no file download, no local Node process, no artifact version to keep in sync.'
   };
+};
+
+// --- El bucle de conducción del método, como dato ---------------------------
+//
+// Hasta 4.0.0 esto sólo existía como prosa descargable
+// (`method_orchestrator_agent`, 2.813 unidades). Un cliente sin descargas tenía
+// el transporte y las 21 operaciones, pero no sabía conducir el método.
+//
+// Se publica SÓLO lo que es del motor —lo que el cliente no puede deducir de
+// `tools/list` ni inventar sin equivocarse— y se deja fuera lo que es del
+// programa cliente: el envoltorio de agente, la lista de herramientas
+// (redundante con `tools/list`), el subagente al que se delega, el registro de
+// resiliencia, la política de reintentos y el formato de informe. 1.562
+// unidades de las 2.813.
+//
+// No ahorra tokens: los mueve de la descarga al manifiesto. Lo que compra es
+// cerrar "cero descargas" y que el bucle no pueda desincronizarse del motor.
+const METHOD_CONDUCTION = {
+  summary: 'How to conduct a server-authoritative BMAD initiative end-to-end through the contract operations. The method engine lives on the server: do not invent phases, steps, roles or artifacts — ask apts_next / apts_workflow_step what is required and satisfy exactly that.',
+  bootstrap_rule: [
+    'Before conducting, ensure the initiative and roster exist. Both operations are idempotent.',
+    '1. Call create_initiative with the initiative title and, when the client repo has a spec, pass it as spec_artifact: { title, content } so the server stores it as a typed semantic_documents artifact linked to the initiative (the server has no access to the client filesystem). It returns { initiative_id, epic_id, phase, created|resumed } and folds in one empty epic. Calling it again resumes the existing active initiative instead of duplicating, so it is also the recovery path for an agent that lost its context.',
+    '2. Register the role roster with one set_agent_role call per BMAD role: one distinct agent_name per role, each bound to its method entity via entity_key. The valid entity_key values come in create_initiative\'s roster.entity_keys (and in apts_next while the caller still has no pointer). The server resolves entity_key to entity_id against the initiative\'s library, scoped by source_ref, and persists it non-null. An unset entity_id makes apts_next wait forever: do not skip the roster. set_agent_role rejects an entity_key that is not in the initiative\'s library.',
+    '3. Pick a stable, deterministic agent_name per role and reuse the same name whenever acting as that role, so re-runs upsert the same pointer instead of duplicating.'
+  ].join('\n'),
+  identity_switching_rule: [
+    'The conducting client is several roles at once. The server names the role a step requires in the role field:',
+    '- apts_next returns the entity REQUIRED by the current step in role, not the caller\'s role.',
+    '- When next is wait and role differs from the identity that called, the step needs another role: switch the acting agent_name to the roster pointer registered for that role and call again. The required role then receives run_step for the same step. Do not poll all roles blindly — the wait response already names the role to switch to.',
+    '- Keep a stable mapping from role to agent_name out of the registered roster and switch deterministically. The agent_name sent in the call wins over the registration header, which is the mechanism the switch rides on.'
+  ].join('\n'),
+  drive_loop: [
+    'Conduct one step at a time until done or blocked:',
+    '1. Call apts_next acting as a plausible role. apts_status gives the same recommendation without mutating anything.',
+    '2. Dispatch on next:',
+    '- wait: two cases, told apart by the returned role. If role differs from the calling identity, the step needs a different role — switch identity (identity_switching_rule) and continue. If role is the SAME identity already acting, there is no free work unit for that role right now (for example an iterable dev-story whose stories are all claimed or terminal): do not re-call as the same identity in a loop. Re-check with apts_status and, if the lifecycle holds no pending work for it, treat it as nothing-to-do, not as a role switch.',
+    '- run_step with a generative target (target_id equals initiative_id; non-iterable step): drive it with generative_step_rule.',
+    '- run_step with an iterable target (target_id is a story id; the dev-story step): implement the story, then close it with dev_story_completion_rule.',
+    '- done: the lifecycle is complete. Stop and report success.',
+    '- blocked: stop and report the blocker (why, and role when present). Do not improvise around a blocker; surface it.'
+  ].join('\n'),
+  generative_step_rule: [
+    'For a generative (non-iterable) step, acting as the required role:',
+    '1. Call apts_workflow_step to fetch the served step payload. It returns mode plus instruction_chunk, template_slice, needs[] (bounded upstream-artifact slices) and outputs[] (what the step must produce).',
+    '- If mode is await_input, the payload carries questions. Present them to the operator, collect answers, and resume by calling apts_workflow_step again with answers for that step. Elicitation is a pause, not a blocker.',
+    '- If mode is wait, blocked or done, handle it as in drive_loop.',
+    '2. Produce the artifact the step declares in outputs[], grounded in instruction_chunk, template_slice and the needs[] slices. Do not fabricate content the step does not ask for.',
+    '3. Submit with apts_submit_step, passing the produced content or reference in output (for example { title, content } for a doc artifact, { stories: [...] } for backlog items). It returns { ok, captured[], advanced_to, workflow_complete }. If ok is false, read why and correct the call instead of retrying it unchanged: in particular, a step paused in await_input must be resumed via apts_workflow_step with answers before it can be submitted.',
+    '4. If workflow_complete is false, keep serving and submitting the next step of the same workflow. When it is true, go back to drive_loop for the next workflow or phase.'
+  ].join('\n'),
+  dev_story_completion_rule: [
+    'The iterable dev-story step does not auto-release: whoever holds the claim must drive the engine\'s dev-story workflow to completion.',
+    'It is multi-step (the BMAD dev procedure; in the seeded library it is 10 iterable steps, and only the terminal step declares a status output). Acting as the SAME dev agent_name that holds the claim, walk it like a generative workflow (generative_step_rule): apts_workflow_step then apts_submit_step per step, answering any await_input, submitting empty output for the procedure steps and output: { status: "done", code_ref: "<commit hash>" } on the step that declares the status output.',
+    'Each submit advances one step. The claimed story is marked done and the cursor released only when that terminal status output is captured (workflow_complete / iterable_unit_done). Do not re-resolve via apts_next per step, and do not expect a single submit to close the story.',
+    'A backlog status update made outside this workflow is not enough: a story left at review is non-terminal, so without the terminal apts_submit_step it is never done.',
+    'Once it is closed, re-enter drive_loop: apts_next hands out the next free unit, or advances the phase once every story is done.',
+    'If the implementation is blocked, make sure the blocker is reflected in APTS and stop the cycle with a blocker report. Do not submit the story as done.'
+  ].join('\n')
 };
 
 // `buildLegacyCleanupTargets` vivía aquí y alimentaba `artifact_sync_policy`, que se
@@ -2726,6 +2800,7 @@ const buildIntegrationManifest = (req) => {
     entrypoint: buildAbsoluteUrl(req, publicIntegrationBasePath),
     api_base_url: buildAbsoluteUrl(req, '/api'),
     mcp_endpoint: buildMcpEndpoint(req),
+    method_conduction: METHOD_CONDUCTION,
     auth: {
       type: 'bearer',
       header: 'Authorization',
