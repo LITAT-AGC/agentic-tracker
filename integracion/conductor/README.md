@@ -27,12 +27,20 @@ reparto natural es: el orquestador (o una persona) lleva la iniciativa hasta
 ```bash
 node integracion/conductor/apts-loop.js \
   --agent-cmd 'claude -p "$(cat {prompt_file})" --model {model} --permission-mode acceptEdits' \
-  --model claude-opus-5 \
+  --model-escalation 'claude-sonnet-5,claude-opus-5' \
   --max-iterations 20
 ```
 
 La identidad cae al entorno si no se pasa por bandera: `APTS_MCP_URL`, `APTS_API_KEY`,
 `APTS_PROJECT_URL`, `APTS_AGENT_NAME`, `APTS_AGENT_EMAIL`.
+
+El entorno, a su vez, cae a un archivo: `--dotenv RUTA`, y por defecto `.env` del
+directorio actual. Que falte no es error; que falte uno señalado a mano, sí. **No pisa
+lo que ya esté en el entorno del shell**, así que la precedencia es bandera > shell >
+archivo. Se llama `--dotenv` y no `--env-file` porque ese nombre lo reserva Node y lo
+intercepta aunque venga detrás del script — y de forma asimétrica, además: si el
+archivo existe deja pasar la bandera sin cargar nada, y si falta mata el proceso con
+`exit 9`.
 
 `--agent-name` debe ser la identidad **registrada como rol dev en el roster**
 (`set_agent_role`) y tiene que ser estable entre vueltas: es el puntero que sostiene el
@@ -41,7 +49,44 @@ conductor para con código 11.
 
 `--agent-cmd` es obligatorio y debe contener `{prompt_file}`. El prompt viaja **por
 archivo**, nunca interpolado en la línea de shell. Admite además `{story_id}`,
-`{model}`, `{agent_name}`, `{project_url}` e `{iteration}`.
+`{model}`, `{agent_name}`, `{project_url}`, `{iteration}`, `{attempt}` y
+`{max_attempts}`.
+
+Si hay política de modelo configurada, el comando **debe** contener `{model}`, o el
+conductor no arranca. Sin esa comprobación se puede montar una escalera `sonnet→opus`,
+no pasarle el modelo al agente, y ver un diario que dice que escaló mientras los tres
+intentos corrían contra el modelo por defecto de la CLI.
+
+## Qué CLI conduce
+
+`--agent-cmd` **es** la elección. El conductor no sabe qué hay al otro lado: escribe el
+prompt en un archivo, sustituye los marcadores en una línea de shell y mira el código de
+salida. Cualquier CLI que sepa hablar MCP contra APTS sirve, y elegir otra es cambiar esa
+línea — por bandera o por `APTS_LOOP_AGENT_CMD` en el `.env`, para que cada desarrollador
+fije la suya sin tocar el comando de nadie.
+
+```bash
+# Claude Code
+APTS_LOOP_AGENT_CMD='claude -p "$(cat {prompt_file})" --model {model} --permission-mode acceptEdits'
+APTS_LOOP_MODEL_ESCALATION='claude-sonnet-5,claude-opus-5'
+
+# Opencode — `-f` adjunta el archivo, así que el prompt no pasa por el shell
+APTS_LOOP_AGENT_CMD='opencode run -m {model} -f {prompt_file} "Implementa la unidad descrita en el archivo adjunto"'
+APTS_LOOP_MODEL_ESCALATION='anthropic/claude-sonnet-5,anthropic/claude-opus-5'
+```
+
+Los nombres de modelo son de la CLI, no de APTS: el conductor los trata como texto opaco
+y los sustituye sin validarlos. Por eso la escalera de Opencode lleva `proveedor/modelo`
+y la de Claude Code no.
+
+**En Windows el `$(cat ...)` no existe**: `shell: true` resuelve a `cmd.exe`, así que la
+forma equivalente es `type {prompt_file} | claude -p --model {model}`. La vía de Opencode
+no tiene ese problema porque nunca mete el prompt en la línea.
+
+**El agente hereda el entorno del conductor**, incluido lo que cargó `--dotenv`. De ahí
+saca su identidad APTS (`APTS_MCP_URL`, `APTS_API_KEY`, `APTS_PROJECT_URL`,
+`APTS_AGENT_NAME`, `APTS_AGENT_EMAIL`) la configuración MCP de la CLI, sin que haya que
+repetirla en el comando ni exponerla en los argumentos del proceso.
 
 Empieza siempre con `--dry-run`: resuelve la primera decisión e informa qué lanzaría,
 sin ejecutar nada.
@@ -53,7 +98,7 @@ sin ejecutar nada.
 | `--max-iterations` | 50 | tope duro; red de seguridad contra un bucle desbocado |
 | `--max-stalls` | 2 | vueltas seguidas sin que cambie **nada** del estado del método |
 | guarda de alcance | `bmad-dev-story` | el motor pide un paso que este conductor no conduce |
-| código del agente | — | el proceso del agente terminó distinto de 0 |
+| código del agente | 1 intento | el proceso del agente terminó distinto de 0 en **todos** sus intentos |
 
 La huella de estancamiento se compone en el cliente con lo que `apts_status` ya
 devuelve —fase, `next`, rol, `workflow_key`, `step_key`, `target_id` y el reparto del
@@ -156,7 +201,11 @@ operador que puede colgarse.
 | 12 | fuera de alcance — el paso recomendado no lo conduce este script |
 | 13 | estancado — la huella no cambió en N vueltas |
 | 14 | tope de iteraciones |
-| 20 | el agente terminó con error |
+| 20 | el agente terminó con error en todos sus intentos |
+
+No hay código nuevo para "falló incluso después de escalar": el motivo es el mismo y el
+detalle lleva la historia — `el agente falló en los 3 intentos (1: sonnet → código 1;
+2: sonnet → código 1; 3: opus → código 1)`, en consola, en el diario y en el aviso.
 
 ## Granularidad y modelo
 
@@ -164,11 +213,102 @@ Una vuelta es **una story**, no un paso: los diez pasos de `bmad-dev-story` los 
 el agente dentro de su sesión. Relanzar contexto por paso pagaría releer el repositorio
 diez veces para una sola story.
 
-De ahí se sigue que `--model` elige un modelo **por story**, no por paso. Enrutar el
-modelo por paso exigiría lanzar un agente por paso, que es justo lo que esta
+De ahí se sigue que el modelo se elige **por intento sobre una story**, no por paso.
+Enrutar el modelo por paso exigiría lanzar un agente por paso, que es justo lo que esta
 granularidad evita.
+
+## Reintento y escalado
+
+Un fallo pasajero del proceso del agente no debe matar la corrida entera. Reintenta el
+conductor y no el agente, por tres razones que no son de gusto: el modo de fallo que
+motiva esto es **el proceso muerto** —CLI caída, límite de contexto, rate limit— y un
+agente que ya no existe no puede reintentarse a sí mismo; **no se puede cambiar de
+modelo dentro de una sesión**, así que escalar exige proceso nuevo; y el reintento
+*dentro* de la sesión ya existe y ya está delegado, que es lo que el prompt dice sobre
+`control_flow`. El agente reintenta **decisiones**; el conductor, **procesos**.
+
+Dos formas de escribir la política, y la escalera es la única fuente del modelo de cada
+intento:
+
+```bash
+--model NOMBRE  --max-retries N        # N+1 intentos, todos con el mismo modelo
+--model-escalation "sonnet,opus"       # 2 intentos: sonnet y, si falla, opus
+```
+
+La longitud de la escalera **es** el número de intentos, así que no hay un segundo mando
+capaz de contradecirla. Por defecto: un intento, sin reintentos — sin ninguna de estas
+banderas el conductor se comporta exactamente como antes de que existieran.
+
+Las tres caen al entorno (`APTS_LOOP_MODEL`, `APTS_LOOP_MAX_RETRIES`,
+`APTS_LOOP_MODEL_ESCALATION`) y de ahí al `.env`, para que cada desarrollador fije los
+suyos sin tocar el comando.
+
+**Las dos formas juntas son error de arranque, pero sólo dentro de una misma capa.** Si
+la línea de comandos dice algo sobre modelos, la capa de entorno queda entera fuera; lo
+contrario obligaría a editar el `.env` para probar una escalera desde la consola. Lo que
+sí sería un fallo silencioso es no saber cuál ganó, así que la política se anuncia al
+arrancar y va al diario:
+
+```
+[apts-loop] política de modelo: escalera sonnet → opus (2 intentos por story)
+            [bandera; se ignora APTS_LOOP_MODEL del entorno]; techo de sesiones: 20 × 2 = 40
+```
+
+El techo se dice en voz alta porque es lo que cuesta dinero: cada intento es una sesión
+de agente entera.
+
+### El reintento reanuda, no repite
+
+El claim es idempotente para el propio `agent_name` y el plazo de caducidad sólo se
+evalúa sobre los punteros de **otros** agentes, así que el reintento recupera la misma
+story. Y como el motor re-sirve el paso fijado mientras el puntero siga `running`, el
+intento siguiente **vuelve al paso donde murió el anterior**: si murió en el 5, empieza
+en el 5. Por eso reintentar es barato, y por eso escalar de modelo apunta justo a la
+parte que resistió en vez de pagar otra vez los pasos que ya cerraron.
+
+A partir del segundo intento el prompt lleva un bloque extra que se lo dice al agente y
+le pide comprobar el árbol de trabajo antes de rehacer nada. En el camino feliz ese
+bloque no se envía y no cuesta nada.
+
+Lo que **no** se puede deshacer es un paso ya entregado: los submits sólo avanzan. Un
+agente que entrega basura y muere después deja un caso que se arregla a mano; el
+conductor no puede revertirlo y el agente tampoco.
+
+### Antes de gastar un intento, se pregunta
+
+Entre un fallo y el reintento el conductor vuelve a llamar a `apts_status`. Cuesta cero
+tokens y evita los dos derroches obvios: quemar una sesión del modelo caro en una story
+que el agente ya cerró antes de morir al salir, e insistir sobre un bloqueo que el
+agente reportó correctamente. Si la recomendación ya no apunta a esa story, la vuelta
+termina ahí y el bucle sigue con el código de siempre.
+
+La espera entre intentos es de 15 s (`APTS_LOOP_RETRY_DELAY_MS`, que existe para poder
+probar el bucle sin esperar de verdad).
+
+### Con `--max-stalls` no se pisan
+
+Los reintentos viven **dentro** de la vuelta, por debajo de la medición de la huella. De
+ahí salen dos propiedades sin ninguna regla especial: no consumen `--max-iterations`
+—una vuelta es una story, con todos sus intentos—, y un atasco no puede contar dos
+veces, porque si los intentos se agotan la vuelta termina en `agente_fallo` y el bucle
+para sin llegar a la comprobación de estancamiento de la vuelta siguiente.
+
+### Lo que no se hace: enrutar por atributos de la story
+
+Se consideró elegir el modelo inicial según `item_type` o `priority`. No entra, y no por
+coste —serían cero tokens— sino porque se pelea con la escalera: quien enruta el modelo
+desde `--agent-cmd` toma posesión de `{model}`, y entonces no hay respuesta coherente a
+qué modelo usa el intento 2. Además, enrutar por atributos es *predecir* la dificultad y
+escalar es *medirla*: empezar barato y subir ante evidencia domina a apostar por
+adelantado.
 
 ## Diario
 
 `.apts/apts-loop.jsonl` por defecto (`--journal off` lo apaga). Una línea por evento:
-arranque, estado de cada vuelta, resultado del agente y parada. No contiene secretos.
+arranque, estado de cada vuelta, resultado de **cada intento** del agente y parada. No
+contiene secretos.
+
+El evento `arranque` lleva la política resuelta (`modelos`, `politica_fuente`,
+`politica_ignorado`, `env_file`); cada evento `agente` lleva `intento`,
+`intentos_totales` y el `modelo` con el que corrió; y un reintento que no llegó a
+gastarse deja un `reintento_innecesario` con lo que el motor respondió en su lugar.

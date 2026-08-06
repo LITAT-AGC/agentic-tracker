@@ -23,6 +23,21 @@
 // SECUENCIAL POR DISEÑO. Una unidad a la vez, un solo `agent_name`. Reanudar es gratis
 // y no hace falta coordinar a nadie: si el conductor muere a mitad, el puntero del
 // motor sigue sosteniendo la story y la siguiente vuelta la retoma donde estaba.
+//
+// REINTENTOS. El modo de fallo que motiva reintentar es el PROCESO muerto (CLI caída,
+// límite de contexto, rate limit), y un agente que ya no existe no puede reintentarse a
+// sí mismo; cambiar de modelo, además, exige proceso nuevo por construcción. Así que
+// reintenta el conductor. El reintento dentro de la sesión es otra capa y ya está
+// delegada: es lo que el prompt dice sobre `control_flow`. El agente reintenta
+// decisiones; el conductor, procesos.
+//
+// El reintento REANUDA, no repite: el claim es idempotente para el propio caller
+// (`claimDevStory`) y `aptsWorkflowStep` re-sirve el paso fijado mientras el puntero
+// siga `running`, así que el intento siguiente vuelve al paso donde murió el anterior
+// con la misma story. De ahí que sea barato, y que escalar de modelo apunte justo a la
+// parte que resistió. Lo que NO se puede deshacer es un paso ya entregado: los submits
+// sólo avanzan. Un agente que entrega basura y muere después deja un caso que se
+// arregla a mano.
 
 const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
@@ -59,15 +74,34 @@ Identidad (cae al entorno si se omite):
   --agent-email CORREO    APTS_AGENT_EMAIL
 
 Ejecución:
-  --agent-cmd "..."       obligatorio. Comando que implementa UNA story. Debe contener
-                          {prompt_file}; admite {story_id} {model} {agent_name}
-                          {project_url} {iteration}
-  --model NOMBRE          se sustituye en {model} (un modelo por story: ver NOTA abajo)
+  --agent-cmd "..."       APTS_LOOP_AGENT_CMD
+                          obligatorio. Comando que implementa UNA story: aquí se elige
+                          la CLI que conduce (Claude Code, Opencode, la que sea).
+                          Debe contener {prompt_file}; admite {story_id} {model}
+                          {agent_name} {project_url} {iteration} {attempt}
+                          {max_attempts}
   --prompt-file RUTA      plantilla de prompt propia en vez de la de por defecto
   --workflows LISTA       workflows en alcance (por defecto: bmad-dev-story)
+  --dotenv RUTA           archivo de entorno a cargar (por defecto .env del directorio
+                          actual; que falte NO es error, salvo si lo pides por bandera).
+                          No pisa lo que ya esté en el entorno del shell.
+                          Se llama así, y no --env-file, porque ese nombre lo reserva
+                          Node y lo intercepta incluso detrás del script.
+
+Modelo por intento (dos formas de escribir lo mismo; ver NOTA abajo):
+  --model NOMBRE          APTS_LOOP_MODEL              modelo de todos los intentos
+  --max-retries N         APTS_LOOP_MAX_RETRIES        N reintentos al mismo --model
+  --model-escalation LISTA  APTS_LOOP_MODEL_ESCALATION "sonnet,opus" = 2 intentos, el
+                          primero con sonnet y el segundo con opus. Su longitud fija
+                          cuántos intentos hay.
+                          Las dos formas juntas EN LA MISMA CAPA son error de arranque.
+                          Si la línea de comandos dice algo de modelos, la capa de
+                          entorno queda fuera entera (y se dice cuál ganó al arrancar).
+                          Por defecto: un intento, sin reintentos.
 
 Frenos:
-  --max-iterations N      tope duro de vueltas (por defecto 50)
+  --max-iterations N      tope duro de vueltas (por defecto 50). Los reintentos NO
+                          consumen vueltas: una vuelta es una story, con sus intentos.
   --max-stalls N          vueltas seguidas sin que cambie nada antes de parar (por defecto 2)
   --dry-run               resuelve e informa la primera decisión sin lanzar nada
 
@@ -84,10 +118,12 @@ Salida:
                           APTS_LOOP_STORY_ID, APTS_LOOP_ITERATION, APTS_LOOP_PROJECT_URL,
                           APTS_LOOP_EXIT_CODE), nunca por sustitución de texto.
 
-NOTA sobre --model: el conductor lanza un agente por STORY, y los diez pasos de
-dev-story corren dentro de esa sesión. Por eso el modelo se elige una vez por story y
-no por paso. Enrutar por paso exigiría lanzar un agente por paso, que es justo lo que
-esta granularidad evita.
+NOTA sobre el modelo: el conductor lanza un agente por STORY, y los diez pasos de
+dev-story corren dentro de esa sesión. Por eso el modelo se elige una vez por intento
+sobre una story, y no por paso. Enrutar por paso exigiría lanzar un agente por paso,
+que es justo lo que esta granularidad evita. El reintento REANUDA en el paso donde
+murió el intento anterior, así que escalar de modelo apunta a la parte que resistió y
+no vuelve a pagar los pasos que ya cerraron.
 
 Códigos de salida: 0 done · 1 configuración · 2 red · 10 blocked · 11 wait ·
 12 fuera de alcance · 13 estancado · 14 tope de iteraciones · 20 el agente falló.
@@ -131,6 +167,20 @@ el paso retroceda solo ni pares sólo porque leas HALT.
 
 No toques el ciclo más allá de esta unidad: no arranques iniciativas, no conduzcas
 fases generativas y no cierres otras stories.`;
+
+// Se añade SÓLO a partir del segundo intento: en el camino feliz cuesta cero tokens.
+// Existe porque el conductor no mira el repositorio y no puede saber si el intento
+// muerto dejó el árbol a medias; el agente sí puede mirarlo, y hay que decirle que lo
+// haga antes de rehacer nada.
+const SUFIJO_REINTENTO = `
+
+REINTENTO. Éste es el intento {attempt} de {max_attempts} sobre esta unidad: un intento
+anterior murió sin cerrarla. El motor conservó tu claim y tu paso, así que
+\`apts_workflow_step\` te va a servir el MISMO paso en el que se quedó, no el primero.
+Antes de rehacer nada, mira ese paso y comprueba en qué estado quedó el árbol de
+trabajo: el intento anterior pudo dejar ediciones a medias. Lo que ya esté entregado no
+se puede deshacer —los submits sólo avanzan—; si lo entregado te impide continuar,
+reporta el bloqueo y detente en vez de cerrar la unidad como done.`;
 
 // ---- utilidades ----
 
@@ -176,6 +226,120 @@ class ErrorRed extends Error {}
 class Parada extends Error {
   constructor(motivo, codigo) { super(motivo); this.motivo = motivo; this.codigo = codigo; }
 }
+
+// ---- entorno ----
+//
+// Se lee con el builtin de Node, no con dotenv: este script no requiere nada fuera de
+// `node:*` y esa propiedad vale más que la comodidad — es un archivo que un operador
+// copia y ejecuta, y el `dotenv` que hay en el repo es del servidor. `loadEnvFile` NO
+// pisa lo que ya está en el entorno, así que la precedencia sale gratis y sin escribir
+// una sola línea: bandera > entorno del shell > .env.
+//
+// La bandera se llama `--dotenv` y NO `--env-file`, que sería el nombre obvio: ese lo
+// reserva Node y lo intercepta aunque venga detrás de la ruta del script. Peor aún, lo
+// hace de forma asimétrica — medido en Node 24.11: si el archivo existe deja pasar la
+// bandera a `process.argv` sin cargar nada, y si falta mata el proceso con exit 9 y un
+// mensaje del runtime. O sea, se quedaría justo con el caso que aquí queremos reportar
+// bien.
+const cargarEnv = (ruta) => {
+  const explicito = typeof ruta === 'string' && ruta.trim() ? ruta.trim() : '';
+  const destino = path.resolve(explicito || '.env');
+  try {
+    process.loadEnvFile(destino);
+    return destino;
+  } catch (error) {
+    // Que falte no es error: la mayoría de las corridas pasan la identidad por entorno.
+    // Señalado a mano y ausente, sí: quien escribe --dotenv espera que se lea.
+    if (explicito) throw new ErrorConfig(`no se pudo leer --dotenv ${destino}: ${error.message}`);
+    return null;
+  }
+};
+
+// ---- política de modelo por intento ----
+//
+// La escalera es la ÚNICA fuente del modelo de cada intento: `--model-escalation
+// "sonnet,opus"` son dos intentos, el primero con sonnet y el segundo con opus. Su
+// longitud fija cuántos hay, así que no existe un segundo mando capaz de
+// contradecirla. `--model` con `--max-retries` es la otra forma de escribir lo mismo
+// cuando todos los peldaños son iguales.
+//
+// Las dos formas juntas se rechazan AL ARRANCAR —un campo que contradice se rechaza,
+// no se ignora— pero sólo dentro de una MISMA capa. Si la línea de comandos dice algo
+// sobre modelos, la capa de entorno queda entera fuera: obligar a editar el .env para
+// probar una escalera desde la consola sería justo el coste que esta comprobación no
+// debe tener, y "la bandera pisa al archivo" no es una contradicción silenciosa sino lo
+// que cualquiera espera. Lo que sí sería silencioso es no decir cuál ganó — y por eso
+// la política se anuncia al arrancar y va al diario.
+const CLAVES_MODELO = ['model', 'max-retries', 'model-escalation'];
+const ETIQUETA_ENV = {
+  model: 'APTS_LOOP_MODEL',
+  'max-retries': 'APTS_LOOP_MAX_RETRIES',
+  'model-escalation': 'APTS_LOOP_MODEL_ESCALATION',
+};
+const etiqueta = (fuente, clave) => (fuente === 'bandera' ? `--${clave}` : ETIQUETA_ENV[clave]);
+
+const componerEscalera = (capa, fuente) => {
+  const { model, 'max-retries': maxRetries, 'model-escalation': escalada } = capa;
+  if (!model && !maxRetries && !escalada) return null;
+
+  if (escalada && (model || maxRetries)) {
+    const otras = CLAVES_MODELO
+      .filter((k) => k !== 'model-escalation' && capa[k])
+      .map((k) => etiqueta(fuente, k));
+    throw new ErrorConfig(
+      `${etiqueta(fuente, 'model-escalation')} ya dice cuántos intentos hay y con qué modelo cada uno; `
+      + `${otras.join(' y ')} dice lo mismo por otra vía. Usa una sola de las dos formas.`,
+    );
+  }
+
+  if (escalada) {
+    const peldanos = escalada.split(',').map((s) => s.trim()).filter(Boolean);
+    if (!peldanos.length) throw new ErrorConfig(`${etiqueta(fuente, 'model-escalation')} no nombra ningún modelo`);
+    return { escalera: peldanos, fuente };
+  }
+
+  // Sin escalera: `--max-retries N` repite `--model` N+1 veces. Sin `--model`, repite el
+  // modelo por defecto de la CLI del agente, que también es un caso legítimo.
+  if (maxRetries && !/^\d+$/.test(maxRetries)) {
+    throw new ErrorConfig(`${etiqueta(fuente, 'max-retries')} debe ser un entero >= 0 (recibido '${maxRetries}')`);
+  }
+  const intentos = (maxRetries ? Number.parseInt(maxRetries, 10) : 0) + 1;
+  return { escalera: Array.from({ length: intentos }, () => model), fuente };
+};
+
+const resolverPolitica = (args) => {
+  for (const k of CLAVES_MODELO) {
+    if (args[k] === true) throw new ErrorConfig(`--${k} necesita un valor`);
+  }
+  const capa = (leer) => Object.fromEntries(CLAVES_MODELO.map((k) => [k, leer(k)]));
+  const deArgs = capa((k) => (typeof args[k] === 'string' ? args[k].trim() : ''));
+  const deEnv = capa((k) => (process.env[ETIQUETA_ENV[k]] || '').trim());
+
+  // La capa de bandera se resuelve primero y corta: si gana, la de entorno ni siquiera
+  // se valida. Un .env contradictorio no debe impedir un experimento desde la consola.
+  const porBandera = componerEscalera(deArgs, 'bandera');
+  if (porBandera) {
+    return { ...porBandera, ignorado: CLAVES_MODELO.filter((k) => deEnv[k]).map((k) => ETIQUETA_ENV[k]) };
+  }
+  const porEntorno = componerEscalera(deEnv, 'entorno');
+  if (porEntorno) return { ...porEntorno, ignorado: [] };
+  return { escalera: [''], fuente: 'defecto', ignorado: [] };
+};
+
+const describirPolitica = (politica, maxIterations) => {
+  const nombres = politica.escalera.map((m) => m || 'el modelo por defecto de la CLI');
+  const cuerpo = politica.escalera.length === 1
+    ? `${nombres[0]}, sin reintentos`
+    : `escalera ${nombres.join(' → ')} (${politica.escalera.length} intentos por story)`;
+  const origen = politica.fuente === 'defecto' ? 'sin configurar' : politica.fuente;
+  const ignorado = politica.ignorado.length ? `; se ignora ${politica.ignorado.join(', ')} del entorno` : '';
+  // El techo se dice en voz alta porque es lo que cuesta dinero: cada intento es una
+  // sesión de agente entera, y multiplicarlo por las vueltas es fácil de no ver.
+  const techo = politica.escalera.length > 1
+    ? `; techo de sesiones: ${maxIterations} × ${politica.escalera.length} = ${maxIterations * politica.escalera.length}`
+    : '';
+  return `${cuerpo} [${origen}${ignorado}]${techo}`;
+};
 
 // ---- cliente MCP (la superficie declarada; no se construye un wrapper REST paralelo) ----
 
@@ -374,22 +538,27 @@ const parar = async (cfg, { motivo, detalle, codigo, fase, storyId, iteracion })
 // ---- lanzamiento del agente ----
 
 const lanzarAgente = (cfg, contexto) => {
+  // El número de intento entra en el nombre: si el intento 1 falla, su prompt es lo
+  // primero que hace falta para diagnosticar, y el intento 2 no debe pisarlo.
   const ficheroPrompt = path.join(
     os.tmpdir(),
-    `${NOMBRE}-${contexto.iteration}-${String(contexto.story_id).slice(0, 8)}.md`,
+    `${NOMBRE}-${contexto.iteration}-${contexto.intento}-${String(contexto.story_id).slice(0, 8)}.md`,
   );
   fs.writeFileSync(ficheroPrompt, contexto.prompt, 'utf8');
 
   const comando = sustituir(cfg.agentCmd, {
     prompt_file: ficheroPrompt,
     story_id: contexto.story_id,
-    model: cfg.model || '',
+    model: contexto.modelo || '',
     agent_name: cfg.agentName,
     project_url: cfg.projectUrl,
     iteration: contexto.iteration,
+    attempt: contexto.intento,
+    max_attempts: cfg.escalera.length,
   });
 
-  log(`vuelta ${contexto.iteration}: story ${contexto.story_id} → ${comando}`);
+  const cual = cfg.escalera.length > 1 ? ` (intento ${contexto.intento}/${cfg.escalera.length}${contexto.modelo ? `, ${contexto.modelo}` : ''})` : '';
+  log(`vuelta ${contexto.iteration}: story ${contexto.story_id}${cual} → ${comando}`);
   const inicio = Date.now();
   const r = spawnSync(comando, { shell: true, stdio: 'inherit' });
   const ms = Date.now() - inicio;
@@ -419,8 +588,11 @@ const construirConfig = (args) => {
     projectUrl: val('project-url', 'APTS_PROJECT_URL'),
     agentName: val('agent-name', 'APTS_AGENT_NAME'),
     agentEmail: val('agent-email', 'APTS_AGENT_EMAIL'),
-    agentCmd: typeof args['agent-cmd'] === 'string' ? args['agent-cmd'] : '',
-    model: typeof args.model === 'string' ? args.model : '',
+    // Cae al entorno como el resto: es la bandera que decide QUÉ CLI conduce (Claude
+    // Code, Opencode, otra), y eso es preferencia de cada desarrollador, no del comando.
+    // No se recorta con trim ni se normaliza: es una línea de shell y los espacios de
+    // dentro son suyos.
+    agentCmd: typeof args['agent-cmd'] === 'string' ? args['agent-cmd'] : (process.env.APTS_LOOP_AGENT_CMD || ''),
     onStop: typeof args['on-stop'] === 'string' ? args['on-stop'] : '',
     // El token SÓLO por entorno, nunca por bandera: los argumentos de un proceso los ve
     // cualquiera con `ps` o el administrador de tareas, y quedan en el historial del
@@ -434,6 +606,9 @@ const construirConfig = (args) => {
     workflows: new Set(String(args.workflows || 'bmad-dev-story').split(',').map((s) => s.trim()).filter(Boolean)),
   };
 
+  cfg.politica = resolverPolitica(args);
+  cfg.escalera = cfg.politica.escalera;
+
   const journal = typeof args.journal === 'string' ? args.journal : path.join('.apts', `${NOMBRE}.jsonl`);
   cfg.journal = journal === 'off' ? null : path.resolve(journal);
 
@@ -445,11 +620,21 @@ const construirConfig = (args) => {
   if (!cfg.agentEmail) faltan.push('--agent-email / APTS_AGENT_EMAIL');
   if (faltan.length) throw new ErrorConfig(`falta configuración: ${faltan.join(', ')}`);
 
-  if (!cfg.dryRun) {
-    if (!cfg.agentCmd) throw new ErrorConfig('--agent-cmd es obligatorio (o usa --dry-run para inspeccionar sin lanzar nada)');
+  if (!cfg.dryRun && !cfg.agentCmd) {
+    throw new ErrorConfig('--agent-cmd es obligatorio (o usa --dry-run para inspeccionar sin lanzar nada)');
+  }
+  // El comando se valida SIEMPRE que exista, también en --dry-run: la documentación
+  // manda empezar por ahí, y un ensayo que no comprueba el comando no sirve de ensayo.
+  if (cfg.agentCmd) {
     // Sin este marcador el prompt no llegaría al agente y la vuelta giraría en vacío.
     if (!cfg.agentCmd.includes('{prompt_file}')) {
       throw new ErrorConfig('--agent-cmd debe contener {prompt_file}: el prompt viaja por archivo, no interpolado en el shell');
+    }
+    // Misma clase de comprobación, y cierra el último agujero silencioso: montar una
+    // escalera sonnet→opus, que el comando no reciba {model}, y que los tres intentos
+    // corran contra el modelo por defecto de la CLI mientras el diario dice que escaló.
+    if (cfg.escalera.some(Boolean) && !cfg.agentCmd.includes('{model}')) {
+      throw new ErrorConfig('hay política de modelo configurada pero --agent-cmd no contiene {model}: el modelo elegido no llegaría al agente');
     }
   }
   if (cfg.maxIterations < 1) throw new ErrorConfig('--max-iterations debe ser al menos 1');
@@ -467,6 +652,26 @@ const construirConfig = (args) => {
 
 // ---- bucle ----
 
+// Espera entre intentos. Sin bandera: frente a una sesión de agente que dura minutos es
+// ruido, y frente a un rate limit es el seguro más barato que hay. Se puede bajar por
+// entorno igual que `APTS_LOOP_TELEGRAM_API`, y por el mismo motivo: para poder probar
+// el bucle sin quedarse esperando de verdad.
+const REINTENTO_ESPERA_MS = entero(process.env.APTS_LOOP_RETRY_DELAY_MS, 15000);
+
+// El detalle que lee el operador a las tres de la mañana. Con un solo intento se dice
+// como siempre; con varios, lo único que importa es qué modelos se probaron y con qué
+// resultado, porque de ahí sale si escalar más habría servido de algo.
+const describirIntentos = (intentos) => {
+  if (intentos.length === 1) {
+    const i = intentos[0];
+    return `el agente terminó con código ${i.exit_code}${i.error ? ` (${i.error})` : ''}`;
+  }
+  const detalle = intentos
+    .map((i) => `${i.intento}: ${i.modelo || 'modelo por defecto'} → código ${i.exit_code}`)
+    .join('; ');
+  return `el agente falló en los ${intentos.length} intentos (${detalle})`;
+};
+
 // Se guarda aparte porque el manejador de errores de abajo necesita poder avisar, y para
 // entonces `cfg` ya no está en alcance. Un bucle desatendido que se cae porque APTS no
 // responde es justo el caso en el que hace falta el aviso, y sin esto era el único que
@@ -476,6 +681,9 @@ let cfgActual = null;
 const main = async () => {
   const args = parsearArgs(process.argv.slice(2));
   if (args.help || args.h) { process.stdout.write(AYUDA); return; }
+
+  // Antes de componer nada: la identidad y la política de modelo pueden venir de ahí.
+  const envCargado = cargarEnv(args.dotenv);
 
   const cfg = construirConfig(args);
   cfgActual = cfg;
@@ -491,8 +699,14 @@ const main = async () => {
     max_stalls: cfg.maxStalls,
     workflows: [...cfg.workflows],
     dry_run: cfg.dryRun,
+    env_file: envCargado,
+    modelos: cfg.escalera,
+    politica_fuente: cfg.politica.fuente,
+    politica_ignorado: cfg.politica.ignorado,
   });
   log(`conduciendo ${cfg.projectUrl} como '${cfg.agentName}' (alcance: ${[...cfg.workflows].join(', ')})`);
+  if (envCargado) log(`entorno cargado de ${envCargado}`);
+  log(`política de modelo: ${describirPolitica(cfg.politica, cfg.maxIterations)}`);
 
   let huellaPrevia = null;
   let estancadas = 0;
@@ -593,28 +807,84 @@ const main = async () => {
       return;
     }
 
-    const prompt = sustituir(plantillaPrompt, {
-      story_id: rec.target_id,
-      agent_name: cfg.agentName,
-      project_url: cfg.projectUrl,
-      role: rec.role || '',
-      iteration: iteracion,
-    });
+    // ---- intentos sobre esta story ----
+    //
+    // Los reintentos viven DENTRO de la vuelta, por debajo de la medición de huella.
+    // De ahí salen dos propiedades sin escribir ninguna regla especial: no consumen
+    // `--max-iterations` (una vuelta es una story, con todos sus intentos), y un atasco
+    // no puede sumar dos paradas — si los intentos se agotan, la vuelta termina en
+    // `agente_fallo` y el bucle para sin llegar a la comprobación de estancamiento de
+    // la vuelta siguiente.
+    const storyId = rec.target_id;
+    const intentos = [];
+    let ultimo = null;
+    let seguir = false; // el motor dejó de apuntar a esta story: sigue el bucle, no reintentes
 
-    const r = lanzarAgente(cfg, { story_id: rec.target_id, iteration: iteracion, prompt });
-    registrar(cfg, { evento: 'agente', iteracion, story_id: rec.target_id, exit_code: r.codigo, ms: r.ms, error: r.error });
+    for (let intento = 1; intento <= cfg.escalera.length; intento += 1) {
+      const modelo = cfg.escalera[intento - 1];
+      const plantilla = intento === 1 ? plantillaPrompt : plantillaPrompt + SUFIJO_REINTENTO;
+      const prompt = sustituir(plantilla, {
+        story_id: storyId,
+        agent_name: cfg.agentName,
+        project_url: cfg.projectUrl,
+        role: rec.role || '',
+        iteration: iteracion,
+        attempt: intento,
+        max_attempts: cfg.escalera.length,
+      });
 
-    if (r.codigo !== 0) {
+      ultimo = lanzarAgente(cfg, { story_id: storyId, iteration: iteracion, intento, modelo, prompt });
+      intentos.push({ intento, modelo: modelo || null, exit_code: ultimo.codigo, error: ultimo.error });
+      registrar(cfg, {
+        evento: 'agente',
+        iteracion,
+        intento,
+        intentos_totales: cfg.escalera.length,
+        story_id: storyId,
+        modelo: modelo || null,
+        exit_code: ultimo.codigo,
+        ms: ultimo.ms,
+        error: ultimo.error,
+      });
+
+      if (ultimo.codigo === 0) break;
+      if (intento === cfg.escalera.length) break; // agotados: se decide justo debajo
+
+      // Antes de gastar otro intento —y otro modelo, que puede ser más caro— se le
+      // pregunta al motor. Cuesta CERO tokens y evita los dos derroches obvios: quemar
+      // una sesión de opus en una story que el agente ya cerró antes de morir al salir,
+      // e insistir sobre un bloqueo que el agente reportó correctamente.
+      log(`intento ${intento}/${cfg.escalera.length} falló (código ${ultimo.codigo}); preguntando al motor antes de reintentar`);
+      const revision = await llamarMcp(cfg, 'apts_status', { agent_name: cfg.agentName });
+      const rev = (revision && revision.recommendation) || {};
+      if (rev.next !== 'run_step' || rev.target_id !== storyId) {
+        // No se decide aquí qué significa: la vuelta siguiente lo resuelve con el mismo
+        // código de siempre (done, blocked, wait, fuera de alcance). Duplicar ese
+        // enrutado aquí sería una segunda copia que se desincronizaría de la primera.
+        log(`tras el fallo el motor ya no apunta a ${storyId} (next=${rev.next}${rev.target_id ? `, target=${rev.target_id}` : ''}); no se gasta reintento`);
+        registrar(cfg, {
+          evento: 'reintento_innecesario', iteracion, intento, story_id: storyId, next: rev.next, target_id: rev.target_id || null,
+        });
+        seguir = true;
+        break;
+      }
+      await dormir(REINTENTO_ESPERA_MS);
+    }
+
+    if (seguir) continue;
+
+    if (ultimo.codigo !== 0) {
       await parar(cfg, {
         motivo: 'agente_fallo',
-        detalle: `el agente terminó con código ${r.codigo}${r.error ? ` (${r.error})` : ''}`,
+        detalle: describirIntentos(intentos),
         codigo: SALIDA.agente_fallo,
         fase,
-        storyId: rec.target_id,
+        storyId,
         iteracion,
       });
     }
-    log(`vuelta ${iteracion} completada en ${Math.round(r.ms / 1000)}s`);
+    const gastados = intentos.length > 1 ? ` tras ${intentos.length} intentos` : '';
+    log(`vuelta ${iteracion} completada en ${Math.round(ultimo.ms / 1000)}s${gastados}`);
   }
 
   await parar(cfg, {
