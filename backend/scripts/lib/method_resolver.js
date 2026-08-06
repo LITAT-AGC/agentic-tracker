@@ -36,6 +36,25 @@ const { loadRosterKeys } = require('./method_bootstrap');
 const LIFECYCLE = ['analysis', 'planning', 'solutioning', 'implementation', 'done'];
 const TERMINAL_STATUSES = ['done', 'archived'];
 
+const readPositiveMs = (raw, fallback) => {
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
+};
+
+// Plazo del claim de una unidad iterable (arrendamiento, no reserva perpetua).
+// El puntero se refresca en cada apts_workflow_step / apts_submit_step, así que un
+// puntero `running` que lleva más de esto sin tocarse es un conductor que se murió
+// a mitad de la story. Sin plazo esa unidad queda reservada para siempre y el ciclo
+// responde `wait: sin unidades de trabajo libres` indefinidamente — el modo de fallo
+// que un bucle desatendido encuentra y uno supervisado no, porque el operador
+// reinicia a mano sin enterarse.
+//
+// El plazo debe superar al paso más largo de dev-story (implementar + escribir
+// tests), porque trabajar NO refresca el puntero: sólo lo refresca el submit del
+// paso. Por eso el defecto es holgado; bajarlo acelera la recuperación pero arriesga
+// que dos agentes tomen la misma story mientras el primero sigue vivo trabajando.
+const CLAIM_TTL_MS = readPositiveMs(process.env.METHOD_CLAIM_TTL_MS, 60 * 60 * 1000);
+
 // ---- F3-T1.5 — Navegación DAG multi-skill-por-fase ----
 // El corpus real tiene varios workflows por fase (DAG inter-workflow). El routing
 // ya es dato (workflow_definitions.metadata.routing, de module-help.csv). Modelo de
@@ -193,13 +212,36 @@ const claimDevStory = async (db, ctx, caller, workflow, step) => {
     .orderBy('id', 'asc')
     .forUpdate();
 
-  // Sostenidas por OTRO agente (otro puntero running con cursor.story_id).
+  // Sostenidas por OTRO agente (otro puntero running con cursor.story_id), pero
+  // sólo mientras su arrendamiento siga vigente. La vigencia se calcula en la BASE
+  // (el `now()` de Postgres), no con el reloj de Node: la aplicación y la base viven
+  // en máquinas distintas, así que comparar dos relojes haría caducar claims por
+  // deriva en vez de por abandono.
   const others = await db('project_state')
     .where({ initiative_id: ctx.initiative_id, step_status: 'running' })
-    .whereNot({ agent_name: caller.agent_name });
-  const heldByOthers = new Set(
-    others.map((o) => o.cursor && o.cursor.story_id).filter(Boolean),
-  );
+    .whereNot({ agent_name: caller.agent_name })
+    .select('*', db.raw("(updated_at < now() - ? * interval '1 millisecond') as lease_expired", [CLAIM_TTL_MS]));
+
+  const heldByOthers = new Set();
+  const expiredPointerIds = [];
+  for (const o of others) {
+    const storyId = o.cursor && o.cursor.story_id;
+    // Un puntero sin story_id está conduciendo un paso generativo: no sostiene
+    // ninguna unidad, así que su arrendamiento no es asunto de este reparto y no se
+    // toca. Sin esta guarda, caducar liberaría trabajo generativo en curso.
+    if (!storyId) continue;
+    if (o.lease_expired) expiredPointerIds.push(o.id);
+    else heldByOthers.add(storyId);
+  }
+
+  // Caducar es soltar: si el puntero no se libera, el agente muerto sigue figurando
+  // como `running` sobre una story que otro acaba de tomar, y el reparto pasaría a
+  // ver dos dueños. Se libera igual que en el camino de abajo (idle + cursor nulo).
+  if (expiredPointerIds.length) {
+    await db('project_state')
+      .whereIn('id', expiredPointerIds)
+      .update({ step_status: 'idle', cursor: null, updated_at: db.fn.now() });
+  }
 
   const free = candidates.find((r) => !heldByOthers.has(r.id));
   if (!free) {
@@ -385,6 +427,40 @@ const resolveNeed = async (db, ctx, need) => {
 const stepAsks = (step) =>
   (step.metadata && Array.isArray(step.metadata.asks) ? step.metadata.asks : []);
 
+// ---- Control de flujo declarado por el paso (metadata.control / metadata.checks) ----
+// El corpus BMAD ramifica dentro del paso: `<goto step|anchor>` y `HALT`. El
+// importador lo preserva en workflow_steps.metadata.control, y las condiciones que lo
+// gobiernan en metadata.checks[].condition_text. Hasta ahora nada de eso salía en el
+// payload, así que el cliente conducía a ciegas un grafo que la base ya tenía sembrado
+// (p. ej. el paso de validación de dev-story declara volver al de implementación).
+//
+// Viajan la rama y la condición; NUNCA checks[].raw. Medido sobre bmad-dev-story:
+// control 272 B en los diez pasos y condition_text 1.446 B, contra 13.153 B de `raw`
+// —7.343 B en un solo paso, seis veces el presupuesto de un need entero—, lo que
+// rompería el coste ~constante por paso del modelo B. Y `raw` es prosa del modelo de
+// archivos de BMAD (sprint-status.yaml, {{story_path}}) que APTS sustituyó por la
+// base: servirla mandaría al agente a buscar ficheros que no existen. La regla del
+// seed ("checks NO como prompt") sigue en pie: viaja la condición, no la prosa.
+const CONTROL_CONDITIONS_MAX = 12;
+const CONTROL_CONDITION_CHARS = 160;
+
+const stepControlFlow = (step) => {
+  const metadata = step.metadata || {};
+  const branches = Array.isArray(metadata.control) ? metadata.control : [];
+  const conditions = (Array.isArray(metadata.checks) ? metadata.checks : [])
+    .map((c) => (c && typeof c.condition_text === 'string' ? c.condition_text.trim() : ''))
+    .filter(Boolean)
+    .slice(0, CONTROL_CONDITIONS_MAX)
+    .map((t) => (t.length > CONTROL_CONDITION_CHARS ? `${t.slice(0, CONTROL_CONDITION_CHARS)}…` : t));
+  if (!branches.length && !conditions.length) return null;
+  // `enforced` dice si el MOTOR respalda estas ramas o sólo las declara el método.
+  // Hoy no: apts_submit_step avanza por step_order y no mira el goto. Sin decirlo, un
+  // cliente que lea 'HALT' pararía creyendo que el motor lo secunda, y uno que lea
+  // `goto step:5` esperaría retroceder solo. Cuando el cursor honre las ramas, esto
+  // pasa a true y el cliente no necesita cambiar para enterarse.
+  return { branches, conditions, enforced: false };
+};
+
 // Serializa el cursor preservando story_id (claim) y answers (elicitación).
 const serializeCursor = (cursor) => {
   const c = {};
@@ -417,6 +493,8 @@ const buildStepPayload = async (db, ctx, {
     needs,
     outputs: step.outputs || [],
   };
+  const controlFlow = stepControlFlow(step);
+  if (controlFlow) payload.control_flow = controlFlow;
   if (mode === 'await_input') payload.questions = questions || [];
   if (providedInput != null) payload.provided_input = providedInput;
   return payload;
@@ -744,4 +822,8 @@ module.exports = {
   buildStepPayload,
   upsertArtifact,
   SLICE_CHARS,
+  stepControlFlow,
+  CONTROL_CONDITIONS_MAX,
+  CONTROL_CONDITION_CHARS,
+  CLAIM_TTL_MS,
 };
