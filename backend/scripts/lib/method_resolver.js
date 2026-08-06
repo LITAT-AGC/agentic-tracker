@@ -36,7 +36,7 @@ const { loadRosterKeys } = require('./method_bootstrap');
 const LIFECYCLE = ['analysis', 'planning', 'solutioning', 'implementation', 'done'];
 const TERMINAL_STATUSES = ['done', 'archived'];
 
-const readPositiveMs = (raw, fallback) => {
+const readPositiveInt = (raw, fallback) => {
   const n = Number.parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : fallback;
 };
@@ -53,7 +53,21 @@ const readPositiveMs = (raw, fallback) => {
 // tests), porque trabajar NO refresca el puntero: sólo lo refresca el submit del
 // paso. Por eso el defecto es holgado; bajarlo acelera la recuperación pero arriesga
 // que dos agentes tomen la misma story mientras el primero sigue vivo trabajando.
-const CLAIM_TTL_MS = readPositiveMs(process.env.METHOD_CLAIM_TTL_MS, 60 * 60 * 1000);
+const CLAIM_TTL_MS = readPositiveInt(process.env.METHOD_CLAIM_TTL_MS, 60 * 60 * 1000);
+
+// Tope de saltos HACIA ATRÁS a un mismo paso dentro de una unidad de trabajo.
+// Sólo lo pagan las ramas retrógradas: todo ciclo contiene al menos una arista hacia
+// atrás, así que acotarlas acota el grafo entero, y los saltos hacia adelante terminan
+// solos sin gastar presupuesto. Por eso el número significa exactamente "reintentos de
+// este tramo" y no "veces que pasé por aquí".
+//
+// El contador vive en project_state.cursor.visits, no en el conductor: el bucle 8→5 de
+// dev-story ocurre DENTRO de la sesión del agente, por debajo del muestreo de la huella
+// de estancamiento, así que ningún freno de cliente puede verlo. Y vive en el cursor
+// —no en la sesión— para que sobreviva a los reintentos del conductor y al re-servido
+// del paso, y se limpie solo al cerrar el workflow o al soltar el claim: cada story
+// empieza con presupuesto fresco.
+const MAX_STEP_REVISITS = readPositiveInt(process.env.METHOD_MAX_STEP_REVISITS, 3);
 
 // ---- F3-T1.5 — Navegación DAG multi-skill-por-fase ----
 // El corpus real tiene varios workflows por fase (DAG inter-workflow). El routing
@@ -430,9 +444,12 @@ const stepAsks = (step) =>
 // ---- Control de flujo declarado por el paso (metadata.control / metadata.checks) ----
 // El corpus BMAD ramifica dentro del paso: `<goto step|anchor>` y `HALT`. El
 // importador lo preserva en workflow_steps.metadata.control, y las condiciones que lo
-// gobiernan en metadata.checks[].condition_text. Hasta ahora nada de eso salía en el
-// payload, así que el cliente conducía a ciegas un grafo que la base ya tenía sembrado
-// (p. ej. el paso de validación de dev-story declara volver al de implementación).
+// gobiernan en metadata.checks[].condition_text. El payload sirve esas ramas y el
+// cursor las aplica (apts_submit_step), así que el grafo que la base tenía sembrado se
+// conduce de verdad: el paso de validación de dev-story vuelve al de implementación.
+//
+// Es poco y concreto: de los 137 pasos del corpus, 10 declaran `control` y sólo 5
+// `goto step:` resuelven a un paso real. La rama que importa es dev-story 8 → 5.
 //
 // Viajan la rama y la condición; NUNCA checks[].raw. Medido sobre bmad-dev-story:
 // control 272 B en los diez pasos y condition_text 1.446 B, contra 13.153 B de `raw`
@@ -444,28 +461,77 @@ const stepAsks = (step) =>
 const CONTROL_CONDITIONS_MAX = 12;
 const CONTROL_CONDITION_CHARS = 160;
 
-const stepControlFlow = (step) => {
+// Forma canónica de una rama, la MISMA que viaja servida y de vuelta en el submit:
+// 'HALT' o `step:<key>`. El agente devuelve un elemento literal de branches[], así que
+// no hay vocabulario nuevo que aprender ni que parsear en ninguno de los dos lados, y
+// validar es comprobar pertenencia al conjunto servido.
+const branchToken = (branch) => {
+  if (branch === 'HALT') return 'HALT';
+  if (branch && typeof branch === 'object' && typeof branch.goto === 'string') return branch.goto;
+  return null;
+};
+
+// Ramas que el motor PUEDE honrar, resueltas contra los pasos del propio workflow.
+//
+// El corpus declara dos cosas que no son direcciones: `goto anchor:*` —un ancla dentro
+// de la prosa del paso, que APTS no tiene dónde resolver: seis de las once del corpus,
+// las seis en el paso 1 de dev-story— y `goto step:N` hacia un paso que ese workflow no
+// trae. Servirlas con `enforced: true` sería volver a mentir, sólo que al revés, así que
+// se descartan aquí. De paso, ese paso 1 pasa de ocho ramas a dos.
+//
+// Se deduplica porque el importador aplana los <goto> a cualquier profundidad y repite:
+// servir dos veces la misma rama es puro gasto y el protocolo de eco no distingue
+// multiplicidad.
+const resolveBranches = (step, stepKeys) => {
+  const declared = (step.metadata && Array.isArray(step.metadata.control)) ? step.metadata.control : [];
+  if (!declared.length) return [];
+  const keys = new Set([...(stepKeys || [])].map((k) => String(k)));
+  const out = [];
+  const seen = new Set();
+  for (const branch of declared) {
+    const token = branchToken(branch);
+    if (!token || seen.has(token)) continue;
+    if (token !== 'HALT' && !(token.startsWith('step:') && keys.has(token.slice(5)))) continue;
+    seen.add(token);
+    out.push(token === 'HALT' ? 'HALT' : { goto: token });
+  }
+  return out;
+};
+
+// `stepKeys`: las claves de los pasos del workflow, para resolver los `goto step:`.
+// El corpus namea cada paso con su `n` de BMAD (`key`), que no coincide con
+// `step_order` cuando los n vienen salteados (0, 20, 30), así que el destino se
+// resuelve por clave y nunca por posición.
+const stepControlFlow = (step, stepKeys) => {
   const metadata = step.metadata || {};
-  const branches = Array.isArray(metadata.control) ? metadata.control : [];
+  const branches = resolveBranches(step, stepKeys);
   const conditions = (Array.isArray(metadata.checks) ? metadata.checks : [])
     .map((c) => (c && typeof c.condition_text === 'string' ? c.condition_text.trim() : ''))
     .filter(Boolean)
     .slice(0, CONTROL_CONDITIONS_MAX)
     .map((t) => (t.length > CONTROL_CONDITION_CHARS ? `${t.slice(0, CONTROL_CONDITION_CHARS)}…` : t));
   if (!branches.length && !conditions.length) return null;
-  // `enforced` dice si el MOTOR respalda estas ramas o sólo las declara el método.
-  // Hoy no: apts_submit_step avanza por step_order y no mira el goto. Sin decirlo, un
-  // cliente que lea 'HALT' pararía creyendo que el motor lo secunda, y uno que lea
-  // `goto step:5` esperaría retroceder solo. Cuando el cursor honre las ramas, esto
-  // pasa a true y el cliente no necesita cambiar para enterarse.
-  return { branches, conditions, enforced: false };
+  // `enforced` dice si el MOTOR respalda estas ramas o sólo las declara el método. Ya
+  // sí: apts_submit_step aplica la que el cliente declare en `output.control`, acotada
+  // al conjunto de branches[] y con tope para las retrógradas. El campo se queda —era
+  // la marca de capacidad en banda, y su trabajo era exactamente éste: que el cliente
+  // no necesitara cambiar para enterarse de que el motor pasó a secundarlas.
+  //
+  // Describe las ramas. Un paso puede traer condiciones sin ninguna rama honrable
+  // (dev-story 3 y 4): ahí no hay nada que respaldar y las condiciones siguen siendo
+  // guía del método, no una promesa del motor.
+  return { branches, conditions, enforced: true };
 };
 
-// Serializa el cursor preservando story_id (claim) y answers (elicitación).
+// Serializa el cursor preservando story_id (claim), answers (elicitación) y visits
+// (presupuesto de saltos hacia atrás). Todo lo que no se nombre aquí se pierde en el
+// siguiente re-servido del paso: `visits` sin esta línea sería un contador que se
+// reinicia solo, es decir, ningún tope.
 const serializeCursor = (cursor) => {
   const c = {};
   if (cursor && cursor.story_id) c.story_id = cursor.story_id;
   if (cursor && cursor.answers && Object.keys(cursor.answers).length) c.answers = cursor.answers;
+  if (cursor && cursor.visits && Object.keys(cursor.visits).length) c.visits = cursor.visits;
   return Object.keys(c).length ? JSON.stringify(c) : null;
 };
 
@@ -493,7 +559,14 @@ const buildStepPayload = async (db, ctx, {
     needs,
     outputs: step.outputs || [],
   };
-  const controlFlow = stepControlFlow(step);
+  // Las claves hermanas sólo hacen falta para resolver los `goto step:`, así que la
+  // consulta la pagan los 10 pasos del corpus que declaran `control`, no los 137.
+  const declaresControl = Boolean(step.metadata && Array.isArray(step.metadata.control)
+    && step.metadata.control.length);
+  const stepKeys = declaresControl
+    ? await db('workflow_steps').where({ workflow_id: workflow.id }).pluck('key')
+    : [];
+  const controlFlow = stepControlFlow(step, stepKeys);
   if (controlFlow) payload.control_flow = controlFlow;
   if (mode === 'await_input') payload.questions = questions || [];
   if (providedInput != null) payload.provided_input = providedInput;
@@ -578,8 +651,9 @@ const aptsWorkflowStep = (db, { project_url, agent_name, answers }) =>
 
 // ---- F3-T4 — apts_submit_step: captura de output del paso + avance del cursor ----
 // Doc-artefactos → APTS (semantic_documents tipados, doc_type del enum); código →
-// referencia (code_ref); unidades iterables → status de la story reclamada. Luego
-// avanza el cursor al próximo paso (o cierra el workflow y libera el puntero).
+// referencia (code_ref); unidades iterables → status de la story reclamada. Luego mueve
+// el cursor: a la rama que el caller declare en `output.control` si el paso la declara,
+// y si no al próximo paso por step_order (o cierra el workflow y libera el puntero).
 //
 // El descriptor de output del paso (step.outputs, cableado en T2) decide QUÉ se
 // captura; el `output` del caller trae el contenido/referencia. Coherente con la
@@ -630,6 +704,33 @@ const aptsSubmitStep = (db, { project_url, agent_name, output }) =>
     const cursor = caller.cursor || {};
     const declared = step.outputs || [];
     const out = output || {};
+    const steps = await loadSteps(trx, workflow.id);
+
+    // ---- 0. Rama de control declarada por el caller ----
+    // Las condiciones del método (`metadata.checks[].condition_text`) son prosa sobre
+    // el árbol de trabajo —"ANY validation fails"—, y el importador aplana los <goto>
+    // sin atribuirlos: el paso 8 de dev-story trae tres ramas y cuatro condiciones sin
+    // nada que las empareje. El motor por tanto no puede ni evaluar ni elegir. Así que
+    // el reparto es el mismo que ya rige la captura de outputs —determinista la
+    // estructura, generativo el contenido—: el agente aporta el valor de verdad, que es
+    // lo único que exige mirar el repositorio, y el motor aporta el grafo (sólo se va a
+    // donde el paso declara) y el tope (MAX_STEP_REVISITS).
+    //
+    // Se valida ANTES de capturar: la transacción commitea al retornar, así que
+    // rechazar después dejaría escritas las capturas de un submit que se dice fallido.
+    const flow = stepControlFlow(step, steps.map((s) => s.key));
+    const branches = (flow && flow.branches) || [];
+    const asked = (out.control === undefined || out.control === null) ? null : branchToken(out.control);
+    if ((out.control !== undefined && out.control !== null)
+        && (!asked || !branches.some((b) => branchToken(b) === asked))) {
+      const oferta = branches.map((b) => branchToken(b)).join(', ');
+      return {
+        ok: false,
+        why: `rama de control no declarada por el paso '${step.key}': ${JSON.stringify(out.control)}`
+          + `. ${oferta ? `Declaradas: ${oferta}` : 'Este paso no declara ninguna rama honrable'}`
+          + '. Enviá en output.control un elemento literal de control_flow.branches, o ninguno para avanzar al paso siguiente',
+      };
+    }
 
     // ---- 1. Captura de output según el descriptor del paso ----
     const captured = [];
@@ -684,8 +785,54 @@ const aptsSubmitStep = (db, { project_url, agent_name, output }) =>
       }
     }
 
-    // ---- 2. Avance del cursor: próximo paso, o cierre del workflow ----
-    const steps = await loadSteps(trx, workflow.id);
+    // ---- 2. Avance del cursor: rama declarada, próximo paso, o cierre del workflow ----
+    const porQue = typeof out.control_why === 'string' && out.control_why.trim()
+      ? out.control_why.trim()
+      : null;
+
+    // HALT: el paso NO avanza y el puntero se queda donde está. La unidad sigue
+    // reclamada, así que el trabajo no se pierde ni se reparte a otro; lo que se
+    // acabó es este submit. Las capturas ya hechas se conservan: el agente produjo
+    // algo, y perderlo obligaría a rehacerlo.
+    const detener = (why) => trx('project_state').where({ id: caller.id }).update({
+      step_status: 'running', cursor: serializeCursor(cursor), updated_at: trx.fn.now(),
+    }).then(() => ({ ok: true, captured, advanced_to: null, workflow_complete: false, halted: true, why }));
+
+    if (asked === 'HALT') {
+      return detener(`HALT declarado en el paso '${step.key}'${porQue ? `: ${porQue}` : ''}`);
+    }
+
+    if (asked) {
+      const targetKey = asked.slice(5);
+      const target = steps.find((s) => String(s.key) === targetKey);
+      // Sólo las retrógradas gastan presupuesto; una arista hacia adelante no puede
+      // cerrar un ciclo por sí sola.
+      if (target.step_order <= step.step_order) {
+        const visits = { ...(cursor.visits || {}) };
+        const gastado = (visits[targetKey] || 0) + 1;
+        if (gastado > MAX_STEP_REVISITS) {
+          // Agotado, se degrada a HALT en vez de avanzar: seguir de largo pasaría por
+          // encima de la validación que acaba de fallar tres veces y cerraría la story
+          // con lo que no pasó. Al no moverse el cursor, la huella del conductor se
+          // congela y el freno de estancamiento vuelve a morder.
+          return detener(
+            `tope de reintentos del paso '${targetKey}' agotado (${MAX_STEP_REVISITS}); `
+            + `el paso '${step.key}' no puede volver a saltar hacia atrás en esta unidad`
+            + `${porQue ? `. Último motivo declarado: ${porQue}` : ''}`,
+          );
+        }
+        visits[targetKey] = gastado;
+        cursor.visits = visits;
+      }
+      await trx('project_state').where({ id: caller.id }).update({
+        current_step_id: target.id, step_status: 'running',
+        cursor: serializeCursor(cursor), updated_at: trx.fn.now(),
+      });
+      return {
+        ok: true, captured, advanced_to: target.key, workflow_complete: false, branch: asked,
+      };
+    }
+
     const next = steps.find((s) => s.step_order > step.step_order) || null;
 
     if (next) {
@@ -823,7 +970,10 @@ module.exports = {
   upsertArtifact,
   SLICE_CHARS,
   stepControlFlow,
+  branchToken,
+  resolveBranches,
   CONTROL_CONDITIONS_MAX,
   CONTROL_CONDITION_CHARS,
   CLAIM_TTL_MS,
+  MAX_STEP_REVISITS,
 };

@@ -145,7 +145,8 @@ contradice, gana el manifiesto.
 
 En resumen de lo que se espera de ti:
 1. \`apts_workflow_step\` para que el servidor te sirva el paso actual.
-2. Haz lo que el paso pide y entrégalo con \`apts_submit_step\`. Cada submit avanza un paso.
+2. Haz lo que el paso pide y entrégalo con \`apts_submit_step\`. Cada submit avanza un
+   paso, salvo que declares una rama (ver CONTROL DE FLUJO).
 3. Repite hasta que la unidad quede cerrada (\`workflow_complete\` / \`iterable_unit_done\`),
    entregando \`output: { status: "done", code_ref: "<hash del commit>" }\` en el paso que
    declara el output de estado.
@@ -159,11 +160,28 @@ respondida: el motor te asignó la story {story_id}. Reanuda tú mismo llamando 
 Esa licencia es SÓLO para lo que la asignación ya determina. Si un paso posterior elicita
 algo que la asignación no decide, no lo inventes: reporta el bloqueo y detente.
 
-El payload del paso puede traer \`control_flow\`: son las ramas que el método declara
-(\`goto\`, \`HALT\`) y las condiciones que las gobiernan. Mientras \`enforced\` sea false, el
-cursor del motor NO las aplica: úsalas como guía de reintento dentro de tu propia
-sesión (por ejemplo, volver a implementar si la validación falla), pero no esperes que
-el paso retroceda solo ni pares sólo porque leas HALT.
+CONTROL DE FLUJO. El payload del paso puede traer \`control_flow\` con \`branches\` —las
+ramas que el método declara— y \`conditions\`, las condiciones en prosa que las gobiernan.
+Con \`enforced: true\` el cursor del motor las aplica, pero no las decide: el motor no
+puede evaluar "ANY validation fails" porque no ve tu árbol de trabajo. Lo decides tú y
+lo declaras al entregar:
+
+  \`output: { control: {"goto":"step:5"}, control_why: "los tests de X siguen rojos" }\`
+  \`output: { control: "HALT", control_why: "no puedo resolver el conflicto de esquema" }\`
+
+Reglas:
+- \`control\` debe ser un elemento LITERAL de \`branches\`, copiado tal cual. Cualquier otra
+  cosa se rechaza con \`ok:false\` y no captura nada.
+- Sin \`control\`, el cursor avanza al paso siguiente: es el camino normal y no hace falta
+  declarar nada para tomarlo.
+- \`{"goto":"step:N"}\` mueve el cursor a ese paso, también hacia atrás — así se vuelve a
+  implementar cuando la validación falla, que es justo lo que el paso 8 de dev-story
+  declara. Los saltos hacia atrás están topados por unidad: agotado el tope, el motor
+  degrada el salto a HALT y responde \`halted:true\` diciéndolo.
+- \`HALT\` NO avanza el cursor y conserva lo ya capturado. Declararlo es parar: reporta
+  además el bloqueo en APTS y termina la sesión. No lo uses para hacer una pausa.
+- Un paso puede traer \`conditions\` y ninguna rama honrable. Ahí no hay nada que declarar:
+  son guía del método, no una promesa del motor.
 
 No toques el ciclo más allá de esta unidad: no arranques iniciativas, no conduzcas
 fases generativas y no cierres otras stories.`;
