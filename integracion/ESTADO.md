@@ -463,6 +463,12 @@ dos rutas responden 200 sirviendo lo nuevo de verdad —el script (46,2 KB) trae
 el README (18,5 KB) la seccion de reintentos de red y la tabla de plantillas de `prompts/`—. Las
 seis comprobaciones del desplegador pasaron.
 
+**Comprobado despues del sexto despliegue del 2026-08-08** (`be3e7b1`, sin migraciones): el
+manifiesto publica **8 artefactos**, con `loop_prompt_code_review` en 1.0.0, `optional: true` y
+dependiendo de `loop_conductor`; y su ruta responde 200 con `text/markdown` y 7 KB del texto real
+—las tres capas nombradas y los marcadores como `{story_id}` sin sustituir, que es como tiene que
+viajar una plantilla—. Las seis comprobaciones del desplegador pasaron.
+
 ## Abierto
 
 **El camino de Cloudflare no se ha visto devolver un vector.** El `CLOUDFLARE_API_TOKEN` del `.env`
