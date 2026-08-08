@@ -2,7 +2,7 @@
 
 Esta carpeta agrupa el material destinado a proyectos cliente que quieran integrarse con APTS.
 
-Se mantiene fuera de `.github/` para evitar que VS Code/Copilot lo trate como customizacion activa del propio repositorio APTS.
+Se mantiene fuera de `.github/` para que ningun runtime lo trate como customizacion activa del propio repositorio APTS.
 
 ## Modelo de superficie
 
@@ -13,22 +13,22 @@ Se mantiene fuera de `.github/` para evitar que VS Code/Copilot lo trate como cu
 
 ## Estructura
 
-- `plantillas-agentes/`: plantillas de agentes para intake, orquestacion, ejecucion y conduccion del metodo.
+- `conductor/`: `apts-loop.js`, el conductor secuencial de la fase de implementacion, y su README.
 - `paquete-apts/`: contrato JSON, guia operativa para `AGENTS.md`, guia de empaquetado y referencia de API.
-- `paquete-apts/runtime-adapters/`: artefactos por runtime generados desde `spec/apts-surface.json` (`claude/`, `opencode/`, `vscode/`).
+- `paquete-apts/runtime-adapters/`: artefactos por runtime generados desde `spec/apts-surface.json` (`claude/`, `opencode/`). Cada directorio trae el registro MCP, las instrucciones, los permisos, los cuatro agentes y los cinco comandos.
 - `paquete-apts/scripts/generate-adapters.js`: generador unico spec → adaptadores.
 
 ## Uso recomendado
 
 1. Lee el manifiesto publico en `GET /api/public/integrar`.
-2. Copia el bloque de tu runtime desde `mcp_endpoint.registration_by_runtime` al archivo de configuracion correspondiente (`.mcp.json`, `opencode.json` o `.vscode/mcp.json`).
+2. Copia el bloque de tu runtime desde `mcp_endpoint.registration_by_runtime` al archivo de configuracion correspondiente (`.mcp.json` para Claude Code, `opencode.json` para opencode).
 3. Aporta los valores que ese bloque referencia: `APTS_API_KEY`, `APTS_PROJECT_URL`, `APTS_AGENT_NAME` y `APTS_AGENT_EMAIL` (la URL del endpoint viene embebida en el bloque; solo los adaptadores estaticos generados la referencian como `APTS_MCP_URL`).
 4. Crea `AGENTS.md` (canonico) y, en Claude Code, `CLAUDE.md` con `@AGENTS.md`.
 5. Si el runtime admite agentes propios, genera los adaptadores con `node paquete-apts/scripts/generate-adapters.js` y copialos donde el runtime los descubra.
 
 ## Artefactos generados
 
-Los archivos bajo `runtime-adapters/{claude,opencode,vscode}/` se tratan como **gestionados**: se regeneran enteros desde el spec y llevan banner "GENERADO — no editar". El unico editable es `spec/apts-surface.json`.
+Los archivos bajo `runtime-adapters/{claude,opencode}/` se tratan como **gestionados**: se regeneran enteros desde el spec y llevan banner "GENERADO — no editar". El unico editable es `spec/apts-surface.json`.
 
 ## Manifiesto publico
 

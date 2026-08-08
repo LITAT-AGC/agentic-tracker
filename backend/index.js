@@ -2239,7 +2239,14 @@ const mapTaskStatusToBacklogStatus = (status) => {
 const integrationRoot = path.join(__dirname, '..', 'integracion');
 // Schema version of the public integration manifest.
 // 1.0.0: first published version. One surface: the remote MCP endpoint.
-const integrationManifestSchemaVersion = '1.0.1';
+// 1.0.1: method_conduction, para que un cliente sin descargas sepa conducir.
+// 1.1.0: dos runtimes en vez de tres (VS Code fuera) y el conductor del bucle
+//        publicado. Es menor y no de parche porque QUITA artefactos —las cuatro
+//        plantillas `agent_template` y sus rutas— y cambia la forma de
+//        `agent_runtime_adapters.mappings`: un cliente que leyera el manifiesto
+//        viejo encuentra menos cosas de las que esperaba, y eso hay que poder
+//        verlo en el numero.
+const integrationManifestSchemaVersion = '1.1.0';
 const publicIntegrationBasePath = '/api/public/integrar';
 
 const integrationArtifacts = {
@@ -2259,66 +2266,22 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'SKILL.md'),
     fileName: 'SKILL.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '1.0.1',
+    artifactVersion: '1.1.0',
     kind: 'skill_package',
     recommended: false,
     usagePriority: 'discovery',
-    description: 'Copilot skill packaging guide for APTS integration.'
+    description: 'Skill packaging guide for APTS integration.'
   },
   agent_guidelines: {
     route: `${publicIntegrationBasePath}/agent-guidelines.md`,
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-agent-guidelines.md'),
     fileName: 'apts-agent-guidelines.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '1.0.1',
+    artifactVersion: '1.1.0',
     kind: 'agent_guidelines',
     recommended: true,
     usagePriority: 'discovery',
     description: 'Base operating rules for any agent that reports work to APTS.'
-  },
-  intake_bugfix_agent: {
-    route: `${publicIntegrationBasePath}/agentes/intake-bugfix-apts.agent.md`,
-    filePath: path.join(integrationRoot, 'plantillas-agentes', 'intake-bugfix-apts.agent.md'),
-    fileName: 'intake-bugfix-apts.agent.md',
-    contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '1.0.0',
-    kind: 'agent_template',
-    recommended: false,
-    usagePriority: 'optional_entrypoint',
-    description: 'Bugfix intake agent template for read-only triage and tracked bug registration.'
-  },
-  executor_agent: {
-    route: `${publicIntegrationBasePath}/agentes/ejecutor-item-backlog-dev-test-commit.agent.md`,
-    filePath: path.join(integrationRoot, 'plantillas-agentes', 'ejecutor-item-backlog-dev-test-commit.agent.md'),
-    fileName: 'ejecutor-item-backlog-dev-test-commit.agent.md',
-    contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '1.0.0',
-    kind: 'agent_template',
-    recommended: false,
-    usagePriority: 'worker',
-    description: 'Worker agent template for one backlog item end-to-end.'
-  },
-  orchestrator_agent: {
-    route: `${publicIntegrationBasePath}/agentes/orquestador-backlog-apts.agent.md`,
-    filePath: path.join(integrationRoot, 'plantillas-agentes', 'orquestador-backlog-apts.agent.md'),
-    fileName: 'orquestador-backlog-apts.agent.md',
-    contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '1.0.0',
-    kind: 'agent_template',
-    recommended: false,
-    usagePriority: 'entrypoint',
-    description: 'Orchestrator agent template that pulls ready backlog items from APTS.'
-  },
-  method_orchestrator_agent: {
-    route: `${publicIntegrationBasePath}/agentes/apts-method-orchestrator.agent.md`,
-    filePath: path.join(integrationRoot, 'plantillas-agentes', 'apts-method-orchestrator.agent.md'),
-    fileName: 'apts-method-orchestrator.agent.md',
-    contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '1.0.0',
-    kind: 'agent_template',
-    recommended: false,
-    usagePriority: 'entrypoint',
-    description: 'Method orchestrator agent template that bootstraps a BMAD initiative and conducts the analysis→…→done lifecycle from a client spec.'
   },
   surface_spec: {
     route: `${publicIntegrationBasePath}/runtime-adapters/spec/apts-surface.json`,
@@ -2338,15 +2301,43 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'scripts', 'generate-adapters.js'),
     fileName: 'generate-adapters.js',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '1.0.0',
+    artifactVersion: '1.1.0',
     kind: 'adapter_generator',
     recommended: true,
     usagePriority: 'primary',
     optional: false,
     dependsOnArtifactIds: ['surface_spec'],
     module_system: 'esm',
-    selection_rule: 'Idempotent generator that reads apts-surface.json and emits runtime-adapters/{claude,opencode,vscode}/. Run it locally to (re)generate adapters; the generated files are managed and must not be hand-edited. It renames the former intake adapter intake-bugfix-apts.agent.md to apts-bugfix-intake.agent.md.',
+    selection_rule: 'Idempotent generator that reads apts-surface.json and emits runtime-adapters/{claude,opencode}/, each with the runtime\'s MCP registration, agents, commands, permissions and instruction file. Run it locally to (re)generate adapters; the generated files are managed and must not be hand-edited.',
     description: 'Idempotent generator that emits the per-runtime adapters from the surface spec.'
+  },
+  loop_conductor: {
+    route: `${publicIntegrationBasePath}/conductor/apts-loop.js`,
+    filePath: path.join(integrationRoot, 'conductor', 'apts-loop.js'),
+    fileName: 'apts-loop.js',
+    contentType: 'application/javascript; charset=utf-8',
+    artifactVersion: '1.0.0',
+    kind: 'loop_conductor',
+    recommended: false,
+    usagePriority: 'optional_entrypoint',
+    optional: true,
+    dependsOnArtifactIds: ['loop_conductor_readme'],
+    module_system: 'commonjs',
+    selection_rule: 'Sequential conductor for the implementation phase: asks the engine what is next, launches ONE agent process per story with fresh context, and repeats until the engine says done or a brake trips. It keeps no state of its own — the engine holds it — so killing and relaunching it is safe. Out of scope on purpose: bug intake and the generative phases (analysis, planning, solutioning), which are interactive; if the engine recommends one, it stops and says so. Node 18+, no dependencies. Read the README before running it.',
+    description: 'Loop conductor that drives the implementation phase, one agent process per story.'
+  },
+  loop_conductor_readme: {
+    route: `${publicIntegrationBasePath}/conductor/README.md`,
+    filePath: path.join(integrationRoot, 'conductor', 'README.md'),
+    fileName: 'apts-loop-README.md',
+    contentType: 'text/markdown; charset=utf-8',
+    artifactVersion: '1.0.0',
+    kind: 'loop_conductor_manual',
+    recommended: false,
+    usagePriority: 'optional_entrypoint',
+    optional: true,
+    selection_rule: 'Manual for the loop conductor: the --agent-cmd line for each runtime (Claude Code and opencode, plus the Windows variant), the brakes and their exit codes, the retry/model-escalation policy, and the stop notifications. The conductor is unusable without it: --agent-cmd is mandatory and its shape is runtime-specific.',
+    description: 'Manual for the loop conductor: invocation per runtime, brakes, exit codes and notifications.'
   }
 };
 
@@ -2411,27 +2402,6 @@ const buildMcpRuntimeRegistrations = (url) => ({
       }
     }
   },
-  vscode: {
-    config_file: '.vscode/mcp.json',
-    value_substitution: 'The access key is prompted once via inputs[] and stored by the editor. The three identity values are project-stable and non-secret: replace the placeholders with real values.',
-    config: {
-      inputs: [
-        { id: 'apts-api-key', type: 'promptString', description: 'APTS_API_KEY', password: true }
-      ],
-      servers: {
-        apts: {
-          type: 'http',
-          url,
-          headers: {
-            Authorization: 'Bearer ${input:apts-api-key}',
-            'X-APTS-Project-Url': '<APTS_PROJECT_URL>',
-            'X-APTS-Agent-Name': '<APTS_AGENT_NAME>',
-            'X-APTS-Agent-Email': '<APTS_AGENT_EMAIL>'
-          }
-        }
-      }
-    }
-  }
 });
 
 const buildMcpEndpoint = (req) => {
@@ -2525,10 +2495,6 @@ const normalizeManifestRuntime = (runtime) => {
   if (!normalized) return null;
 
   const aliases = {
-    'vs-code': 'vscode',
-    'vs code': 'vscode',
-    copilot: 'vscode',
-    'github-copilot': 'vscode',
     'open-code': 'opencode',
     'open code': 'opencode',
     claude: 'claudecode',
@@ -2556,7 +2522,7 @@ const buildIntegrationManifest = (req) => {
     runtime_filter: {
       query_param: 'runtime',
       active_runtime: activeRuntime,
-      supported_runtime_values: ['vscode', 'opencode', 'claudecode'],
+      supported_runtime_values: ['claudecode', 'opencode'],
       recommendation_behavior: 'When runtime is provided, recommended artifacts are filtered to runtime-compatible entries first.'
     },
     bootstrap: {
@@ -2609,8 +2575,8 @@ const buildIntegrationManifest = (req) => {
         env_example: [
           'APTS_API_KEY=place-your-api-key-here',
           'APTS_PROJECT_URL=https://github.com/org/repo',
-          'APTS_AGENT_NAME=Copilot',
-          'APTS_AGENT_EMAIL=copilot@example.com'
+          'APTS_AGENT_NAME=your-agent-name',
+          'APTS_AGENT_EMAIL=your-agent@example.com'
         ],
         companion_env: 'The MCP endpoint URL comes embedded in mcp_endpoint.registration_by_runtime; only the static generated adapters reference it as APTS_MCP_URL.'
       },
@@ -2631,57 +2597,65 @@ const buildIntegrationManifest = (req) => {
         runtime_adapter_paths: ['.github/skills/apts', '.agents/skills/apts', '.claude/skills/apts'],
         policy: 'Keep APTS integration artifacts local to each repository and avoid user-global skill installation for project integrations.'
       },
-      runtime_agent_discovery: {
-        runtime: 'vscode',
-        discovery_path: '.github/agents',
-        required_glob: '*.agent.md',
-        reload_required_after_sync: true,
-        generation_note: 'Per-runtime adapters are no longer downloaded individually. Generate them locally with the adapter_generator (scripts/generate-adapters.js) from the surface_spec, then copy runtime-adapters/vscode/agents/*.agent.md into .github/agents.',
-        validation_checklist: [
-          'Confirm orchestrator and executor adapters exist in .github/agents, plus the intake adapter (apts-bugfix-intake.agent.md) when bug-intake custom flows are desired.',
-          'Validate YAML frontmatter for each adapter and ensure name is present and unique.',
-          'Reload VS Code window so the runtime reindexes custom agents.'
-        ]
-      },
       agent_runtime_adapters: {
         required_for_custom_agents: true,
-        installation_state_policy: 'If the runtime is VS Code and required adapters are missing in .github/agents, custom-agent installation is incomplete.',
+        // Antes esta politica hablaba SOLO de VS Code, en los tres sitios: la
+        // frase de estado, los tres mappings y el paso recomendado. Un cliente
+        // Claude Code la leia, concluia con razon que no le aplicaba, y no
+        // generaba nada: se quedaba sin agentes y sin comandos aunque el
+        // generador ya los emitia. Medido el 2026-08-08 en un cliente real.
+        // Ahora la politica es de los DOS runtimes soportados y no nombra
+        // ninguno en la condicion.
+        installation_state_policy: 'Custom-agent installation is incomplete while the adapters for the ACTIVE runtime are missing from their target paths. This applies to every supported runtime, not to one of them: pick the mappings whose runtime matches yours and materialize all of them.',
         generation: {
           spec_artifact_id: 'surface_spec',
           generator_artifact_id: 'adapter_generator',
-          output_dir: 'runtime-adapters/vscode/agents',
-          policy: 'Generated adapters are managed: run the generator to (re)materialize them; never hand-edit them. They are not published as individual downloadable artifacts.'
+          output_dir: 'runtime-adapters/<runtime>',
+          policy: 'Generated adapters are managed: run the generator to (re)materialize them; never hand-edit them. They are not published as individual downloadable artifacts — the spec plus the generator IS the delivery.',
+          how_to: 'Download surface_spec and adapter_generator, run `node generate-adapters.js` (it reads the spec next to it and needs no dependencies), then copy the whole directory of your runtime into the client project root, preserving relative paths.'
         },
+        // Un mapping por runtime, y el destino es el DIRECTORIO entero: cada
+        // runtime materializa el registro MCP, sus cuatro agentes, sus cinco
+        // comandos, los permisos y su archivo de instrucciones. Enumerar
+        // agente por agente era lo que dejaba fuera al orquestador de metodo,
+        // que no figuraba en ningun mapping y es justo el que conduce el ciclo.
         mappings: [
           {
-            runtime: 'vscode',
-            canonical_artifact_id: 'intake_bugfix_agent',
+            runtime: 'claudecode',
             generated_by_artifact_id: 'adapter_generator',
-            target_relative_path: '.github/agents/apts-bugfix-intake.agent.md',
-            invocation_name: 'APTS Bugfix Intake',
-            invocation_aliases: ['Intake Bugfix APTS']
+            source_relative_path: 'runtime-adapters/claude/',
+            target_relative_path: '<client project root>',
+            materializes: [
+              '.mcp.json (MCP registration)',
+              'CLAUDE.md (imports AGENTS.md and carries the APTS managed section)',
+              '.claude/settings.json (tool allowlist derived from the contract)',
+              '.claude/agents/*.md (4 agents)',
+              '.claude/commands/*.md (5 slash commands: apts-next, apts-method, apts-bug, apts-status, apts-resume)'
+            ]
           },
           {
-            runtime: 'vscode',
-            canonical_artifact_id: 'orchestrator_agent',
+            runtime: 'opencode',
             generated_by_artifact_id: 'adapter_generator',
-            target_relative_path: '.github/agents/apts-backlog-orchestrator.agent.md',
-            invocation_name: 'APTS Backlog Orchestrator',
-            invocation_aliases: ['Orquestador Backlog APTS']
-          },
-          {
-            runtime: 'vscode',
-            canonical_artifact_id: 'executor_agent',
-            generated_by_artifact_id: 'adapter_generator',
-            target_relative_path: '.github/agents/backlog-item-executor-dev-test-commit.agent.md',
-            invocation_name: 'Backlog Item Executor Dev Test Commit',
-            invocation_aliases: ['Ejecutor Item Backlog Dev Test Commit']
+            source_relative_path: 'runtime-adapters/opencode/',
+            target_relative_path: '<client project root>',
+            materializes: [
+              'opencode.json (MCP registration and permissions)',
+              'AGENTS.md (APTS managed section)',
+              '.opencode/agent/*.md (4 agents)',
+              '.opencode/command/*.md (5 commands: apts-next, apts-method, apts-bug, apts-status, apts-resume)'
+            ]
           }
+        ],
+        agents: [
+          { id: 'apts-method-orchestrator', role: 'entrypoint', purpose: 'Bootstraps a BMAD initiative and conducts the analysis→…→done lifecycle from a client spec. This is the agent to install first when starting from a spec.' },
+          { id: 'apts-backlog-orchestrator', role: 'entrypoint', purpose: 'Pulls ready backlog items from APTS and dispatches them.' },
+          { id: 'backlog-item-executor-dev-test-commit', role: 'worker', purpose: 'Takes one backlog item end-to-end: implement, test, commit.' },
+          { id: 'apts-bugfix-intake', role: 'optional_entrypoint', purpose: 'Read-only triage of a defect report and tracked bug registration.' }
         ]
       },
       agent_instruction_policy: {
-        preferred_instruction_files: ['AGENTS.md', '.github/copilot-instructions.md'],
-        missing_file_behavior: 'If neither AGENTS.md nor .github/copilot-instructions.md exists, create AGENTS.md from the downloaded apts-agent-guidelines.md before protected APTS calls.',
+        preferred_instruction_files: ['AGENTS.md'],
+        missing_file_behavior: 'If AGENTS.md does not exist, create it from the downloaded apts-agent-guidelines.md before protected APTS calls. Claude Code additionally reads CLAUDE.md, which the generated adapter writes as an import of AGENTS.md plus the managed section, so AGENTS.md stays the single instruction file either way.',
         existing_file_behavior: 'If an instruction file already exists, preserve project-specific rules and merge or refresh only one APTS-managed section instead of replacing the whole file.',
         managed_section_markers: ['<!-- APTS:START -->', '<!-- APTS:END -->'],
         update_strategy: [
@@ -2729,8 +2703,9 @@ const buildIntegrationManifest = (req) => {
         'Register the remote MCP server: copy the block for your runtime from mcp_endpoint.registration_by_runtime as-is. No file has to be downloaded to use the operations that tools/list returns.',
         'If APTS_API_KEY is not yet present in the environment, request it from the operator, together with the project identity values the registration block references.',
         'Call the tools with minimal payloads: the integration layer supplies project_url and agent identity through the registration headers.',
-        'Ensure the project has AGENTS.md or .github/copilot-instructions.md. Create AGENTS.md from apts-agent-guidelines.md if neither file exists, or merge/update one APTS-managed section if an instruction file already exists.',
-        'If the runtime is VS Code and custom agents are required, generate the adapters locally with scripts/generate-adapters.js, copy runtime-adapters/vscode/agents/*.agent.md into .github/agents, and reload the editor window after sync.',
+        'Ensure the project has AGENTS.md. Create it from apts-agent-guidelines.md if it does not exist, or merge/update one APTS-managed section if it already does.',
+        'Install the agents and commands for YOUR runtime, whichever of the supported ones it is: download surface_spec and adapter_generator, run the generator, and copy the directory named in the mapping for your runtime (bootstrap.agent_runtime_adapters.mappings) into the project root. Without this there is no method orchestrator and no slash commands, and the whole lifecycle has to be conducted by hand.',
+        'To grind the implementation phase unattended, download loop_conductor and its README (loop_conductor_readme) and run it: it launches one agent process per story with fresh context and stops on its own when the engine says done or a brake trips. It does NOT conduct the generative phases — those are interactive.',
         'Treat interrupted execution as resumable work: call register_task with backlog_item_id so APTS can resume existing stalled/todo/in_progress tasks for that backlog item instead of creating duplicates.',
         'Prepare a local append-only resilience journal, for example at .apts/agent-resilience-log.jsonl, without treating it as a source of truth.',
         'Inspect local files that currently contain backlog, planning, or operational tracking.',
@@ -2762,22 +2737,20 @@ const buildIntegrationManifest = (req) => {
       'Read the bootstrap section first to understand the service purpose and the migration goal from local tracking to APTS.',
       'If APTS_API_KEY is missing, request it from the operator before any protected API call.',
       'Store APTS_API_KEY in a .env file at the root of the client project, or in an equivalent project secret store, together with the project identity values the registration block references.',
-      'Register the remote MCP server from mcp_endpoint.registration_by_runtime; the 21 contract operations arrive through tools/list, with no file to download or keep in sync.',
+      'Register the remote MCP server from mcp_endpoint.registration_by_runtime; the contract operations arrive through tools/list, with no file to download or keep in sync.',
       'When consuming manifest artifacts, filter by runtime first (runtime query param or client-side equivalent), then apply recommended entries from that compatible subset.',
-      'Use runtime-specific adapter paths only when needed for discovery (.github/skills/apts, .agents/skills/apts, or .claude/skills/apts), and avoid user-global skill installation.',
-      'If using VS Code custom agents, generate the runtime adapters locally with scripts/generate-adapters.js, copy runtime-adapters/vscode/agents/*.agent.md into .github/agents, and reload the window so those agents become discoverable.',
+      'Use runtime-specific adapter paths only when needed for discovery (.agents/skills/apts or .claude/skills/apts), and avoid user-global skill installation.',
+      'Generate and install the adapters for your runtime with the adapter_generator, as bootstrap.agent_runtime_adapters describes. Both supported runtimes need this; it is what materializes the agents and the slash commands.',
       'Maintain the local resilience log described in the bootstrap section; it is append-only and must not replace APTS as the source of truth.',
       'Read the base agent guidelines before the first APTS API call.',
-      'Ensure AGENTS.md or .github/copilot-instructions.md exists before protected calls: create AGENTS.md if neither exists, or merge/update one APTS-managed section if an instruction file already exists.',
+      'Ensure AGENTS.md exists before protected calls: create it if it does not, or merge/update one APTS-managed section if it does.',
       'If the runtime supports custom agents and the current chat is a bugfix/reporting request or might be one, install or invoke the APTS Bugfix Intake agent before direct execution.',
       'If the current chat introduces a possible bug, error, or regression request, confirm with the user that it should be tracked as a bug in APTS before creating or updating a bug item.',
       'Only after that explicit confirmation should the issue be represented in APTS backlog as a bug item before registering execution work or starting implementation.',
       'If the current chat asks to report a solved bug, update the tracked bug backlog item and add resolution details with verification evidence.',
-      'If the runtime is VS Code on Windows, route tests through WSL terminals/tasks and route non-test operations through PowerShell terminals/tasks.',
       'Do not run manual identity pre-flight commands: the integration layer supplies project_url and agent identity, and a call that is missing something is rejected naming the field.',
       'Use register_task with backlog_item_id to resume interrupted work for that backlog item before creating additional execution tasks.',
-      'Do not force task status done for interrupted executions: pass through review first and ensure recent heartbeat or progress logs exist before closing as done.',
-      'Download the optional agent templates only if your runtime supports custom agents.'
+      'Do not force task status done for interrupted executions: pass through review first and ensure recent heartbeat or progress logs exist before closing as done.'
     ],
     identity_requirements: [
       { field: 'project_url', resolve_with: 'the integration layer (registration header); a value in the call that contradicts it is rejected' },
@@ -2848,12 +2821,15 @@ app.get(publicIntegrationBasePath, (req, res) => {
 app.get(`${publicIntegrationBasePath}/skills.json`, async (req, res) => sendIntegrationArtifact(req, res, 'skills_json'));
 app.get(`${publicIntegrationBasePath}/skill.md`, async (req, res) => sendIntegrationArtifact(req, res, 'skill_markdown'));
 app.get(`${publicIntegrationBasePath}/agent-guidelines.md`, async (req, res) => sendIntegrationArtifact(req, res, 'agent_guidelines'));
-app.get(`${publicIntegrationBasePath}/agentes/intake-bugfix-apts.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'intake_bugfix_agent'));
-app.get(`${publicIntegrationBasePath}/agentes/ejecutor-item-backlog-dev-test-commit.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'executor_agent'));
-app.get(`${publicIntegrationBasePath}/agentes/orquestador-backlog-apts.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'orchestrator_agent'));
-app.get(`${publicIntegrationBasePath}/agentes/apts-method-orchestrator.agent.md`, async (req, res) => sendIntegrationArtifact(req, res, 'method_orchestrator_agent'));
 app.get(`${publicIntegrationBasePath}/runtime-adapters/spec/apts-surface.json`, async (req, res) => sendIntegrationArtifact(req, res, 'surface_spec'));
 app.get(`${publicIntegrationBasePath}/scripts/generate-adapters.js`, async (req, res) => sendIntegrationArtifact(req, res, 'adapter_generator'));
+app.get(`${publicIntegrationBasePath}/conductor/apts-loop.js`, async (req, res) => sendIntegrationArtifact(req, res, 'loop_conductor'));
+app.get(`${publicIntegrationBasePath}/conductor/README.md`, async (req, res) => sendIntegrationArtifact(req, res, 'loop_conductor_readme'));
+
+// Las cuatro rutas `/agentes/*.agent.md` se retiraron con VS Code el 2026-08-08:
+// eran plantillas descargables para copiar a `.github/agents`, y los dos runtimes
+// que quedan materializan sus agentes desde el spec con el generador. Un 404 aqui
+// es la respuesta correcta, no una regresion.
 
 // --- AGENT API (SKILLS) ---
 
@@ -5608,160 +5584,6 @@ const checkRemoteMcpContract = async () => {
   return { operations: operations.length };
 };
 
-// Auto-chequeo de las plantillas de agente publicadas.
-//
-// Los cuatro artefactos `agent_template` que se sirven por HTTP contienen las
-// mismas instrucciones que `apts-surface.json` publica como dato. Son dos copias
-// del mismo texto, y ya se separaron una vez sin que nadie lo notara: tres de las
-// cuatro plantillas siguieron ordenando cosas de la superficie retirada —mirar
-// `.apts/execution-context.json`, dejar que el servidor autocompletara la
-// identidad, levantar servidores con primitivas de OpenCode— mientras el spec ya
-// describía el MCP remoto. Un cliente recibía las dos versiones del manifiesto y
-// se contradecían.
-//
-// Se comparan el CUERPO y la CABECERA. Al principio sólo el cuerpo, y la mitad
-// sin vigilar se desvió igual que se había desviado la vigilada: dos de las
-// cuatro plantillas publicadas perdieron el `argument-hint` que el spec declara,
-// y una de ellas es invocable por el usuario, así que quien copiaba la plantilla
-// se quedaba sin la pista de argumentos que el manifiesto promete.
-//
-// Los siete campos de la cabecera salen del spec —es lo mismo que hace el
-// generador de adaptadores para VS Code—, así que no hay ninguno que quede fuera
-// del contrato y no hace falta lista de excepciones. Se compara campo a campo y
-// ya normalizado, no el texto crudo: el generador cita los valores y estas
-// plantillas no siempre, y esa diferencia de comillas no es una divergencia.
-const AGENT_FRONTMATTER_FIELDS = [
-  'name', 'description', 'tools', 'agents', 'argument-hint',
-  'user-invocable', 'disable-model-invocation'
-];
-
-// Parser mínimo de la cabecera: `clave: valor` por línea, con tres formas de
-// valor —lista entre corchetes, booleano y cadena, con o sin comillas—. Es todo
-// lo que el generador emite; cualquier otra cosa se queda como texto y fallará
-// la comparación, que es lo que se quiere.
-const parseAgentFrontmatter = (text) => {
-  const fields = {};
-  for (const line of text.split('\n')) {
-    const separator = line.indexOf(':');
-    if (separator < 0) continue;
-    const key = line.slice(0, separator).trim();
-    const raw = line.slice(separator + 1).trim();
-    if (/^\[.*\]$/.test(raw)) {
-      fields[key] = raw.slice(1, -1).split(',')
-        .map((item) => item.trim().replace(/^['"](.*)['"]$/s, '$1'))
-        .filter((item) => item.length);
-    } else if (raw === 'true' || raw === 'false') {
-      fields[key] = raw === 'true';
-    } else {
-      fields[key] = raw.replace(/^["'](.*)["']$/s, '$1');
-    }
-  }
-  return fields;
-};
-
-// La cabecera que el spec exige para un agente. Misma derivación que
-// `generate-adapters.js` hace para VS Code, y por el mismo motivo: el spec es
-// quien manda.
-const expectedAgentFrontmatter = (agent, agentsById) => {
-  const expected = {
-    name: agent.name,
-    description: agent.description,
-    tools: agent.tools
-  };
-  if (agent.subagents && agent.subagents.length) {
-    expected.agents = agent.subagents.map((id) => (agentsById.get(id) || {}).name);
-  }
-  if (agent.argumentHint) expected['argument-hint'] = agent.argumentHint;
-  expected['user-invocable'] = agent.userInvocable !== false;
-  if (agent.userInvocable === false) expected['disable-model-invocation'] = false;
-  return expected;
-};
-
-const checkPublishedAgentTemplates = async () => {
-  const surfaceSpec = JSON.parse(await fs.readFile(integrationArtifacts.surface_spec.filePath, 'utf8'));
-  const agentByName = new Map(surfaceSpec.agents.map((agent) => [agent.name, agent]));
-  const agentsById = new Map(surfaceSpec.agents.map((agent) => [agent.id, agent]));
-  // El cuerpo servido lleva delante el aviso de generado que emite
-  // `generate-adapters.js`; no es parte del cuerpo que declara el spec, así que
-  // se descuenta antes de comparar.
-  const normalize = (text) => String(text).replace(/\r/g, '').replace(/^<!--[\s\S]*?-->\n?/, '').trim();
-  const problems = [];
-  let checked = 0;
-
-  for (const [artifactId, artifact] of Object.entries(integrationArtifacts)) {
-    if (artifact.kind !== 'agent_template') continue;
-
-    const raw = (await fs.readFile(artifact.filePath, 'utf8')).replace(/\r/g, '');
-    const parts = raw.match(/^(---\n[\s\S]*?\n---\n)([\s\S]*)$/);
-    if (!parts) {
-      problems.push({ artifact: artifactId, reason: 'missing YAML frontmatter' });
-      continue;
-    }
-
-    const frontmatter = parseAgentFrontmatter(parts[1].replace(/^---\n|\n---\n$/g, ''));
-    const name = frontmatter.name;
-    const agent = name ? agentByName.get(name) : null;
-    if (!agent) {
-      problems.push({ artifact: artifactId, reason: `frontmatter name "${name}" is not an agent in apts-surface.json` });
-      continue;
-    }
-
-    if (normalize(parts[2]) !== normalize(agent.body)) {
-      problems.push({
-        artifact: artifactId,
-        agent: name,
-        reason: 'body differs from apts-surface.json',
-        template_length: normalize(parts[2]).length,
-        spec_length: normalize(agent.body).length
-      });
-      continue;
-    }
-
-    // Cabecera: campo a campo contra lo que el spec declara. Un campo de más
-    // pesa igual que uno de menos —la cabecera entera sale del spec—, así que
-    // los dos se reportan.
-    const expected = expectedAgentFrontmatter(agent, agentsById);
-    const fieldProblems = [];
-    for (const field of AGENT_FRONTMATTER_FIELDS) {
-      const inTemplate = Object.prototype.hasOwnProperty.call(frontmatter, field);
-      const inSpec = Object.prototype.hasOwnProperty.call(expected, field);
-      if (!inTemplate && !inSpec) continue;
-      if (!inTemplate) {
-        fieldProblems.push({ field, reason: 'missing in template', spec: expected[field] });
-      } else if (!inSpec) {
-        fieldProblems.push({ field, reason: 'not declared in apts-surface.json', template: frontmatter[field] });
-      } else if (JSON.stringify(frontmatter[field]) !== JSON.stringify(expected[field])) {
-        fieldProblems.push({ field, reason: 'differs', template: frontmatter[field], spec: expected[field] });
-      }
-    }
-    const unknownFields = Object.keys(frontmatter).filter((field) => !AGENT_FRONTMATTER_FIELDS.includes(field));
-    for (const field of unknownFields) {
-      fieldProblems.push({ field, reason: 'unknown frontmatter field', template: frontmatter[field] });
-    }
-
-    if (fieldProblems.length) {
-      problems.push({
-        artifact: artifactId,
-        agent: name,
-        reason: 'frontmatter differs from apts-surface.json',
-        fields: fieldProblems
-      });
-      continue;
-    }
-
-    checked += 1;
-  }
-
-  if (problems.length) {
-    const templateError = new Error('Published agent templates are out of sync with apts-surface.json');
-    templateError.code = 'AGENT_TEMPLATE_MISMATCH';
-    templateError.details = problems;
-    throw templateError;
-  }
-
-  return { agent_templates: checked };
-};
-
 const startServer = async () => {
   try {
     const contractCheckResult = await checkRemoteMcpContract().catch((error) => {
@@ -5769,15 +5591,6 @@ const startServer = async () => {
       process.exit(3);
     });
     logger.info(contractCheckResult, 'Remote MCP contract self-check passed');
-
-    let templateCheckResult;
-    try {
-      templateCheckResult = await checkPublishedAgentTemplates();
-    } catch (error) {
-      logger.fatal({ err: error, details: error?.details || null }, 'Agent template self-check failed');
-      process.exit(3);
-    }
-    logger.info(templateCheckResult, 'Published agent templates self-check passed');
 
     const [batchNo, migrationNames] = await db.migrate.latest();
 

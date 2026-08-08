@@ -10,9 +10,11 @@ llego hasta aqui: eso esta en el historial de git.
 | Superficie de integracion | El endpoint MCP remoto, `POST /mcp` (Streamable HTTP, sin sesion) |
 | Operaciones | 22, derivadas de `apts_skills.json` |
 | Registro | Una URL y cuatro cabeceras; el manifiesto publica el bloque por runtime |
-| Manifiesto | `GET /api/public/integrar`, `schema_version` 1.0.1, 8.766 unidades |
-| Artefactos publicados | 9; `surface_spec` en `artifact_version` 1.0.2, `skills_json`, `skill_markdown` y `agent_guidelines` en 1.0.1, el resto en 1.0.0 |
-| Descargas necesarias para operar | Ninguna |
+| Manifiesto | `GET /api/public/integrar`, `schema_version` 1.1.0, 8.565 unidades |
+| Runtimes soportados | Dos: Claude Code y opencode |
+| Artefactos publicados | 7; `skill_markdown`, `agent_guidelines` y `adapter_generator` en `artifact_version` 1.1.0, `surface_spec` en 1.0.2, `skills_json` en 1.0.1, los dos del conductor en 1.0.0 |
+| Descargas necesarias para **llamar** a las operaciones | Ninguna |
+| Descargas necesarias para **conducir** | El spec y el generador (agentes y comandos); el conductor y su README si se quiere el bucle desatendido |
 
 **Identidad.** Viaja en las cabeceras del registro. El servidor no mira el sistema de archivos, el
 entorno ni el Git del cliente. Un valor enviado en los argumentos gana a la cabecera —asi conmuta de
@@ -20,7 +22,38 @@ rol un agente— y un `project_url` que contradiga la cabecera se rechaza.
 
 **Conduccion del metodo.** El manifiesto publica `method_conduction`, hermano de `mcp_endpoint`, con
 cinco reglas: `bootstrap_rule`, `identity_switching_rule`, `drive_loop`, `generative_step_rule` y
-`dev_story_completion_rule`. Es la fuente autoritativa; las plantillas de agente apuntan a el.
+`dev_story_completion_rule`. Es la fuente autoritativa; los agentes generados apuntan a el.
+
+**Dos runtimes, no tres.** VS Code salio el 2026-08-08. Era el unico que no registraba el MCP con
+variables de entorno ni tenia comandos, asi que su adaptador era medio adaptador —agentes y una
+instruccion, sin registro ni permisos— y su entrega iba por una segunda via: cuatro plantillas
+`.agent.md` descargables que el cliente copiaba a mano a `.github/agents`. Esa segunda via se fue con
+el: los cuatro artefactos `agent_template` y sus rutas ya no se publican (404), la carpeta
+`plantillas-agentes/` ya no existe, y con ella desaparecio el segundo auto-chequeo de arranque, que
+existia solo para vigilar que esas cuatro copias no se separaran del spec. Queda **un** auto-chequeo.
+
+**Y por eso los clientes de Claude Code se quedaban sin agentes y sin comandos.** La politica de
+instalacion de adaptadores hablaba SOLO de VS Code en los tres sitios donde aparecia —la frase de
+estado, los tres `mappings` y el paso recomendado—, aunque el manifiesto publicara bloques de
+registro para los tres runtimes y el generador emitiera los tres directorios. Un cliente Claude Code
+la leia, concluia con razon que no le aplicaba, y no generaba nada. Se vio en un cliente real el
+2026-08-08: tenia `.mcp.json`, `AGENTS.md` y el diario de resiliencia —todo lo que el manifiesto si
+exige— y ni un solo agente ni comando, asi que condujo el ciclo BMAD a mano leyendo
+`method_conduction`. El orquestador de metodo, ademas, no figuraba en NINGUN mapping de ningun
+runtime, siendo el que conduce el ciclo desde una spec.
+
+Ahora la condicion no nombra ningun runtime —"mientras falten los adaptadores del runtime ACTIVO"—,
+hay un mapping por runtime cuyo destino es el directorio entero en vez de un agente por linea, y los
+cuatro agentes se listan aparte con su papel. Copiar `runtime-adapters/claude/` o
+`runtime-adapters/opencode/` a la raiz del cliente trae de una vez el registro MCP, el archivo de
+instrucciones, los permisos, los cuatro agentes y los cinco comandos.
+
+**El conductor del bucle ya se publica.** `integracion/conductor/apts-loop.js` existia desde el
+2026-08-06 y no aparecia en ninguna parte del manifiesto: ni como artefacto ni nombrado en una
+cadena. Un cliente que arrancaba desde la URL no podia saber que existia. Ahora son dos artefactos,
+`loop_conductor` y `loop_conductor_readme`, y van juntos a proposito: `--agent-cmd` es obligatorio y
+su forma depende del runtime, asi que el script sin su manual no se puede usar. El script es
+autocontenido —CommonJS, solo builtins de Node— asi que descargar ese unico archivo basta.
 
 **La fase de partida ya no se puede regalar.** `create_initiative` publica `phase`, y era la unica
 puerta del contrato por la que un cliente podia saltarse fases enteras: el paseo inter-fase arranca
@@ -54,18 +87,15 @@ porque seria un 200 que no escribe nada. Devuelve lo efectivo, no lo enviado.
 De paso, los dos sitios que decian «21 operaciones» dejaron de decir un numero: el manifiesto remite
 a lo que devuelve `tools/list`, que es lo que el cliente va a leer igualmente.
 
-**Una sola fuente por cosa.** Dos auto-chequeos corren al arrancar, antes de escuchar, y abortan con
-`exit 3` si algo se ha separado:
+**Una sola fuente por cosa.** Un auto-chequeo corre al arrancar, antes de escuchar, y aborta con
+`exit 3` si algo se ha separado: el contrato, contra `apts_skills.json`
+(`backend/scripts/lib/contract_check.mjs`).
 
-- el contrato, contra `apts_skills.json` (`backend/scripts/lib/contract_check.mjs`);
-- los cuatro artefactos `agent_template`, cuerpo **y** cabecera, contra `apts-surface.json`
-  (`checkPublishedAgentTemplates` en `backend/index.js`). Los siete campos de la cabecera salen del
-  spec, asi que no queda ninguno fuera del contrato; se comparan campo a campo ya normalizados.
-
-Las cuatro plantillas publicadas **las escribe el generador** desde ese mismo spec, igual que los
-adaptadores, asi que la cabecera y el cuerpo tienen una sola fuente y el cerrojo solo tiene que
-comprobar que nadie las tocó a mano. Sus nombres de archivo son parte de las rutas publicadas y no
-derivan del `id`, asi que el mapa vive explicito en el generador.
+Eran dos. El segundo comparaba las cuatro plantillas publicadas —cuerpo y cabecera— contra
+`apts-surface.json`, y existia porque eran una segunda copia del mismo texto que ya se habia
+separado del spec sin que nadie lo notara. Al retirarlas con VS Code desaparece la copia, y con la
+copia el cerrojo: ahora el spec tiene un solo consumidor, el generador, y lo que este emite se
+comprueba regenerando.
 
 El algebra del embedding —`cosineSimilarity`, `parseEmbeddingVector`, `vectorNorm`,
 `buildBugEmbeddingText`— existe una sola vez, en `backend/scripts/lib/semantic_embeddings.js`, y la
@@ -174,15 +204,18 @@ Contra `APTS_test` (puerto 47301; la ultima ronda —la del coste de los embeddi
   a mano, los huecos de `solutioning` desaparecen y los de `implementation` se reducen a los tres que
   faltan. Por MCP llega como `isError` con `PHASE_NOT_REACHABLE` en `details` y `retriable: false`.
   El rechazo no deja residuo: la guardia corre dentro de la transaccion y antes de `ensureProject`.
-- Las 9 rutas de artefacto responden 200.
+- Las 7 rutas de artefacto responden 200, incluidas las dos nuevas del conductor; y las cuatro
+  `/agentes/*.agent.md` que se retiraron dan 404.
+- **El manifiesto no menciona VS Code por ninguna parte**, ni en las claves ni en la prosa:
+  `vscode`, `VS Code`, `copilot`, `.github/agents` y `agent_template` dan cero coincidencias sobre
+  el JSON entero. Y encogio: 8.565 unidades contra 8.766, aun habiendo agregado el conductor.
+- **El conductor publicado se ejecuta.** Descargado como un unico archivo y corrido con `--dry-run`
+  contra el servidor de prueba, anuncia su alcance y su politica de modelo, resuelve la primera
+  decision y para con `PARADA (blocked): sin iniciativa activa` y codigo 10, que es exactamente lo
+  que su README documenta. No necesita nada instalado: CommonJS y solo builtins de Node.
 - `scripts/test_agent_api.js` y `scripts/test_agent_api_batch.js`, en verde.
-- El generador es idempotente, tambien ahora que escribe las cuatro plantillas publicadas: una
-  segunda corrida no cambia nada, y esos cuatro archivos conservan su CRLF.
-- El cerrojo de plantillas, en sus dos mitades: arranque limpio con `agent_templates: 4`; alterando
-  el cuerpo, `exit 3` nombrando el artefacto y el motivo; y en la cabecera, las tres clases de
-  divergencia —campo que falta, valor que difiere y campo que el spec no declara— dan `exit 3`
-  nombrando artefacto, agente, campo y el valor que el spec exige. Se reportan todas juntas, no solo
-  la primera.
+- El generador es idempotente: una segunda corrida emite los mismos 23 archivos y no cambia el
+  arbol.
 - **El bucle publicado no necesita `primitives_palette`.** Con la tabla vaciada —la condicion exacta
   de produccion— un cliente que no descarga nada vuelve a llegar a `phase=done` con los mismos seis
   numeros que con la tabla poblada: 52 submits, 7 workflows generativos, 2 unidades `dev-story` de 10

@@ -37,7 +37,7 @@ npx playwright test
 After testing is completed, reset or drop the PostgreSQL test database if you need a clean state for the next run.
 
 ### 4. Shell Routing by Runtime (Windows)
-Pick the shell by the active agent runtime, not by VS Code task:
+Pick the shell by the active agent runtime:
 - **Claude Code:** use the Bash tool for POSIX scripts and tests; use PowerShell for Windows-native operations (setup, file ops, git workflows, docs updates, local utilities). Start long-running validation servers with a non-blocking process primitive (Bash background mode, or PowerShell `Start-Job`/`Start-Process`) and stop them after tests.
 - **opencode:** use bash; route long-running servers through a background/PTY primitive rather than relying only on `&` or `nohup`.
 - This mirrors the canonical *Shell routing by runtime* guidance shipped to client projects in the APTS integration package (`integracion/paquete-apts/runtime-adapters/spec/apts-surface.json` → `instructions.body`).

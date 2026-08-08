@@ -21,35 +21,41 @@ Note: in this repository, it is published as integration material under the repo
 ## When to use it
 
 - When a project needs to report agent work to APTS.
-- When you need native MCP tools for the APTS workflow in Claude Code, opencode or VS Code.
+- When you need native MCP tools for the APTS workflow in Claude Code or opencode, the two supported runtimes.
 - When you want to install instructions or prompts so the agent follows the APTS workflow.
 - When you need the tools JSON contract in a downloadable format together with the skill.
 
 ## What it includes
 
 - [Skills JSON contract](./apts_skills.json) — single source of truth
-- [Base guide for AGENTS.md / CLAUDE.md / copilot-instructions.md](./apts-agent-guidelines.md)
+- [Base guide for AGENTS.md / CLAUDE.md](./apts-agent-guidelines.md)
 - [Runtime surface spec](./runtime-adapters/spec/apts-surface.json) and [adapter generator](./scripts/generate-adapters.js)
 
 ## Recommended procedure
 
 1. Read the public manifest at `GET /api/public/integrar`.
-2. Copy the block for your runtime from `mcp_endpoint.registration_by_runtime` into the runtime config file (`.mcp.json` for Claude Code, `opencode.json` for opencode, `.vscode/mcp.json` for VS Code).
+2. Copy the block for your runtime from `mcp_endpoint.registration_by_runtime` into the runtime config file (`.mcp.json` for Claude Code, `opencode.json` for opencode).
 3. Provide the values that block references: `APTS_API_KEY`, `APTS_PROJECT_URL`, `APTS_AGENT_NAME`, `APTS_AGENT_EMAIL` (the endpoint URL comes embedded in the manifest block; only the static generated adapters reference it as `APTS_MCP_URL`). Keep the key in a `.env` file at the client project root or an equivalent secret store — never in source code, versioned prompts or backlog documents.
 4. Apply the AGENTS setup policy below: create `AGENTS.md` when no instruction file exists, or merge/update one APTS-managed section. In Claude Code add `CLAUDE.md` with `@AGENTS.md`.
 5. Validate the integration by calling `register_task`, then `read_project_context`, `log_agent_progress`, `heartbeat` and `update_task_status review`, all with minimal payloads.
 
 To drive the BMAD method lifecycle end to end, read `method_conduction` from the same manifest: it carries the conduction loop as data.
 
-## Custom agents (optional)
+## Agents and commands (do this, not optional)
 
-The agent templates only matter when the runtime supports custom agents. Generate the per-runtime adapters locally with `scripts/generate-adapters.js` from `runtime-adapters/spec/apts-surface.json`, then copy them where the runtime discovers them. Generated adapters are managed output: never hand-edit them — edit the spec and regenerate.
+The four agents and the five commands are NOT downloaded one by one: run `scripts/generate-adapters.js` over `runtime-adapters/spec/apts-surface.json` and copy the directory for your runtime — `runtime-adapters/claude/` or `runtime-adapters/opencode/` — into the client project root, keeping the relative paths. That single copy brings the MCP registration, the instruction file, the permissions, the four agents and the five slash commands (`apts-next`, `apts-method`, `apts-bug`, `apts-status`, `apts-resume`).
+
+Skipping this leaves the project without the method orchestrator and without any command, and the whole lifecycle has to be conducted by hand. Generated adapters are managed output: never hand-edit them — edit the spec and regenerate.
+
+## Unattended implementation loop (optional)
+
+Once the initiative reaches `implementation`, the loop conductor (`conductor/apts-loop.js`, published as the `loop_conductor` artifact) grinds the stories on its own: one agent process per story with fresh context, until the engine says `done` or a brake trips. Read its README first — `--agent-cmd` is mandatory and its shape depends on the runtime. It does not conduct the generative phases, which are interactive.
 
 ## AGENTS.md setup policy (mandatory)
 
 - `AGENTS.md` is the canonical instructions file read by the runtimes. In Claude Code, `CLAUDE.md` only contains `@AGENTS.md`.
-- If neither `AGENTS.md` nor `.github/copilot-instructions.md` exists in the client project, create `AGENTS.md` with the APTS-managed section generated from the spec (see [apts-agent-guidelines.md](./apts-agent-guidelines.md) for the install/upgrade policy).
-- If either file already exists, do not replace the full file. Merge or refresh only the APTS-managed section and preserve project-specific rules.
+- If `AGENTS.md` does not exist in the client project, create it with the APTS-managed section generated from the spec (see [apts-agent-guidelines.md](./apts-agent-guidelines.md) for the install/upgrade policy).
+- If it already exists, do not replace the full file. Merge or refresh only the APTS-managed section and preserve project-specific rules.
 - Use idempotent markers (`<!-- APTS:START -->` and `<!-- APTS:END -->`) so future upgrades update guidance without duplicating content.
 - Keep only one APTS-managed section per instruction file.
 

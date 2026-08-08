@@ -6,11 +6,10 @@ The APTS-managed section (the operational rules an integrated agent must follow)
 
 ## AGENTS.md bootstrap policy (create or update)
 
-1. If neither `AGENTS.md` nor `.github/copilot-instructions.md` exists, create `AGENTS.md` with the managed block below.
+1. If `AGENTS.md` does not exist, create it with the managed block below.
 2. If `AGENTS.md` already exists, keep project-specific rules and only merge or refresh the APTS-managed section.
-3. If `AGENTS.md` does not exist but `.github/copilot-instructions.md` exists, merge or refresh the same managed section there.
-4. On repeated installs or updates, do not duplicate instructions. Update the existing managed section in place.
-5. In Claude Code, `CLAUDE.md` only contains `@AGENTS.md`; never duplicate guidance into `CLAUDE.md`.
+3. On repeated installs or updates, do not duplicate instructions. Update the existing managed section in place.
+4. In Claude Code, `CLAUDE.md` only contains `@AGENTS.md`; never duplicate guidance into `CLAUDE.md`.
 
 Treat downloaded official APTS scripts and generated adapter files as managed: replace them entirely on version updates and do not merge legacy wrapper snippets into them. The only hand-editable surface source is `runtime-adapters/spec/apts-surface.json`.
 
@@ -20,7 +19,6 @@ The APTS-managed instruction block — the operational rules an integrated agent
 
 - **Claude Code:** `runtime-adapters/claude/CLAUDE.md` (which also imports `@AGENTS.md`)
 - **opencode:** `runtime-adapters/opencode/AGENTS.md`
-- **VS Code:** `runtime-adapters/vscode/copilot-instructions.md`
 
 Each generated file wraps the body with the `<!-- APTS:START -->` / `<!-- APTS:END -->` markers. To install or upgrade a client, copy that managed block from the generated file for the target runtime into the client's instruction file, replacing only the existing managed section and preserving project-specific rules outside it.
 

@@ -58,7 +58,7 @@ Ademas, el backend publica un punto de entrada publico para agentes en `/api/pub
 Politica de mantenimiento del manifiesto: cada cambio funcional, estructural o semantico en `/api/public/integrar` debe subir `schema_version`, y cada artefacto cuyo contenido cambie debe subir su `artifact_version`.
 
 
-Superficie recomendada: registrar el servidor MCP remoto copiando el bloque de `mcp_endpoint.registration_by_runtime` que corresponda al runtime. No hace falta descargar ningun archivo para usar las 21 operaciones.
+Superficie recomendada: registrar el servidor MCP remoto copiando el bloque de `mcp_endpoint.registration_by_runtime` que corresponda al runtime. No hace falta descargar ningun archivo para llamar a las operaciones.
 
 Todas las llamadas de agentes deben incluir la cabecera:
 
@@ -66,7 +66,7 @@ Todas las llamadas de agentes deben incluir la cabecera:
 Authorization: Bearer <APTS_API_KEY>
 ```
 
-Las 21 operaciones del contrato, con su endpoint REST equivalente (la fuente formal de parametros y tipos es `apts_skills.json`):
+Las operaciones del contrato, con su endpoint REST equivalente (la fuente formal de parametros y tipos es `apts_skills.json`):
 
 | Operacion | Metodo | Endpoint | Uso |
 | --- | --- | --- | --- |
@@ -76,6 +76,7 @@ Las 21 operaciones del contrato, con su endpoint REST equivalente (la fuente for
 | `get_backlog_item` | GET | `/api/backlog/:id` | Leer un backlog item concreto. |
 | `get_task` | GET | `/api/tasks/:id` | Leer una tarea concreta. |
 | `get_project_constraints` | GET | `/api/projects/:url/constraints` | Leer las restricciones operativas del proyecto. |
+| `set_project_constraints` | PUT | `/api/projects/:url/constraints` | Registrar comandos de test/lint/typecheck, lenguaje y convenciones. |
 | `search_similar_bug_reports` | POST | `/api/projects/backlog/semantic-search` | Buscar bugs similares semanticamente para intake sin duplicados. |
 | `create_backlog_item` | POST | `/api/projects/backlog` | Crear un backlog item gestionado en APTS. |
 | `update_backlog_item` | PATCH | `/api/backlog/:id` (batch: `/api/backlog`) | Editar estado, prioridad o contenido de un backlog item. |
@@ -108,8 +109,8 @@ Valores que la integracion referencia (el bloque del manifiesto trae la URL embe
 APTS_MCP_URL=https://apts.example.com/mcp
 APTS_API_KEY=...
 APTS_PROJECT_URL=https://github.com/org/repo
-APTS_AGENT_NAME=Copilot
-APTS_AGENT_EMAIL=copilot@example.com
+APTS_AGENT_NAME=tu-agente
+APTS_AGENT_EMAIL=tu-agente@example.com
 ```
 
 El servidor no inspecciona el entorno, el sistema de archivos ni el Git del cliente: esos valores llegan en las cabeceras del registro. Un valor enviado en los argumentos de la llamada gana a la cabecera —asi conmuta de rol un agente— y un `project_url` que contradiga la cabecera se rechaza. `task_id` lo devuelve `register_task` y viaja en la llamada; `branch` es opcional y no puede ir en cabecera porque cambia durante la sesion.
@@ -128,12 +129,12 @@ Un backlog item puede enlazarse con una `active_task_id` mientras esta en ejecuc
 
 ## Agentes recomendados
 
-Este repositorio incluye cuatro plantillas de agentes de integracion en `integracion/plantillas-agentes/`:
+El generador emite cuatro agentes de integracion para cada runtime soportado, desde `integracion/paquete-apts/runtime-adapters/spec/apts-surface.json`:
 
-- `APTS Bugfix Intake` (`intake-bugfix-apts.agent.md`): triaje de bugs reportados por chat, en solo lectura hasta confirmacion, y registro trazado del bug en APTS.
-- `APTS Backlog Orchestrator` (`orquestador-backlog-apts.agent.md`): toma items `ready` del backlog en APTS, crea la task de ejecucion y delega el trabajo atomico.
-- `Backlog Item Executor Dev Test Commit` (`ejecutor-item-backlog-dev-test-commit.agent.md`): implementa un solo item del backlog, registra progreso en APTS, ejecuta validaciones relevantes del repositorio y solo committea si pasan.
-- `APTS Method Orchestrator` (`apts-method-orchestrator.agent.md`): arranca una iniciativa BMAD desde una spec de cliente y conduce el ciclo analisis → planificacion → solucion → implementacion → done.
+- `APTS Bugfix Intake` (`apts-bugfix-intake`): triaje de bugs reportados por chat, en solo lectura hasta confirmacion, y registro trazado del bug en APTS.
+- `APTS Backlog Orchestrator` (`apts-backlog-orchestrator`): toma items `ready` del backlog en APTS, crea la task de ejecucion y delega el trabajo atomico.
+- `Backlog Item Executor Dev Test Commit` (`backlog-item-executor-dev-test-commit`): implementa un solo item del backlog, registra progreso en APTS, ejecuta validaciones relevantes del repositorio y solo committea si pasan.
+- `APTS Method Orchestrator` (`apts-method-orchestrator`): arranca una iniciativa BMAD desde una spec de cliente y conduce el ciclo analisis → planificacion → solucion → implementacion → done.
 
 Las cuatro plantillas son artefactos publicados del manifiesto y **las escribe el generador** (`integracion/paquete-apts/scripts/generate-adapters.js`) desde `runtime-adapters/spec/apts-surface.json`: no se editan a mano; el arranque del backend aborta si divergen del spec.
 
@@ -322,32 +323,29 @@ Esta es la parte importante si quieres que otros repositorios reporten actividad
 ### Paso 1: registrar el MCP remoto en el proyecto integrador
 
 1. Lee el manifiesto publico: `GET /api/public/integrar` (sin token).
-2. Copia el bloque de tu runtime desde `mcp_endpoint.registration_by_runtime` al archivo de configuracion correspondiente (`.mcp.json` para Claude Code, `opencode.json` para opencode, `.vscode/mcp.json` para VS Code). La URL del endpoint ya viene embebida en el bloque.
+2. Copia el bloque de tu runtime desde `mcp_endpoint.registration_by_runtime` al archivo de configuracion correspondiente (`.mcp.json` para Claude Code, `opencode.json` para opencode). La URL del endpoint ya viene embebida en el bloque.
 3. Define en el `.env` del proyecto cliente (o en tu gestor de secretos) los valores que ese bloque referencia:
 
 ```env
 APTS_API_KEY=replace-with-the-shared-api-key
 APTS_PROJECT_URL=https://github.com/org/repo
-APTS_AGENT_NAME=Copilot
-APTS_AGENT_EMAIL=copilot@example.com
+APTS_AGENT_NAME=tu-agente
+APTS_AGENT_EMAIL=tu-agente@example.com
 ```
 
-Con eso el runtime recibe las 21 operaciones por `tools/list`. No hay nada mas que instalar.
+Con eso el runtime recibe las operaciones por `tools/list`. No hay nada mas que instalar para llamarlas.
 
-### Paso 2 (opcional): adaptadores y material de integracion
+### Paso 2: agentes y comandos
 
-Si tu runtime admite agentes o comandos propios, genera los adaptadores localmente con `node integracion/paquete-apts/scripts/generate-adapters.js` desde `runtime-adapters/spec/apts-surface.json` y copialos donde el runtime los descubra (por ejemplo `.github/agents/` en VS Code). Los archivos generados son gestionados: no se editan a mano.
+Genera los adaptadores con `node integracion/paquete-apts/scripts/generate-adapters.js` y copia el directorio de tu runtime —`runtime-adapters/claude/` o `runtime-adapters/opencode/`— a la raiz del proyecto cliente, conservando las rutas relativas. Esa copia trae el registro MCP, el archivo de instrucciones, los permisos, los cuatro agentes y los cinco comandos (`apts-next`, `apts-method`, `apts-bug`, `apts-status`, `apts-resume`). Los archivos generados son gestionados: no se editan a mano.
+
+Saltarse este paso deja el proyecto sin orquestador de metodo y sin ningun comando, y obliga a conducir el ciclo entero a mano.
 
 Si quieres los assets sin clonar el repo, todos se sirven como artefactos del manifiesto publico (`/api/public/integrar`).
 
-Para VS Code en Windows, si quieres replicar el routing de shell (tests por WSL y operaciones no-test por PowerShell), toma como base `docs/vscode-tasks.windows.example.json` y copialo al proyecto cliente como `.vscode/tasks.json`.
+### Paso 2b (opcional): el bucle de implementacion
 
-Regla recomendada:
-
-- ejecutar tests con tareas etiquetadas como `tests:wsl`;
-- ejecutar operaciones no-test con tareas etiquetadas como `ops:powershell`.
-
-Nota: en este repositorio `.vscode/` esta ignorado por git, por eso la plantilla versionable vive en `docs/`.
+Con la iniciativa ya en `implementation`, `integracion/conductor/apts-loop.js` mastica las stories solo: un proceso de agente por story con contexto limpio, hasta que el motor dice `done` o salta un freno. Lee antes su README (`integracion/conductor/README.md`), que tambien se publica como artefacto: `--agent-cmd` es obligatorio y su forma depende del runtime. No conduce las fases generativas, que son interactivas.
 
 Importante: si APTS cambia endpoints, payloads o manejo de errores, el ajuste debe reflejarse primero en `integracion/paquete-apts/apts_skills.json`. El auto-chequeo del arranque aborta si la superficie remota se separa del contrato.
 
@@ -431,13 +429,7 @@ Es un problema de configuracion que se resuelve con el operador; no hay superfic
 
 ### Paso 3: instalar el prompt en el proyecto integrador
 
-Ademas de las skills, el agente necesita una instruccion de trabajo consistente. La forma mas simple es agregar un archivo `AGENTS.md` en la raiz del proyecto integrador o, si tu stack lo prefiere, usar `.github/copilot-instructions.md` o el mecanismo de system/developer prompt de tu runtime.
-
-Si el proyecto integrador usa VS Code con GitHub Copilot, la recomendacion practica es esta:
-
-- Instrucciones globales del proyecto: `AGENTS.md` o `.github/copilot-instructions.md`
-- Prompts reutilizables para tareas puntuales: `.github/prompts/*.prompt.md`
-- Skills nativos de VS Code/Copilot: `.github/skills/<nombre>/SKILL.md`
+Ademas de las skills, el agente necesita una instruccion de trabajo consistente. La forma mas simple es agregar un archivo `AGENTS.md` en la raiz del proyecto integrador; los dos runtimes soportados lo leen, y en Claude Code el `CLAUDE.md` generado no hace mas que importarlo.
 
 Nota importante: APTS no instala por defecto estas piezas como customizacion activa del propio repositorio; publica el material como artefactos del manifiesto y en `integracion/paquete-apts/`. En el proyecto cliente, las instrucciones y prompts obligan el flujo de trabajo del agente, y las llamadas las ejecutan las tools del servidor MCP remoto registrado (nada de wrappers HTTP propios).
 
@@ -475,37 +467,14 @@ mi-proyecto/
   .env
 ```
 
-Si el equipo quiere empaquetarlo como skill nativo de VS Code/Copilot, una variante valida es esta:
+### Troubleshooting: el runtime no reconoce los agentes
 
-```text
-mi-proyecto/
-  .github/
-    copilot-instructions.md
-    prompts/
-      apts-operacion.prompt.md
-    skills/
-      apts/
-        SKILL.md
-```
+Si copiaste el directorio de tu runtime y los agentes no aparecen:
 
-En ese caso, el `SKILL.md` del proyecto cliente debe describir cuando usar la skill y remitir a las tools del MCP remoto registrado.
-
-### Troubleshooting: VS Code no reconoce los agentes
-
-Si descargaste las plantillas y no aparecen como custom agents, revisa lo siguiente:
-
-1. El archivo debe terminar en `.agent.md`.
-2. Debe estar en `.github/agents/` del proyecto cliente abierto en VS Code.
-3. El frontmatter YAML debe ser valido (bloque `---` con `name` y `description`).
-4. `apts_skills.json` solo define tools/skills; no instala agentes automaticamente.
-5. Recarga VS Code con `Developer: Reload Window` luego de copiar o renombrar plantillas.
-
-Referencia de plantillas en este repo (el generador emite las variantes por runtime en `integracion/paquete-apts/runtime-adapters/`; la de intake se publica alli como `apts-bugfix-intake.agent.md`):
-
-- `integracion/plantillas-agentes/intake-bugfix-apts.agent.md`
-- `integracion/plantillas-agentes/orquestador-backlog-apts.agent.md`
-- `integracion/plantillas-agentes/ejecutor-item-backlog-dev-test-commit.agent.md`
-- `integracion/plantillas-agentes/apts-method-orchestrator.agent.md`
+1. Comprueba que copiaste el directorio ENTERO conservando rutas relativas: los agentes van en `.claude/agents/` o `.opencode/agent/`, y los comandos en `.claude/commands/` o `.opencode/command/`.
+2. El frontmatter YAML de cada archivo debe ser valido (bloque `---`, con `description`).
+3. `apts_skills.json` solo define las operaciones; no instala agentes.
+4. Regenera con `node integracion/paquete-apts/scripts/generate-adapters.js` si editaste el spec: los adaptadores no se editan a mano.
 
 ### Paso 5: validacion de la integracion
 
@@ -526,6 +495,6 @@ Referencia de plantillas en este repo (el generador emite las variantes por runt
 ## Limites actuales
 
 - Si un runtime no puede registrar servidores MCP remotos, no hay superficie alternativa recomendada: se resuelve la configuracion del runtime con el operador.
-- La instalacion de instrucciones y agentes propios en proyectos clientes sigue dependiendo de lo que soporte cada runtime; los adaptadores generados cubren Claude Code, opencode y VS Code.
+- Los adaptadores generados cubren los dos runtimes soportados: Claude Code y opencode.
 
 El estado al dia de la superficie de integracion, con lo verificado y lo abierto, vive en `integracion/ESTADO.md`.
