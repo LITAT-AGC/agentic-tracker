@@ -442,6 +442,27 @@ Contra `APTS_test` (puerto 47301; la ultima ronda —la del coste de los embeddi
   al matarlo queda con `listening: false` y su ultima señal intacta. Es la comprobacion que
   importa: la señal que anota el servidor es la que produce el conductor publicado, sin
   haberlo tocado.
+- **La caducidad de las ordenes**, con `backend/scripts/test_conductor_order_expiry.js` (nuevo;
+  necesita el servidor levantado, porque la mitad del criterio es la presencia y esa vive en su
+  memoria; crea su proyecto y lo borra). **El plazo no se acorta**: las filas se envejecen contra
+  la base, asi que lo que se comprueba es el de verdad —10 min— sin esperar diez minutos. Veinte
+  comprobaciones en verde. Una orden recien encolada NO caduca aunque no haya nadie escuchando,
+  que es lo que protege el encolar-antes-de-arrancar; pasada del plazo y con el destinatario
+  ausente, mirar el buzon la caduca, con el motivo escrito en la propia fila y sin acuse. Quien
+  esta escuchando manda sobre el reloj: el panel no toca su orden por vieja que sea, pero su
+  sondeo siguiente no se la entrega —`order: null`— y la deja caducada con el otro motivo, que no
+  es el mismo texto. Lo que ya se resolvio no se reescribe. Y el radio se respeta: una orden vieja
+  de otro nombre y sin proyecto no la toca ese panel ni el sondeo de otro conductor, y si la caduca
+  el suyo al preguntar.
+- **El cerrojo del servidor recien arrancado**, que es la otra rama del criterio de ausencia: con
+  el servidor en pie 11 s y el plazo de señal en 3.600 s, una orden vieja de un nombre sin señal
+  **no** caduca. La prueba lo detecta y comprueba eso en vez del escenario completo, porque el caso
+  no se puede provocar desde fuera: depende de cuando arranco el servidor.
+- **Y en pantalla**, contra el servidor de prueba: la etiqueta «No hay nadie al otro lado», el
+  texto de ayuda diciendo el plazo que devuelve el servidor, una orden de hace 40 min pasando a
+  `cancelled` con su motivo debajo por el solo hecho de mirar la pestaña, la reciente aguantando
+  `pending` con «no hay nadie al otro lado; caduca a los 10 min», y el aviso al encolar: «si no
+  arranca uno en 10 min, la orden caducara sola».
 - **El corte en POSIX, ejecutado por fin** (WSL Ubuntu contra el servidor de prueba de Windows). El
   agente arranca en su propio grupo (`pgid` distinto del conductor) con un nieto dentro. Un agente
   que coopera muere entero en ~2 s sin pagar la gracia. Un agente que **ignora `SIGTERM`** es el que
@@ -817,7 +838,7 @@ que cree haber matado al agente. Desplegado el 2026-08-08 con sus tres migracion
 esta corriendo, asi que una orden `pending` significaba dos cosas muy distintas —«la recoge
 en diez segundos» y «no hay nadie escuchando ese nombre»— y el panel las mostraba
 exactamente igual. Pulsar Detener y no saber si sirvio de algo era el daño real; el que
-las ordenes viejas se acumulen es el otro problema, y sigue abierto.
+las ordenes viejas se acumulen es el otro problema, y se cerro despues (ver abajo).
 
 Lo que las distingue ya pasaba por el servidor: **el sondeo del buzon**. Quien pregunta es,
 por definicion, quien puede recoger la orden, y preguntan los dos modos —el que espera y el
@@ -849,6 +870,41 @@ encolar se compone **despues** de releer el estado: encolar siempre funciona —
 fila— y prometer «la recoge en unos diez segundos» cuando no hay nadie escuchando era
 justamente lo que dejaba mudo al buzon.
 
+**Y una orden que nadie va a recoger ya caduca.** Era el otro medio problema del buzon: una orden
+dirigida a un conductor que no corre se quedaba `pending` para siempre. El daño visible era la
+lista acumulando lo que nunca se recogeria; el que muerde es otro, y es el que decidio el diseño:
+el conductor en espera recoge la PRIMERA pendiente de su nombre, asi que uno arrancado mañana
+ejecutaria el `start` de hoy —o cortaria con un `stop` que ya no viene a cuento—. Ejecutar una
+orden rancia es peor que perderla.
+
+El sondeo del conductor no vale como unico disparador, porque el caso a caducar es justamente
+aquel en que no hay nadie sondeando. Son **dos** reglas con dos motivos. Al **entregar**
+(`/conductor/orders/next`) no se entrega lo que lleva mas del plazo, y ahi no hace falta mirar la
+presencia: quien pregunta esta vivo por definicion, y si la orden siguio pendiente todo ese rato es
+que el conductor estaba ocupado con otra corrida o acababa de arrancar. Al **mirar** (la ruta del
+panel) caduca lo que lleva mas del plazo Y cuyo destinatario consta ausente, que es justo lo que la
+señal de vida ya sabia decir; el plazo a secas mataria la orden encolada a proposito para un
+conductor que se arranca cinco minutos despues.
+
+El plazo son **10 min**, ajustable con `CONDUCTOR_ORDER_TTL_MS` —por entorno y no por bandera, como
+los otros dos— y viaja en la respuesta (`order_ttl_seconds`) para que el panel lo diga en vez de
+llevarlo escrito, que se separaria el dia que alguien lo tocara. La ausencia se juzga con el mismo
+cerrojo que ya usa el panel: sin ninguna señal de ese nombre solo se puede afirmar que no hay nadie
+si el servidor lleva en pie mas que el plazo de presencia, porque esa señal vive en memoria y un
+reinicio la pierde. Sin ese cerrojo, caducar seria matar las ordenes de un conductor vivo cada vez
+que se reinicia pm2.
+
+No hace falta migracion: `cancelled` ya estaba en el enum y el motivo cabe en `detail`, que es lo
+que el panel ya mostraba debajo del estado. `acked_at` se queda en `null` a proposito —caducar no
+es que le llegara a nadie— y los dos motivos son distintos segun el camino, porque no dicen lo
+mismo. El conductor no cambia ni una linea: los dos artefactos se quedan en **1.6.0**.
+
+Un efecto que conviene saber: un `start` encolado **mientras** el conductor conduce otra cosa se
+queda `pending` —el bucle solo atiende `stop`, `pause` y `resume` con el agente en marcha—, asi que
+si esa corrida dura mas del plazo, la orden caduca en vez de arrancar sola al terminar. Es lo que
+se queria: arrancar horas despues de que alguien lo pidiera es exactamente la sorpresa que la
+caducidad evita.
+
 De paso, la pestaña Conductor **se refresca sola** cada diez segundos, el mismo intervalo que
 sondea el conductor: mirar mas seguido no adelantaria nada, porque el buzon no se mueve entre
 sus preguntas. Solo corre con esa pestaña delante y la ventana visible, el boton Actualizar
@@ -865,13 +921,6 @@ primera mano la forma de la respuesta del punto compatible con OpenAI —vector 
 `data[0].embedding` y `usage` con tokens—, que es lo unico que se dio por bueno leyendo la
 documentacion. Si ese punto contestara con el sobre nativo de Workers AI, el lector ya acepta
 `result.data[0]` y no haria falta tocar nada.
-
-**Nadie caduca una orden pendiente.** Una orden dirigida a un conductor que no esta
-corriendo se queda `pending` para siempre. Ya no es muda —el panel dice si hay alguien al
-otro lado, ver abajo— pero sigue ahi, y la lista de ordenes acumula lo que nunca se
-recogera. Un TTL que las pasara a `cancelled` exige elegir un plazo y, sobre todo, decidir
-quien lo aplica: el sondeo del conductor no sirve, porque el caso a caducar es justamente
-aquel en que no hay conductor sondeando.
 
 **Editar `workflow_steps` sigue fuera de alcance**, declarado. Las instrucciones paso a paso
 del metodo se editan sembrando el corpus, no desde el panel.

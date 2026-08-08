@@ -5384,6 +5384,79 @@ const conductorPresenceOf = (agentName) => {
   };
 };
 
+// ---- Caducar lo que nadie va a recoger ----
+// Una orden `pending` dirigida a un conductor que no corre se quedaba ahí para siempre, y
+// eso hacía dos daños distintos. El visible: la lista del panel acumulando órdenes que ya
+// no significan nada. El que muerde: el conductor en espera recoge la PRIMERA pendiente de
+// su nombre, así que uno arrancado mañana ejecutaría el `start` de hoy —o cortaría con el
+// `stop` que ya no viene a cuento—. Ejecutar una orden rancia es peor que perderla.
+//
+// El sondeo del conductor no vale como único disparador, porque el caso a caducar es
+// justamente aquel en que no hay nadie sondeando. Así que son dos reglas con dos motivos:
+//
+//   · al ENTREGAR (`/conductor/orders/next`): lo que lleva más del plazo no se entrega.
+//     Aquí no hace falta mirar la presencia —quien pregunta está vivo por definición—: si
+//     la orden siguió pendiente todo ese rato es que el conductor estaba ocupado con otra
+//     corrida o acababa de arrancar, y en los dos casos ya no es lo que se pidió.
+//   · al MIRAR (el panel): caduca lo que lleva más del plazo Y cuyo destinatario consta
+//     ausente. La ausencia se exige aquí porque el plazo a secas mataría la orden encolada
+//     a propósito para un conductor que se arranca cinco minutos después.
+//
+// `cancelled` ya estaba en el enum y el motivo cabe en `detail`, así que no hay migración.
+// `acked_at` se queda en null a propósito: nadie acusó nada, caducar no es que le llegara.
+const CONDUCTOR_ORDER_TTL_MS = Number.parseInt(process.env.CONDUCTOR_ORDER_TTL_MS, 10) > 0
+  ? Number.parseInt(process.env.CONDUCTOR_ORDER_TTL_MS, 10)
+  : 600000; // diez minutos: margen de sobra para arrancar el conductor después de encolar
+
+const conductorOrderTtlLabel = () => (CONDUCTOR_ORDER_TTL_MS >= 60000
+  ? `${Math.round(CONDUCTOR_ORDER_TTL_MS / 60000)} min`
+  : `${Math.round(CONDUCTOR_ORDER_TTL_MS / 1000)} s`);
+
+const conductorOrdersCutoff = () => new Date(Date.now() - CONDUCTOR_ORDER_TTL_MS);
+
+const expireStaleOrdersForAgent = async (agentName) => db('conductor_orders')
+  .where({ agent_name: agentName, status: 'pending' })
+  .where('created_at', '<', conductorOrdersCutoff())
+  .update({
+    status: 'cancelled',
+    detail: `caducada: llevaba más de ${conductorOrderTtlLabel()} en el buzón cuando el conductor volvió a preguntar`,
+    updated_at: db.fn.now()
+  });
+
+// La ausencia se juzga con el mismo criterio que el panel muestra, y con el mismo cerrojo:
+// sin ninguna señal de ese nombre sólo se puede afirmar que no hay nadie si el servidor
+// lleva en pie más que el plazo de presencia —la señal vive en memoria y un reinicio la
+// pierde—; con una señal previa consta igual, porque habló y dejó de hacerlo.
+const expireAbandonedOrders = async ({ projectUrl, agentName }) => {
+  const candidatas = await db('conductor_orders')
+    .where('status', 'pending')
+    .where('created_at', '<', conductorOrdersCutoff())
+    .where((builder) => {
+      builder.where({ project_url: projectUrl });
+      if (agentName) builder.orWhere({ agent_name: agentName });
+    })
+    .select('id', 'agent_name');
+
+  if (!candidatas.length) return 0;
+
+  const uptime = Date.now() - SERVER_STARTED_AT.getTime();
+  const abandonadas = candidatas
+    .filter((orden) => {
+      const presencia = conductorPresenceOf(orden.agent_name);
+      if (presencia.listening) return false;
+      return presencia.last_seen_at !== null || uptime > CONDUCTOR_PRESENCE_TTL_MS;
+    })
+    .map((orden) => orden.id);
+
+  if (!abandonadas.length) return 0;
+
+  return db('conductor_orders').whereIn('id', abandonadas).update({
+    status: 'cancelled',
+    detail: `caducada: ${conductorOrderTtlLabel()} en el buzón y nadie escuchando ese nombre`,
+    updated_at: db.fn.now()
+  });
+};
+
 app.get('/api/conductor/orders/next', apiLimiter, authenticateAgent, async (req, res) => {
   const agentName = String(req.query.agent_name || req.headers['x-apts-agent-name'] || '').trim();
   if (!agentName) return res.status(400).json({ error: 'agent_name is required' });
@@ -5393,6 +5466,10 @@ app.get('/api/conductor/orders/next', apiLimiter, authenticateAgent, async (req,
   markConductorSeen(agentName);
 
   try {
+    // Antes de mirar qué hay: lo rancio no se entrega. Un conductor recién arrancado no
+    // tiene por qué heredar la orden de anteayer sólo por llamarse igual.
+    await expireStaleOrdersForAgent(agentName);
+
     const order = await db('conductor_orders')
       .where({ agent_name: agentName, status: 'pending' })
       .orderBy('created_at', 'asc')
@@ -5896,6 +5973,11 @@ app.get('/api/dashboard/projects/:url/conductor', requireAuth, async (req, res) 
 
     const agentName = String(req.query.agent_name || '').trim();
 
+    // Mirar el buzón es lo que lo limpia, y no hay otro sitio donde ponerlo: el conductor
+    // que sondearía no existe, que es la definición del caso. Corre antes del listado para
+    // que lo que se muestre sea ya el resultado y no la foto de un momento antes.
+    await expireAbandonedOrders({ projectUrl: url, agentName });
+
     const orders = await db('conductor_orders')
       .where((builder) => {
         builder.where({ project_url: url });
@@ -5938,6 +6020,9 @@ app.get('/api/dashboard/projects/:url/conductor', requireAuth, async (req, res) 
       active_task: activeTask || null,
       presence: [...presenceNames].map(conductorPresenceOf),
       presence_ttl_seconds: Math.round(CONDUCTOR_PRESENCE_TTL_MS / 1000),
+      // Lo que aguanta una orden sin recogerse. Viaja para que el panel diga el plazo de
+      // este servidor y no uno escrito a mano que se separaría del de verdad.
+      order_ttl_seconds: Math.round(CONDUCTOR_ORDER_TTL_MS / 1000),
       // Cuánto lleva el servidor en pie, no cuándo arrancó: quien lo lee tiene que
       // compararlo con el TTL, y hacerlo desde el reloj del navegador metería su desfase
       // en la única cuenta que decide si el panel puede afirmar una ausencia.

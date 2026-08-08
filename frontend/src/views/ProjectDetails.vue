@@ -446,7 +446,8 @@
                 Se dirigen al nombre de agente con el que corre; sin ese nombre no hay a quién hablarle.
                 <span class="block mt-1">
                   La etiqueta de arriba dice si hay alguien escuchando ese buzón: sólo lo atiende un
-                  conductor en marcha, y una orden dirigida a uno apagado espera ahí sin caducar.
+                  conductor en marcha, y una orden dirigida a uno apagado caduca sola pasados
+                  {{ conductorOrderTtlLabel }}, para que no la ejecute el que arranque mañana.
                 </span>
                 <span class="block mt-1">
                   <strong>Reanudar</strong> repite la última corrida del conductor sin volver a escribir
@@ -1392,6 +1393,13 @@ const conductorPresenceFor = (name) => {
 
 const conductorPresenceState = computed(() => conductorPresenceFor(conductorAgentName.value));
 
+// El plazo lo dice el servidor: escribirlo aquí a mano lo separaría del que de verdad
+// aplica en cuanto alguien tocara `CONDUCTOR_ORDER_TTL_MS`.
+const conductorOrderTtlLabel = computed(() => {
+  const seconds = Number(conductorState.value?.order_ttl_seconds);
+  return Number.isFinite(seconds) && seconds > 0 ? formatSecondsAgo(seconds) : '10 min';
+});
+
 const presenceSeverity = (state) => ({
   listening: 'success',
   silent: 'warn',
@@ -1405,8 +1413,8 @@ const pendingOrderNote = (order) => {
   if (!order || order.status !== 'pending') return null;
   const presence = conductorPresenceFor(order.agent_name);
   if (presence.state === 'listening') return { severity: 'success', text: 'encolada; la recoge en unos segundos' };
-  if (presence.state === 'silent') return { severity: 'warn', text: `sin señal desde hace ${formatSecondsAgo(conductorPresenceByName.value.get(order.agent_name)?.seconds_ago)}` };
-  if (presence.state === 'absent') return { severity: 'danger', text: 'no hay nadie al otro lado' };
+  if (presence.state === 'silent') return { severity: 'warn', text: `sin señal desde hace ${formatSecondsAgo(conductorPresenceByName.value.get(order.agent_name)?.seconds_ago)}; caduca a los ${conductorOrderTtlLabel.value}` };
+  if (presence.state === 'absent') return { severity: 'danger', text: `no hay nadie al otro lado; caduca a los ${conductorOrderTtlLabel.value}` };
   return { severity: 'secondary', text: 'sin datos del destinatario' };
 };
 
@@ -1458,9 +1466,9 @@ const sendConductorOrder = async (command) => {
     const presence = conductorPresenceFor(agentName);
     const espera = {
       listening: 'El conductor la recoge en unos diez segundos.',
-      silent: `Nadie pregunta por ese buzón desde hace ${formatSecondsAgo(conductorPresenceByName.value.get(agentName)?.seconds_ago)}: esperará ahí hasta que alguien la recoja.`,
-      absent: 'Pero no hay ningún conductor escuchando con ese nombre: esperará en el buzón hasta que arranque uno.',
-      unknown: 'Todavía no consta ninguna señal de ese conductor.'
+      silent: `Nadie pregunta por ese buzón desde hace ${formatSecondsAgo(conductorPresenceByName.value.get(agentName)?.seconds_ago)}: esperará ahí ${conductorOrderTtlLabel.value} y caducará sola si no la recoge nadie.`,
+      absent: `Pero no hay ningún conductor escuchando con ese nombre: si no arranca uno en ${conductorOrderTtlLabel.value}, la orden caducará sola.`,
+      unknown: `Todavía no consta ninguna señal de ese conductor. Si no la recoge nadie en ${conductorOrderTtlLabel.value}, caducará sola.`
     }[presence.state];
     conductorMessage.value = `Orden '${command}' encolada. ${espera}`;
     conductorMessageTone.value = presence.state === 'listening' ? 'ok' : 'warn';
