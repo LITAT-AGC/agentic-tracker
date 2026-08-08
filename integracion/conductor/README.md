@@ -115,6 +115,27 @@ al cerrar el ciclo, así que sin esa llamada el trabajo termina de verdad pero
 medias un proyecto que ya está hecho. Con la recomendación en `done` no queda nada que
 reclamar: esa llamada sólo persiste el recorrido.
 
+## Reintentos de red
+
+Cada llamada MCP reintenta **3 veces** con espera creciente —2 s, 6 s, 18 s— antes de
+parar por red. No es configurable: que un parpadeo no tumbe el bucle no es una política
+que haya que afinar, y si la red está caída de verdad la parada con código 2 sigue ahí
+veintiséis segundos después.
+
+Se reintenta sólo lo que puede salir distinto: el `fetch` que no llegó a hablar, un 429 y
+los 5xx. Un 4xx es una llamada mal hecha y un error JSON-RPC es el servidor contestando
+que no; repetirlos no cambia nada y esconde el motivo detrás de tres esperas.
+
+Existe porque el bucle desatendido se paraba de verdad: tres caídas en cuatro vueltas el
+2026-08-08, siempre en la llamada a `apts_status` inmediatamente después de cerrar una
+unidad, y con el endpoint respondiendo 200 un minuto más tarde. Cada una exigía que una
+persona relanzara el conductor, que es justo el trabajo que el bucle vino a ahorrar.
+
+Cada reintento deja línea en el diario (`evento: "reintento_red"`, con la herramienta, el
+número de intento, la espera y el motivo). Un servidor que se degrada se ve como
+reintentos que aparecen y se multiplican; esconderlos convertiría la red de seguridad en
+una forma de no enterarse.
+
 ## Elicitación
 
 El paso de entrada de `bmad-dev-story` llega en `mode: "await_input"` con las preguntas
@@ -346,5 +367,7 @@ contiene secretos.
 
 El evento `arranque` lleva la política resuelta (`modelos`, `politica_fuente`,
 `politica_ignorado`, `env_file`); cada evento `agente` lleva `intento`,
-`intentos_totales` y el `modelo` con el que corrió; y un reintento que no llegó a
-gastarse deja un `reintento_innecesario` con lo que el motor respondió en su lugar.
+`intentos_totales` y el `modelo` con el que corrió; un reintento que no llegó a
+gastarse deja un `reintento_innecesario` con lo que el motor respondió en su lugar; y cada
+reintento de red deja un `reintento_red` con la herramienta, el intento, la espera y el
+motivo.

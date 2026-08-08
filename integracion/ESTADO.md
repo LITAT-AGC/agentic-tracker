@@ -12,7 +12,7 @@ llego hasta aqui: eso esta en el historial de git.
 | Registro | Una URL y cuatro cabeceras; el manifiesto publica el bloque por runtime |
 | Manifiesto | `GET /api/public/integrar`, `schema_version` 1.1.0, 8.565 unidades |
 | Runtimes soportados | Dos: Claude Code y opencode |
-| Artefactos publicados | 7; `skill_markdown`, `agent_guidelines` y `adapter_generator` en `artifact_version` 1.1.0, `surface_spec` en 1.0.2, `skills_json` en 1.0.1, los dos del conductor en 1.0.0 |
+| Artefactos publicados | 7; `skill_markdown`, `agent_guidelines`, `adapter_generator` y los dos del conductor en `artifact_version` 1.1.0, `surface_spec` en 1.0.2, `skills_json` en 1.0.1 |
 | Descargas necesarias para **llamar** a las operaciones | Ninguna |
 | Descargas necesarias para **conducir** | El spec y el generador (agentes y comandos); el conductor y su README si se quiere el bucle desatendido |
 
@@ -84,6 +84,19 @@ ARCHITECTURE", "FIRST STEP"), no un procedimiento conducible; el procedimiento r
 files del upstream, que el importador no trajo. `dev_story_completion_rule` del manifiesto ya dice
 que el paso terminal declara DOS outputs y que los dos viajan en el mismo submit. `schema_version`
 no cambia: no hay clave nueva.
+
+**Un parpadeo de red ya no tumba el bucle.** Cada llamada MCP del conductor reintenta tres veces
+—2 s, 6 s, 18 s— antes de la parada por red, y solo lo que puede salir distinto: el `fetch` que no
+llego a hablar, un 429 y los 5xx; un 4xx es una llamada mal hecha y un error JSON-RPC es el servidor
+contestando que no. Cada reintento deja `reintento_red` en el diario, porque un servidor que se
+degrada se ve como reintentos que aparecen y se multiplican, y esconderlos convertiria la red de
+seguridad en una forma de no enterarse. No es bandera: si la red esta caida de verdad, la parada con
+codigo 2 sigue ahi veintiseis segundos despues. Lo pidio la realidad —tres caidas en cuatro vueltas
+el 2026-08-08, siempre en el `apts_status` inmediatamente posterior a cerrar una unidad, con el
+endpoint respondiendo 200 un minuto mas tarde—, y cada una exigia que una persona relanzara el
+conductor. Los dos artefactos del conductor suben a `artifact_version` 1.1.0: el comportamiento
+observable cambia, y sin el bump quien cachee por version se queda con el conductor que se para al
+primer parpadeo.
 
 Del lado del conductor, `integracion/conductor/prompts/dev-story-revision-adversaria.md`
 (`--prompt-file`) exige las tres capas en subagentes paralelos antes de entregar el paso 8, y ante
@@ -266,6 +279,11 @@ Contra `APTS_test` (puerto 47301; la ultima ronda —la del coste de los embeddi
   decision y para con `PARADA (blocked): sin iniciativa activa` y codigo 10, que es exactamente lo
   que su README documenta. No necesita nada instalado: CommonJS y solo builtins de Node.
 - `scripts/test_agent_api.js` y `scripts/test_agent_api_batch.js`, en verde.
+- **Los reintentos de red del conductor**, por los dos caminos y en seco (`--dry-run`, que resuelve
+  la decision sin lanzar agente). Contra un puerto muerto: tres reintentos, tres lineas
+  `reintento_red` en el diario con las esperas 2000/6000/18000 ms, y parada por red con codigo 2 a
+  los 26,1 s. Contra una ruta que contesta 404 (`POST /api/health`): ni un reintento y parada en
+  1,1 s, que es lo correcto —repetir una llamada mal hecha solo retrasa el motivo—.
 - **La compuerta de revision por unidad**, con `backend/scripts/test_code_review_gate.js` (nuevo:
   no habia arnes del motor de metodo, solo de la API de agente; corre dentro de una transaccion que
   se revierte y no necesita el servidor levantado). El submit terminal sin revision se rechaza

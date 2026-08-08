@@ -2316,7 +2316,11 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'conductor', 'apts-loop.js'),
     fileName: 'apts-loop.js',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '1.0.0',
+    // 1.1.0: cada llamada MCP reintenta 3 veces con espera creciente antes de parar por
+    // red. Cambia el comportamiento observable de un cliente que ya lo tuviera bajado, y
+    // por eso sube la versión: sin el bump, quien cacheara por version se quedaría con un
+    // conductor que se para al primer parpadeo.
+    artifactVersion: '1.1.0',
     kind: 'loop_conductor',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -2331,7 +2335,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'conductor', 'README.md'),
     fileName: 'apts-loop-README.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '1.0.0',
+    // 1.1.0: documenta los reintentos de red y las plantillas de prompt de `prompts/`.
+    artifactVersion: '1.1.0',
     kind: 'loop_conductor_manual',
     recommended: false,
     usagePriority: 'optional_entrypoint',

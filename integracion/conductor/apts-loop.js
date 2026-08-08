@@ -363,7 +363,28 @@ const describirPolitica = (politica, maxIterations) => {
 
 let idSeq = 0;
 
-const llamarMcp = async (cfg, herramienta, argumentos) => {
+// Reintentos de red. La caída típica no es el servidor caído sino un parpadeo —una
+// resolución de DNS que falla, un keepalive que el otro extremo cortó—, y el sitio donde
+// muerde es la llamada a `apts_status` inmediatamente después de cerrar una unidad.
+// Pasó tres veces en cuatro vueltas el 2026-08-08, siempre ahí, con el endpoint
+// respondiendo 200 un minuto después. Sin esto el bucle desatendido se para y hace falta
+// una persona para relanzarlo, que es exactamente el trabajo que el bucle vino a ahorrar.
+//
+// Se reintenta SÓLO lo que puede salir distinto: el fetch que no llegó a hablar, un 429 y
+// los 5xx —la misma política que el aviso por Telegram ya aplicaba—. Un 400 es una llamada
+// mal hecha, y un error JSON-RPC es el servidor contestando que no: repetirlos no cambia
+// nada y esconde el motivo detrás de tres esperas. Agotados los reintentos, la parada por
+// red es la misma de antes.
+//
+// No es una bandera. Que un parpadeo no tumbe el bucle no es una política que el operador
+// tenga que afinar; y si la red está caída de verdad, la parada con código 2 sigue ahí
+// veintiséis segundos después.
+const REINTENTOS_RED = 3;
+const ESPERA_RED_MS = [2000, 6000, 18000];
+
+const errorRed = (mensaje, reintentable) => Object.assign(new ErrorRed(mensaje), { reintentable });
+
+const intentarMcp = async (cfg, herramienta, argumentos) => {
   let respuesta;
   try {
     respuesta = await fetch(cfg.mcpUrl, {
@@ -384,27 +405,55 @@ const llamarMcp = async (cfg, herramienta, argumentos) => {
       }),
     });
   } catch (error) {
-    throw new ErrorRed(`no se pudo alcanzar el endpoint MCP: ${error.message}`);
+    throw errorRed(`no se pudo alcanzar el endpoint MCP: ${error.message}`, true);
   }
 
   if (!respuesta.ok) {
     const texto = await respuesta.text().catch(() => '');
     // 401/403 es configuración del operador, no algo que reintentar.
-    const clase = respuesta.status === 401 || respuesta.status === 403 ? ErrorConfig : ErrorRed;
-    throw new clase(`${herramienta}: HTTP ${respuesta.status} ${texto.slice(0, 300)}`);
+    if (respuesta.status === 401 || respuesta.status === 403) {
+      throw new ErrorConfig(`${herramienta}: HTTP ${respuesta.status} ${texto.slice(0, 300)}`);
+    }
+    const transitorio = respuesta.status === 429 || respuesta.status >= 500;
+    throw errorRed(`${herramienta}: HTTP ${respuesta.status} ${texto.slice(0, 300)}`, transitorio);
   }
 
   const sobre = await respuesta.json();
-  if (sobre.error) throw new ErrorRed(`${herramienta}: ${sobre.error.message || 'error JSON-RPC'}`);
+  if (sobre.error) throw errorRed(`${herramienta}: ${sobre.error.message || 'error JSON-RPC'}`, false);
 
   const texto = sobre.result && sobre.result.content && sobre.result.content[0]
     ? sobre.result.content[0].text
     : null;
   const datos = texto ? JSON.parse(texto) : null;
   if (sobre.result && sobre.result.isError) {
-    throw new ErrorRed(`${herramienta}: ${(datos && (datos.error || datos.message)) || 'la operación devolvió error'}`);
+    throw errorRed(`${herramienta}: ${(datos && (datos.error || datos.message)) || 'la operación devolvió error'}`, false);
   }
   return datos;
+};
+
+// Los reintentos quedan en el diario, no sólo en la salida estándar: un servidor que se
+// degrada se ve como reintentos que aparecen y se multiplican, y esconderlos convertiría
+// esta red de seguridad en una forma de no enterarse.
+const llamarMcp = async (cfg, herramienta, argumentos) => {
+  for (let intento = 0; ; intento += 1) {
+    try {
+      return await intentarMcp(cfg, herramienta, argumentos);
+    } catch (error) {
+      const agotado = intento >= REINTENTOS_RED;
+      if (!(error instanceof ErrorRed) || !error.reintentable || agotado) throw error;
+      const espera = ESPERA_RED_MS[intento];
+      log(`red: ${error.message}; reintento ${intento + 1}/${REINTENTOS_RED} en ${espera / 1000}s`);
+      registrar(cfg, {
+        evento: 'reintento_red',
+        herramienta,
+        intento: intento + 1,
+        de: REINTENTOS_RED,
+        espera_ms: espera,
+        detalle: error.message,
+      });
+      await dormir(espera);
+    }
+  }
 };
 
 // ---- huella de progreso ----
