@@ -815,6 +815,25 @@ PROD —que es el camino que caduca al entregar— responde 200 con `{"order":nu
 `online` con **un** reinicio (22 acumulados contra 21). Las seis comprobaciones del desplegador
 pasaron y el aviso de `/mcp` no salio.
 
+**Comprobado despues del undecimo despliegue del 2026-08-08** (`cf675c0`, **sin migraciones**:
+`stop` sale de la lista de la API y el CHECK de la tabla se queda como estaba). Entraron cuatro
+commits, la unificacion de Detener y Pausar y tres notas de ESTADO. El frontend se compilo en el
+servidor —`dist.new` intercambiado, 16 ficheros— y se comprobo **contra contenido**: el chunk
+`ProjectDetails` que sirve nginx (53.745 bytes) no contiene «Detener» **ni una sola vez**, trae el
+parrafo nuevo («Apagar el proceso no se puede desde el panel») y ni una aparicion de `stop`.
+
+**Y funcionalmente vivo, por la URL publica y con sesion de panel**: `stop` responde **400
+diciendo «command must be one of: start, pause, resume»** —igual que un comando inventado— y los
+tres que quedan responden 200 escribiendo su fila. Las tres filas de la comprobacion se borraron
+al terminar, asi que `conductor_orders` vuelve a estar **vacia** en PROD, que es como estaba.
+
+El manifiesto publico sale con `schema_version` 1.1.1 y 8 artefactos, con el conductor en **1.6.0**
+y su README en **1.6.1**, cada uno en su URL versionada: el README sirve el texto de los tres
+botones, y el script sigue siendo el mismo de siempre —75.567 bytes, con su linea
+`['stop', 'pause']` intacta—, que es la prueba de que la retirada no lo toco. pm2 quedo `online`
+con **un** reinicio (23 acumulados contra 22). Las seis comprobaciones del desplegador pasaron y el
+aviso de `/mcp` no salio.
+
 **El panel ya escribe donde antes solo miraba, y el conductor ya se puede parar.** Tres
 huecos que venian del mismo sitio —lo que APTS sabia hacer no tenia por donde pedirse— se
 cerraron el 2026-08-08.
@@ -1005,10 +1024,8 @@ documentacion. Si ese punto contestara con el sobre nativo de Workers AI, el lec
 **Editar `workflow_steps` sigue fuera de alcance**, declarado. Las instrucciones paso a paso
 del metodo se editan sembrando el corpus, no desde el panel.
 
-En el repositorio no queda nada mas. Produccion tiene las 23 migraciones aplicadas y el frontend
-recompilado el 2026-08-08, y corre lo mismo que `origin/main` **salvo la unificacion de Detener y
-Pausar**, que entra en el siguiente despliegue: no lleva migracion, y hasta que se despliegue el
-panel de produccion sigue mostrando los cuatro botones.
+En el repositorio no queda nada mas. Produccion corre lo mismo que `origin/main`, con las 23
+migraciones aplicadas y el frontend recompilado el 2026-08-08.
 
 **El `.env` de PROD no necesita ninguna clave nueva.** Tiene diez y ninguna de las que llegaron
 despues es obligatoria: `EMBEDDING_DEFAULT_MODEL` no hace falta porque
