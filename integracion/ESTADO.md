@@ -261,9 +261,6 @@ documentacion. Si ese punto contestara con el sobre nativo de Workers AI, el lec
 En el repositorio no queda nada mas. Produccion corre lo mismo que `origin/main`, con las 17
 migraciones aplicadas y el frontend recompilado el 2026-08-07 —llevaba desde el 21 de junio—.
 
-Una cosa queda fuera del repositorio: la contraseña de `apt_user` se expuso en claro durante el
-despliegue del 2026-08-02 y conviene rotarla (`ALTER ROLE`, actualizar el `.env`, reiniciar pm2).
-
 **El `.env` de PROD no necesita ninguna clave nueva.** Tiene diez y ninguna de las que llegaron
 despues es obligatoria: `EMBEDDING_DEFAULT_MODEL` no hace falta porque
 `OPENROUTER_DEFAULT_EMBEDDING_MODEL` se sigue leyendo detras y ya vale
