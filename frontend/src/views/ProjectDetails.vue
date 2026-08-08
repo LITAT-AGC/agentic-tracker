@@ -659,7 +659,9 @@ const semanticSearchTopK = 5;
 const semanticSearchThreshold = 0.6;
 
 const backlogTypeOptions = ['feature', 'bug', 'chore', 'research'];
-const backlogStatusOptions = ['draft', 'needs_details', 'ready', 'in_progress', 'review', 'blocked', 'done', 'archived'];
+// `ready_for_dev` es el estado que el motor de metodo escribe en cada story; sin el en
+// esta lista, el panel no podia filtrar por el ni ofrecerlo al editar.
+const backlogStatusOptions = ['draft', 'needs_details', 'ready', 'ready_for_dev', 'in_progress', 'review', 'blocked', 'done', 'archived'];
 const taskStatusOptions = ['todo', 'in_progress', 'review', 'done', 'stalled'];
 
 const triageableBacklogCount = computed(() => {

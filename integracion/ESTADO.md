@@ -138,6 +138,18 @@ El backfill de la migracion recupera lo unico reconstruible: las tareas que su h
 apunta. Las que un `register_task` posterior desbanco no dejaron ningun rastro relacional y no se
 pueden recuperar; la migracion imprime los dos numeros en vez de dar a entender que los cubrio todos.
 
+**`ready_for_dev` ya existe tambien para la API.** La migracion 010 metio ese estado en la columna
+—lo declara en su propia lista, `BACKLOG_STATUSES_NEW`— y el motor lo escribe en CADA story que
+crea, pero la constante `BACKLOG_STATUSES` de `backend/index.js` se quedo con la lista de antes de
+esa migracion. La base aceptaba el valor, el motor lo escribia, y la API ni lo leia ni lo escribia.
+Dos sintomas el 2026-08-08, con horas de diferencia y la misma raiz: `list_backlog_items` con ese
+filtro rebotando con 400 a un agente en produccion, y `update_backlog_item` incapaz de reponer una
+story que la vigilancia habia dejado en `blocked` —que es el unico camino de vuelta que el propio
+motor recomienda al rechazar un `apts_set_status` desde ahi—, cosa que obligo a escribir la
+`344da12c` a mano en la base. Ampliar la lista no rompe ninguna llamada: el valor ya era legal en la
+columna. La lista vivia copiada en tres sitios y los tres estan al dia: la constante, los seis enums
+de `apts_skills.json` y el selector del panel.
+
 **Un parpadeo de red ya no tumba el bucle.** Cada llamada MCP del conductor reintenta tres veces
 —2 s, 6 s, 18 s— antes de la parada por red, y solo lo que puede salir distinto: el `fetch` que no
 llego a hablar, un 429 y los 5xx; un 4xx es una llamada mal hecha y un error JSON-RPC es el servidor
@@ -359,6 +371,10 @@ Contra `APTS_test` (puerto 47301; la ultima ronda —la del coste de los embeddi
   `backlog_item_id` da 400 nombrando lo que falta, y `'quizas'` da 400 en vez de colar como `false`;
   por MCP el rechazo llega como `isError`. Y se lee: `get_task` lo devuelve en las dos vistas, y en
   `compact` una tarea sin unidad no paga la clave vacia.
+- **`ready_for_dev` por la API**, con `backend/scripts/test_ready_for_dev_status.js` (nuevo):
+  `list_backlog_items` filtra por el estado y devuelve la story que el motor creo asi;
+  `update_backlog_item` repone a `ready_for_dev` una story dejada en `blocked`, y la deja en el
+  estado canonico del metodo y no en un primo suyo; y un estado inventado sigue dando 400.
 - El backfill de la migracion 020 sobre `APTS_test`: `backlog_item_id` recuperado en 93 tareas, 196
   sin asociacion posible —las que un `register_task` posterior desbanco antes de que la columna
   existiera—.
@@ -571,18 +587,6 @@ vigilancia de fondo ya le habia puesto: la maquina de metodo no tiene salida des
 historia `344da12c` sigue en `blocked` esperando esa reposicion.
 
 ## Abierto
-
-**Una story `blocked` no tiene reposicion por ninguna de las dos superficies.** La columna
-`backlog_items.status` la escriben dos vocabularios que no se solapan donde hace falta. El motor usa
-`ready_for_dev, in_progress, review, done` y lo escribe el mismo al crear las stories;
-`update_backlog_item` acepta `draft, needs_details, ready, in_progress, review, blocked, done,
-archived` y **rechaza `ready_for_dev`** con 400. Asi que cuando la vigilancia de latidos deja una
-story en `blocked`, el consejo que da el propio motor —`apts_set_status` responde «para reponer la
-story usa `update_backlog_item`, p. ej. status 'ready'»— no la repone: `ready` tampoco esta en
-`STORY_METHOD_TRANSITIONS`, de modo que el siguiente `apts_set_status` a `in_progress` volveria a dar
-409 desde otro estado. Se vio el 2026-08-08 reponiendo la `344da12c`, que hubo que escribir a
-`ready_for_dev` directamente en la base. Salidas posibles: aceptar `ready_for_dev` en
-`update_backlog_item`, o darle salida a `blocked` en la maquina de metodo. Sin decidir.
 
 **Cloudflare sirve los artefactos `.js` hasta cuatro horas viejos.** El sitio esta detras de
 Cloudflare, que cachea por extension: `.js` esta en su lista por defecto, asi que

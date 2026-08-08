@@ -210,7 +210,16 @@ const authenticateAgent = (req, res, next) => {
 };
 
 const BACKLOG_ITEM_TYPES = ['feature', 'bug', 'chore', 'research'];
-const BACKLOG_STATUSES = ['draft', 'needs_details', 'ready', 'in_progress', 'review', 'blocked', 'done', 'archived'];
+// `ready_for_dev` incluido: lo declara `20260620000010_bmad_hierarchy.js` en su propia
+// lista (`BACKLOG_STATUSES_NEW`) y es el estado que el motor escribe en CADA story que
+// crea, pero esta constante se quedo con la lista de antes de esa migracion. El resultado
+// era que la base aceptaba el valor, el motor lo escribia, y la API ni lo leia ni lo
+// escribia: `list_backlog_items` con ese filtro daba 400 —le rebotó a un agente en
+// produccion el 2026-08-08— y `update_backlog_item` no podia reponer una story que la
+// vigilancia hubiera dejado en `blocked`, que es el unico camino de vuelta que el propio
+// motor recomienda. Ampliar la lista no rompe ninguna llamada existente: el valor ya era
+// legal en la columna.
+const BACKLOG_STATUSES = ['draft', 'needs_details', 'ready', 'ready_for_dev', 'in_progress', 'review', 'blocked', 'done', 'archived'];
 const TASK_STATUSES = ['todo', 'in_progress', 'review', 'done', 'stalled'];
 // mismos valores que declara la migración `20260620000010_bmad_hierarchy.js`
 // para las columnas `initiatives.track` y `initiatives.phase`. Sin comprobarlos en la
