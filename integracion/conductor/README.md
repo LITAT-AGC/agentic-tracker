@@ -160,9 +160,14 @@ el ciclo: apunta a `method_conduction` del manifiesto, que es la fuente autorita
 
 En `prompts/` viven las variantes versionadas:
 
-| archivo | qué añade |
-|---|---|
-| `dev-story-revision-adversaria.md` | una compuerta de revisión adversaria antes del paso 8 de `bmad-dev-story` |
+| archivo | qué añade | artefacto |
+|---|---|---|
+| `dev-story-revision-adversaria.md` | una compuerta de revisión adversaria antes del paso 8 de `bmad-dev-story` | `loop_prompt_code_review`, en `…/integrar/conductor/prompts/` |
+
+Se publican como artefactos por la misma razón que el conductor: si sólo estuvieran en el
+repositorio, un cliente que arranca desde la URL leería aquí sobre un archivo que no puede
+bajarse. Son opcionales de verdad —el conductor trae su plantilla por defecto dentro—, así
+que no bajarlas no rompe nada.
 
 **Revisión adversaria.** Reproduce dentro de la sesión del agente lo que
 `bmad-code-review` describe y nunca ejecuta: tres capas en subagentes paralelos —Blind

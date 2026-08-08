@@ -12,9 +12,9 @@ llego hasta aqui: eso esta en el historial de git.
 | Registro | Una URL y cuatro cabeceras; el manifiesto publica el bloque por runtime |
 | Manifiesto | `GET /api/public/integrar`, `schema_version` 1.1.0, 8.565 unidades |
 | Runtimes soportados | Dos: Claude Code y opencode |
-| Artefactos publicados | 7; `skill_markdown`, `agent_guidelines`, `adapter_generator` y los dos del conductor en `artifact_version` 1.1.0, `surface_spec` en 1.0.2, `skills_json` en 1.0.1 |
+| Artefactos publicados | 8; `skill_markdown`, `agent_guidelines`, `adapter_generator` y los dos del conductor en `artifact_version` 1.1.0, `surface_spec` en 1.0.2, `skills_json` en 1.0.1, `loop_prompt_code_review` en 1.0.0 |
 | Descargas necesarias para **llamar** a las operaciones | Ninguna |
-| Descargas necesarias para **conducir** | El spec y el generador (agentes y comandos); el conductor y su README si se quiere el bucle desatendido |
+| Descargas necesarias para **conducir** | El spec y el generador (agentes y comandos); el conductor y su README si se quiere el bucle desatendido, y su plantilla de revision si se quiere ademas la compuerta dentro de la sesion del agente |
 
 **Identidad.** Viaja en las cabeceras del registro. El servidor no mira el sistema de archivos, el
 entorno ni el Git del cliente. Un valor enviado en los argumentos gana a la cabecera —asi conmuta de
@@ -102,7 +102,11 @@ Del lado del conductor, `integracion/conductor/prompts/dev-story-revision-advers
 (`--prompt-file`) exige las tres capas en subagentes paralelos antes de entregar el paso 8, y ante
 un hallazgo confirmado —`archivo:linea` mas escenario de fallo concreto— declara la rama que el
 propio metodo ya tiene, `{"goto":"step:5"}`, en vez de parchear en silencio. La plantilla vive en el
-repo y **no** es un artefacto publicado: el README del conductor, que si lo es, la nombra.
+repo y **ya se publica**, como `loop_prompt_code_review` (1.0.0), en
+`…/integrar/conductor/prompts/dev-story-revision-adversaria.md`. Se publica por la misma razon que
+el conductor: el README, que si era artefacto, la nombraba, asi que un cliente que arranca desde la
+URL leia sobre un archivo que no podia bajarse. Es opcional de verdad —el conductor trae su
+plantilla por defecto dentro—, y la compuerta del motor aplica se baje o no.
 
 **La fase de partida ya no se puede regalar.** `create_initiative` publica `phase`, y era la unica
 puerta del contrato por la que un cliente podia saltarse fases enteras: el paseo inter-fase arranca

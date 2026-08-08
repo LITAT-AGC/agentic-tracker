@@ -2343,6 +2343,24 @@ const integrationArtifacts = {
     optional: true,
     selection_rule: 'Manual for the loop conductor: the --agent-cmd line for each runtime (Claude Code and opencode, plus the Windows variant), the brakes and their exit codes, the retry/model-escalation policy, and the stop notifications. The conductor is unusable without it: --agent-cmd is mandatory and its shape is runtime-specific.',
     description: 'Manual for the loop conductor: invocation per runtime, brakes, exit codes and notifications.'
+  },
+  // Se publica porque el README —que sí es artefacto— la nombra: un cliente que sólo
+  // descarga desde esta URL leía sobre un archivo que no podía bajarse. El conductor
+  // funciona sin ella (trae su plantilla por defecto dentro), así que es opcional de
+  // verdad y no una dependencia escondida.
+  loop_prompt_code_review: {
+    route: `${publicIntegrationBasePath}/conductor/prompts/dev-story-revision-adversaria.md`,
+    filePath: path.join(integrationRoot, 'conductor', 'prompts', 'dev-story-revision-adversaria.md'),
+    fileName: 'dev-story-revision-adversaria.md',
+    contentType: 'text/markdown; charset=utf-8',
+    artifactVersion: '1.0.0',
+    kind: 'loop_conductor_prompt',
+    recommended: false,
+    usagePriority: 'optional_entrypoint',
+    optional: true,
+    dependsOnArtifactIds: ['loop_conductor'],
+    selection_rule: 'Prompt template for the loop conductor (--prompt-file), replacing its built-in default. It adds an adversarial review gate before the dev-story validation step: three layers in parallel subagents under distinct lenses (Blind Hunter sees only the diff, Edge Case Hunter the boundaries, Acceptance Auditor only the story and its acceptance criteria), a triage that counts a finding only with file:line plus a concrete failure scenario, and the method\'s own {"goto":"step:5"} branch when something is confirmed. Download it only if you run the conductor and want the gate in the agent session; the engine gate (the required_for_close code_review artifact on the terminal dev-story step) applies either way. Placeholders substituted by the conductor: {story_id}, {agent_name}, {project_url}, {role}, {iteration}, {attempt}, {max_attempts}.',
+    description: 'Prompt template for the conductor that demands an adversarial review before a story closes.'
   }
 };
 
@@ -2831,6 +2849,7 @@ app.get(`${publicIntegrationBasePath}/runtime-adapters/spec/apts-surface.json`, 
 app.get(`${publicIntegrationBasePath}/scripts/generate-adapters.js`, async (req, res) => sendIntegrationArtifact(req, res, 'adapter_generator'));
 app.get(`${publicIntegrationBasePath}/conductor/apts-loop.js`, async (req, res) => sendIntegrationArtifact(req, res, 'loop_conductor'));
 app.get(`${publicIntegrationBasePath}/conductor/README.md`, async (req, res) => sendIntegrationArtifact(req, res, 'loop_conductor_readme'));
+app.get(`${publicIntegrationBasePath}/conductor/prompts/dev-story-revision-adversaria.md`, async (req, res) => sendIntegrationArtifact(req, res, 'loop_prompt_code_review'));
 
 // Las cuatro rutas `/agentes/*.agent.md` se retiraron con VS Code el 2026-08-08:
 // eran plantillas descargables para copiar a `.github/agents`, y los dos runtimes
