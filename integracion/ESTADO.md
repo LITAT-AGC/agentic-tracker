@@ -724,7 +724,9 @@ backfill le grabo antes su `backlog_item_id`. Conserva la asociacion y perdio la
 su `stalled` ya no arrastra la historia. Lo que el desligado no deshace es el `blocked` que la
 vigilancia de fondo ya le habia puesto: la maquina de metodo no tiene salida desde ese estado
 —`apts_set_status` responde 409 diciendo que se reponga con `update_backlog_item`—, asi que la
-historia `344da12c` sigue en `blocked` esperando esa reposicion.
+historia `344da12c` quedaba en `blocked` esperando esa reposicion. Ya no: comprobado contra la base
+de PROD el 2026-08-08, esta en `done` desde las 07:34 de ese dia y **no queda ninguna unidad
+`blocked`** en toda la produccion.
 
 **Comprobado despues del octavo despliegue del 2026-08-08** (`99c5cfa`, **con tres
 migraciones**: la 021 `entity_overrides`, la 022 —el CHECK de `agent_logs.action_type` con
@@ -764,6 +766,16 @@ del desplegador pasaron y el aviso de `/mcp` no salio.
 
 Lo que **no** se ha comprobado en PROD es la pantalla: el panel de produccion pide la
 contraseña del operador. Los cuatro estados se vieron en vivo contra el servidor de prueba.
+
+**Comprobado despues del decimo despliegue del 2026-08-08** (`7396a7e`, **sin migraciones**:
+`cancelled` ya estaba en el enum y el motivo cabe en `detail`). Entraron dos commits, la
+caducidad de las ordenes y la nota del noveno despliegue. Se comprobo contra contenido y no
+contra el 200: el chunk `ProjectDetails` que sirve nginx trae los tres textos nuevos —«caduca
+sola pasados», «caduca a los» y «caducara sola»—, y `backend/index.js` en el servidor trae las
+dos funciones de caducidad y las dos constantes. **Y funcionalmente vivo**: sondear el buzon en
+PROD —que es el camino que caduca al entregar— responde 200 con `{"order":null}`. pm2 quedo
+`online` con **un** reinicio (22 acumulados contra 21). Las seis comprobaciones del desplegador
+pasaron y el aviso de `/mcp` no salio.
 
 **El panel ya escribe donde antes solo miraba, y el conductor ya se puede parar.** Tres
 huecos que venian del mismo sitio —lo que APTS sabia hacer no tenia por donde pedirse— se
