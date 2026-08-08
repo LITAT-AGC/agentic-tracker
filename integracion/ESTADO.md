@@ -118,6 +118,22 @@ El modelo por defecto es `EMBEDDING_DEFAULT_MODEL` —`OPENROUTER_DEFAULT_EMBEDD
 leyendo detras—, y `backend/index.js` lo importa en vez de releer la variable, para que el panel no
 pueda anunciar uno distinto del que se pide.
 
+**Un artefacto de la unidad ya no se guarda con la clave de la iniciativa.** `story_spec` es el
+unico artefacto por-story del metodo, y se escribia con el mismo `scope_key` que todos los demas
+—`initiative:<id>:<doc_type>`—, asi que habia UNA sola fila para la iniciativa entera: la primera
+story que escribia la suya se la servia despues a todas las demas por `needs[]`. Lo encontro un
+agente el 2026-08-08 conduciendo el bucle de fm-synth: trabajando el importador SysEx recibia la
+especificacion de la historia 1.3, se dio cuenta y tiro de `get_backlog_item`. El fallo era mudo
+—no da error, da el contexto equivocado— y el siguiente podia no verlo.
+
+El alcance se declara ahora como dato, en `method_outputs.js` (`scope: 'story'`), y de ahi sale el
+conjunto que usan la escritura y la lectura. La clave la compone `artifactScopeKey` y nadie mas,
+porque `upsertArtifact` y `resolveNeed` tienen que coincidir exactamente. Sin unidad en el cursor,
+un need por-story se declara **ausente** en vez de servir el de otra. `WORKFLOW_COMPLETION` sigue
+evaluando `artifact-exists` a nivel de iniciativa a proposito: ese predicado gatea el avance de
+fase, no el contexto servido, y hacerlo por-story es otra decision, mas estricta y capaz de plantar
+una iniciativa en marcha.
+
 **Ninguna escritura del agente paga un embedding que no necesite.** Son dos vectores distintos y ya
 no se comportan igual de mal:
 
@@ -228,6 +244,11 @@ Contra `APTS_test` (puerto 47301; la ultima ronda —la del coste de los embeddi
   nombrando el workflow y el paso que pierde, sin tocar nada; con `--force`, avisa por stderr, sigue,
   y deja los punteros exactamente como habia advertido —`entity_id` incluido, que sobrevive porque
   esa entity no desaparecia.
+- **El alcance por-unidad de `story_spec`**, en cinco casos: con solo la spec de A escrita, A la ve y
+  B se declara ausente en vez de recibir la ajena; con las dos escritas, cada una ve la suya y hay
+  dos filas con `scope_key` distinto; reescribir la de A la versiona a v2 sin crear otra fila ni
+  tocar la de B; un artefacto de iniciativa (`architecture`) lo siguen viendo las dos y tambien
+  quien no sostiene ninguna unidad; y un need por-story sin unidad en el cursor da `present: false`.
 - La busqueda de bugs duplicados sobrevive a una fila con el vector corrupto: HTTP 200, esa fila
   fuera y el resto comparandose.
 - El plazo de espera del embedding existe en el unico camino que queda: con

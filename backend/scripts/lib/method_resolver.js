@@ -27,7 +27,7 @@
 //   args     : identificadores mínimos para el goteo F3 { phase, workflow_key, step_key }
 
 const { resolvePhaseStep, evaluatePrimitive } = require('./method_primitives');
-const { buildWorkflowCompletion } = require('./method_outputs');
+const { buildWorkflowCompletion, perStoryDocTypes } = require('./method_outputs');
 const { applyRewire } = require('../importer/rewire');
 
 const LIFECYCLE = ['analysis', 'planning', 'solutioning', 'implementation', 'done'];
@@ -80,6 +80,25 @@ const MAX_STEP_REVISITS = readPositiveInt(process.env.METHOD_MAX_STEP_REVISITS, 
 // architecture/epics por artifact-exists; readiness/sprint-planning/create-story
 // por count-threshold (provisional F4); dev-story por all-children-status.
 const WORKFLOW_COMPLETION = buildWorkflowCompletion();
+
+// ---- Alcance de un artefacto tipado ----
+// Casi todos los artefactos del metodo son de la INICIATIVA: hay un brief, un prd,
+// una arquitectura. `story_spec` no: es de la unidad, y guardarlo con la clave de
+// la iniciativa hacia que todas las stories compartieran una sola fila.
+//
+// La clave la compone esta funcion y nadie mas, porque la escritura
+// (`upsertArtifact`) y la lectura (`resolveNeed`) tienen que coincidir exactamente:
+// si se compusiera en los dos sitios, separarlas seria cuestion de tiempo y el
+// sintoma volveria a ser el de siempre —un artefacto que no aparece, o el de otro—.
+const PER_STORY_DOC_TYPES = perStoryDocTypes();
+
+const isPerStoryDocType = (docType) => PER_STORY_DOC_TYPES.has(docType);
+
+const artifactScopeKey = (initiativeId, docType, storyId) => (
+  isPerStoryDocType(docType) && storyId
+    ? `initiative:${initiativeId}:${docType}:story:${storyId}`
+    : `initiative:${initiativeId}:${docType}`
+);
 
 // Fases sin ningún required en el CSV (analysis): workflow deliverable de facto.
 const PHASE_FALLBACK_WORKFLOW = { analysis: 'bmad-product-brief' };
@@ -463,8 +482,23 @@ const truncateSlice = (text) => {
 // opcional (requiere OPENROUTER_API_KEY); el contrato del payload no cambia.
 const resolveNeed = async (db, ctx, need) => {
   if (need.kind === 'artifact') {
-    const row = await db('semantic_documents')
-      .where({ initiative_id: ctx.initiative_id, doc_type: need.doc_type })
+    // Un artefacto de unidad se busca por la clave de ESTA unidad y de ninguna
+    // otra. Si no existe, se sirve `present: false`, que es la verdad: esta story
+    // todavia no tiene spec. Antes, al buscar solo por (iniciativa, doc_type), se
+    // servia la de otra story como si fuera suya — un fallo mudo, que es la peor
+    // clase: el paso recibia contexto ajeno y seguia adelante sin sintoma.
+    const query = db('semantic_documents').where({ doc_type: need.doc_type });
+    if (isPerStoryDocType(need.doc_type)) {
+      // Sin unidad en el cursor no hay forma de saber cual de todas tocaria, y
+      // elegir una seria reproducir el fallo. Se declara ausente.
+      if (!ctx.story_id) {
+        return { kind: 'artifact', doc_type: need.doc_type, present: false, ref: null, slice: null };
+      }
+      query.where({ scope_key: artifactScopeKey(ctx.initiative_id, need.doc_type, ctx.story_id) });
+    } else {
+      query.where({ initiative_id: ctx.initiative_id });
+    }
+    const row = await query
       .orderBy('version', 'desc')
       .first('id', 'doc_type', 'version', 'title', 'content');
     if (!row) {
@@ -590,8 +624,11 @@ const buildStepPayload = async (db, ctx, {
   initiative, workflow, step, role, storyId, mode = 'run', questions = null, providedInput = null,
 }) => {
   const needs = [];
+  // La unidad reclamada viaja en el contexto: sin ella, un need de artefacto
+  // por-story no puede saber cual le toca.
+  const ctxConUnidad = { ...ctx, story_id: storyId || null };
   for (const need of step.needs || []) {
-    needs.push(await resolveNeed(db, ctx, need));
+    needs.push(await resolveNeed(db, ctxConUnidad, need));
   }
   const payload = {
     mode,
@@ -711,9 +748,11 @@ const aptsWorkflowStep = (db, { project_url, agent_name, answers }) =>
 const crypto = require('crypto');
 
 // Upsert de artefacto tipado (1 fila por initiative+doc_type; version=contador).
-const upsertArtifact = async (db, { initiativeId, projectUrl, docType, title, content }) => {
+const upsertArtifact = async (db, {
+  initiativeId, projectUrl, docType, title, content, storyId,
+}) => {
   const strategy_key = 'method_artifact';
-  const scope_key = `initiative:${initiativeId}:${docType}`;
+  const scope_key = artifactScopeKey(initiativeId, docType, storyId);
   const body = content || '';
   const content_hash = crypto.createHash('sha256').update(body).digest('hex');
   const existing = await db('semantic_documents')
@@ -784,9 +823,13 @@ const aptsSubmitStep = (db, { project_url, agent_name, output }) =>
     const captured = [];
     for (const decl of declared) {
       if (decl.kind === 'artifact') {
+        // `storyId` solo lo usa la clave de los artefactos por-unidad; para los de
+        // iniciativa se ignora, asi que pasarlo siempre no cambia nada y evita
+        // tener que decidir aqui de que tipo es cada uno.
         const res = await upsertArtifact(trx, {
           initiativeId: initiative.id, projectUrl: project_url,
           docType: decl.doc_type, title: out.title, content: out.content,
+          storyId: cursor.story_id || null,
         });
         captured.push({ kind: 'artifact', doc_type: decl.doc_type, id: res.id, version: res.version });
         // Conveniencia: cerrar el FK prd_artifact_id de la iniciativa cuando es el PRD.

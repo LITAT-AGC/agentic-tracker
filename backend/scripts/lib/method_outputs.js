@@ -36,7 +36,15 @@ const WORKFLOW_OUTPUTS = {
   // F4-T1: docs de proceso/validación (doc_types agregados en migración 015).
   'bmad-check-implementation-readiness': { output: { kind: 'artifact', doc_type: 'readiness' } },
   'bmad-sprint-planning': { output: { kind: 'artifact', doc_type: 'sprint_plan' } },
-  'bmad-create-story': { output: { kind: 'artifact', doc_type: 'story_spec' } },
+  // `scope: 'story'` — el UNICO artefacto que no es de la iniciativa sino de la
+  // unidad. Sin esta marca, `story_spec` se guardaba en la misma fila que todos
+  // los demas (`initiative:<id>:<doc_type>`) y por tanto habia UNA sola para la
+  // iniciativa entera: la primera story que escribia la suya se la servia despues
+  // a todas las demas como `needs[]`. Lo encontro un agente el 2026-08-08
+  // trabajando el importador SysEx y recibiendo la especificacion de la historia
+  // 1.3; se dio cuenta y tiro de `get_backlog_item`, pero el fallo es silencioso
+  // —no da error, da el contexto equivocado— y el siguiente podia no verlo.
+  'bmad-create-story': { output: { kind: 'artifact', doc_type: 'story_spec', scope: 'story' } },
   // Ejecutor per-historia (iterable): cierra cuando todas las historias están done.
   'bmad-dev-story': { output: { kind: 'status', value: 'done' }, iterable: true },
 };
@@ -56,6 +64,21 @@ const outputToCompletion = (output) => {
   return null;
 };
 
+// Los doc_type que son de la UNIDAD y no de la iniciativa. Derivado del mismo mapa
+// que todo lo demas, para que marcar el alcance en un sitio baste.
+//
+// Ojo con la completitud: `WORKFLOW_COMPLETION` sigue evaluando `artifact-exists`
+// a nivel de iniciativa tambien para estos, y se deja asi a proposito. Ese
+// predicado gatea el AVANCE DE FASE, no el contexto que se sirve; hacerlo
+// por-story convertiria "hay una spec" en "hay una spec de cada story", que es
+// otra decision —mas estricta y capaz de plantar una iniciativa en marcha— y no
+// es la que este arreglo viene a tomar.
+const perStoryDocTypes = () => new Set(
+  Object.values(WORKFLOW_OUTPUTS)
+    .filter((spec) => spec.output.kind === 'artifact' && spec.output.scope === 'story')
+    .map((spec) => spec.output.doc_type),
+);
+
 // Construye el mapa de completitud a nivel-workflow (consumido por el resolver T1.5).
 const buildWorkflowCompletion = () => {
   const completion = {};
@@ -66,4 +89,4 @@ const buildWorkflowCompletion = () => {
   return completion;
 };
 
-module.exports = { WORKFLOW_OUTPUTS, outputToCompletion, buildWorkflowCompletion };
+module.exports = { WORKFLOW_OUTPUTS, outputToCompletion, buildWorkflowCompletion, perStoryDocTypes };
