@@ -186,14 +186,32 @@ Contra `APTS_test` (puerto 47301; la ultima ronda —la del coste de los embeddi
 
 ## Produccion
 
-Donde vive, leido el 2026-08-02:
+Donde vive, al dia el 2026-08-07:
 
 | | |
 |---|---|
 | Aplicacion | `134.122.62.55:/opt/APTS`, pm2 `apts-backend` (fork, cwd `backend/`), puerto 46315 |
 | Frontend | nginx en `apts.informaticos.ar`, servido desde `frontend/dist` |
 | Base | `10.110.0.10:46452/APTS`, PostgreSQL 17.9, usuario `apt_user` |
-| Despliegue | Manual. No lo gestiona el deploy-hub de `/opt/deploy-system` |
+| Despliegue | Una orden: la directiva `.claude/skills/desplegar-produccion` y `scripts/deploy_prod.sh`. Sigue sin gestionarlo el deploy-hub de `/opt/deploy-system` |
+
+**El despliegue ya no se recuerda de memoria.** `scripts/deploy_prod.sh` no vive en el servidor: se
+canaliza por ssh desde el checkout, asi que el que corre es el del commit que dispara el despliegue.
+Trae el codigo, instala solo donde cambio el `package.json`, copia la base **antes** de migrar y solo
+si hay migraciones pendientes, compila el frontend a `dist.new` y lo intercambia —el anterior queda
+en `dist.prev`—, reinicia pm2 y comprueba. Si algo falla despues del pull, vuelve al sha de partida y
+restaura el `dist`. Lo unico que no puede revertir es el esquema.
+
+**`/mcp` ya lo contesta el backend.** nginx no tenia `location` para esa ruta, asi que caia en el
+`try_files ... /index.html` y la servia como estatico: el manifiesto publicaba
+`https://apts.informaticos.ar/mcp` como punto de integracion y un POST recibia **405 de nginx**, con
+lo que ningun cliente MCP externo podia usar la superficie publicada. Corregido el 2026-08-07 con un
+`location = /mcp` que hace `proxy_pass` al 46315, con `client_max_body_size 4m` —el endpoint declara
+4mb y el limite por defecto de nginx es 1m, que habria cortado los mensajes grandes con un 413— y
+`proxy_read_timeout 180s`, porque un paso generativo pasa de los 60s por defecto. El `/api/` de al
+lado conserva esos dos valores por defecto. Ojo con las copias del fichero: el include es
+`sites-enabled/*`, asi que un `.bak` ahi dentro se carga como un server duplicado; las copias van a
+`/root/nginx-backups/`.
 
 **El servidor de base de datos es compartido; la base no.** Conviven ocho bases —entre ellas
 `prd_geronimo` y `lms_prd`, de otros sistemas productivos—, pero las tablas de `APTS` son todas de
@@ -222,6 +240,13 @@ terminar: crear un bug gasta una llamada (`bug_embedding`, `openai/text-embeddin
 cero; la busqueda de duplicados gasta una y encuentra el bug. `initialize` y `tools/list` responden
 21 operaciones, el manifiesto 200, y los dos auto-chequeos pasan al arrancar.
 
+**Comprobado despues del despliegue del 2026-08-07**, con el sitio en marcha: `/api/health` en
+`ok` por el 46315 y por nginx; los dos auto-chequeos pasando (`operations: 21`,
+`agent_templates: 4`); el `index.html` publicado pidiendo un bundle del dist recien compilado —que
+es lo unico que distingue un frontend nuevo de uno viejo, porque con `try_files` cualquier ruta
+responde 200—; y, ya por la URL publica y con credenciales, `initialize` contestando y `tools/list`
+devolviendo **21 operaciones**.
+
 ## Abierto
 
 **El camino de Cloudflare no se ha visto devolver un vector.** El `CLOUDFLARE_API_TOKEN` del `.env`
@@ -233,12 +258,16 @@ primera mano la forma de la respuesta del punto compatible con OpenAI —vector 
 documentacion. Si ese punto contestara con el sobre nativo de Workers AI, el lector ya acepta
 `result.data[0]` y no haria falta tocar nada.
 
-En el repositorio no queda nada mas, y produccion corre `5344d61` con las 17 migraciones aplicadas.
+En el repositorio no queda nada mas. Produccion corre lo mismo que `origin/main`, con las 17
+migraciones aplicadas y el frontend recompilado el 2026-08-07 —llevaba desde el 21 de junio—.
 
-Dos cosas quedan fuera de el:
+Una cosa queda fuera del repositorio: la contraseña de `apt_user` se expuso en claro durante el
+despliegue del 2026-08-02 y conviene rotarla (`ALTER ROLE`, actualizar el `.env`, reiniciar pm2).
 
-- la contraseña de `apt_user` se expuso en claro durante el despliegue y conviene rotarla
-  (`ALTER ROLE`, actualizar el `.env`, reiniciar pm2);
-- el frontend de PROD sigue compilado del 21 de junio. Solo cambia `DashboardLayout.vue`, asi que
-  basta un `npm run build` cuando interese.
+**El `.env` de PROD no necesita ninguna clave nueva.** Tiene diez y ninguna de las que llegaron
+despues es obligatoria: `EMBEDDING_DEFAULT_MODEL` no hace falta porque
+`OPENROUTER_DEFAULT_EMBEDDING_MODEL` se sigue leyendo detras y ya vale
+`openai/text-embedding-3-small`; `METHOD_CLAIM_TTL_MS` (1 h) y `METHOD_MAX_STEP_REVISITS` (3) traen
+valor por defecto; `PUBLIC_APP_URL` cae en `CORS_ORIGIN`, que apunta al sitio bueno; y las tres
+`CLOUDFLARE_*` solo hacen falta el dia que el modelo por defecto pase a ser un `@cf/...`.
 
