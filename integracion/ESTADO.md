@@ -553,7 +553,41 @@ dependiendo de `loop_conductor`; y su ruta responde 200 con `text/markdown` y 7 
 —las tres capas nombradas y los marcadores como `{story_id}` sin sustituir, que es como tiene que
 viajar una plantilla—. Las seis comprobaciones del desplegador pasaron.
 
+**Comprobado despues del septimo despliegue del 2026-08-08** (`3d06ef9`, **con migracion**: la 020).
+La copia previa quedo en `/root/apts-backup-20260808-040808-54b3f5988.dump` (562 KB). El backfill
+sobre PROD asocio 2 tareas de 12: las otras diez son de sesiones anteriores cuyo puntero ya habia
+sido pisado. Por la URL publica, el manifiesto sale con `schema_version` **1.1.1**, el conductor y su
+README en **1.4.0**, `skills_json` en 1.0.2 y `loop_prompt_code_review` en 1.1.1, y publica
+`register_task_link_rule`; `skills.json` trae `owns_backlog_item` en las dos ramas del `oneOf`; y
+`tools/list` devuelve 22 operaciones con el campo en el `inputSchema` de `register_task`. Las seis
+comprobaciones del desplegador pasaron.
+
+Y con la migracion ya aplicada se desligo a mano la tarea `f6c66111` (`Dev story 344da12c…`, la que
+registro un agente por su cuenta y quedaba como tarea activa de su historia): en ese orden, porque el
+backfill le grabo antes su `backlog_item_id`. Conserva la asociacion y perdio la propiedad, asi que
+su `stalled` ya no arrastra la historia. Lo que el desligado no deshace es el `blocked` que la
+vigilancia de fondo ya le habia puesto: la maquina de metodo no tiene salida desde ese estado
+—`apts_set_status` responde 409 diciendo que se reponga con `update_backlog_item`—, asi que la
+historia `344da12c` sigue en `blocked` esperando esa reposicion.
+
 ## Abierto
+
+**Cloudflare sirve los artefactos `.js` hasta cuatro horas viejos.** El sitio esta detras de
+Cloudflare, que cachea por extension: `.js` esta en su lista por defecto, asi que
+`…/integrar/conductor/apts-loop.js` y `…/integrar/scripts/generate-adapters.js` se sirven desde el
+borde con `cf-cache-status: HIT` y `max-age=14400` aunque la ruta cuelgue de `/api/`. Se vio el
+2026-08-08 justo despues del septimo despliegue: el manifiesto ya anunciaba el conductor en 1.4.0 y
+la URL seguia entregando el de 1.3.0 (47.683 bytes contra los 57.834 del servidor, y sin
+`owns_backlog_item` por ninguna parte), con `Age: 6345`. El origen responde bien —comprobado por
+`127.0.0.1:46315`—; el que miente es el borde. Los demas artefactos no estan afectados: el
+manifiesto y `skills.json` salen `DYNAMIC`, porque ni la ruta sin extension ni `.json` entran en esa
+lista.
+
+Es peor que un retraso: `artifact_version` existe para que un cliente sepa que esta bajando, y
+durante esas horas el numero y el contenido no coinciden. La correccion natural es que el origen lo
+diga —`Cache-Control: no-cache` en `sendIntegrationArtifact`, que Cloudflare respeta— y purgar el
+borde una vez; queda sin decidir porque cambia el cacheo de todos los artefactos y eso es una
+decision de infraestructura, no de este cambio.
 
 **El camino de Cloudflare no se ha visto devolver un vector.** El `CLOUDFLARE_API_TOKEN` del `.env`
 es valido y esta activo (`/user/tokens/verify` responde 200) pero no alcanza ninguna cuenta
