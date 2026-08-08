@@ -3,6 +3,8 @@ node_modules
 .env
 .DS_Store
 dist
+dist.new
+dist.prev
 coverage
 .vscode
 ./no_subir.md
