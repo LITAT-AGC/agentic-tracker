@@ -12,7 +12,7 @@ llego hasta aqui: eso esta en el historial de git.
 | Registro | Una URL y cuatro cabeceras; el manifiesto publica el bloque por runtime |
 | Manifiesto | `GET /api/public/integrar`, `schema_version` 1.1.1 |
 | Runtimes soportados | Dos: Claude Code y opencode |
-| Artefactos publicados | 8; los dos del conductor en `artifact_version` 1.6.0, `skill_markdown`, `agent_guidelines` y `adapter_generator` en 1.1.0, `loop_prompt_code_review` en 1.1.1, `surface_spec` en 1.0.2, `skills_json` en 1.0.2 |
+| Artefactos publicados | 8; el conductor en `artifact_version` 1.6.0 y su README en 1.6.1, `skill_markdown`, `agent_guidelines` y `adapter_generator` en 1.1.0, `loop_prompt_code_review` en 1.1.1, `surface_spec` en 1.0.2, `skills_json` en 1.0.2 |
 | Descargas necesarias para **llamar** a las operaciones | Ninguna |
 | Descargas necesarias para **conducir** | El spec y el generador (agentes y comandos); el conductor y su README si se quiere el bucle desatendido, y su plantilla de revision si se quiere ademas la compuerta dentro de la sesion del agente |
 
@@ -420,7 +420,7 @@ Contra `APTS_test` (puerto 47301; la ultima ronda —la del coste de los embeddi
   la salida del agente en vivo con `spawn`** —el texto del agente aparece intercalado entre las
   lineas `[apts-loop]`, en orden, por los dos sistemas—; el **latido avanza mientras el agente
   trabaja**; y la tarea del conductor queda asociada a la unidad sin poseerla.
-- **Las cuatro ordenes del buzon, con el agente real en marcha.** `resume` sin corrida previa se
+- **Las ordenes del buzon, con el agente real en marcha.** `resume` sin corrida previa se
   rechaza con `cancelled` y su motivo; `start` con payload arranca; `pause` a mitad corta el arbol
   —cinco niveles, con `claude.exe` dentro, todos muertos y ningun huerfano— y devuelve el conductor
   a la espera; `resume` sin payload retoma con la MISMA configuracion y el motor sirve la story
@@ -428,8 +428,8 @@ Contra `APTS_test` (puerto 47301; la ultima ronda —la del coste de los embeddi
   corriendo», sin reiniciar nada.
 - **La señal de vida del conductor**, con `backend/scripts/test_conductor_presence.js` (nuevo;
   necesita el servidor levantado, porque la presencia vive en la memoria de ESE proceso y no
-  hay forma de mirarla sin el; crea su proyecto y lo borra). Treinta comprobaciones en verde
-  con `CONDUCTOR_PRESENCE_TTL_MS=3000`, que es lo que permite ver caducar una señal sin
+  hay forma de mirarla sin el; crea su proyecto y lo borra). Treinta y dos comprobaciones en
+  verde con `CONDUCTOR_PRESENCE_TTL_MS=3000`, que es lo que permite ver caducar una señal sin
   esperar un minuto. Un conductor que no ha sondeado no esta escuchando y no consta ninguna
   señal suya; en cuanto sondea, `listening` y `seconds_ago` a 0; pasado el plazo deja de
   escuchar pero **conserva** `last_seen_at`, que es lo que separa callado de apagado. Dos
@@ -463,6 +463,14 @@ Contra `APTS_test` (puerto 47301; la ultima ronda —la del coste de los embeddi
   `cancelled` con su motivo debajo por el solo hecho de mirar la pestaña, la reciente aguantando
   `pending` con «no hay nadie al otro lado; caduca a los 10 min», y el aviso al encolar: «si no
   arranca uno en 10 min, la orden caducara sola».
+- **La retirada de `stop`**, contra el servidor de prueba en 47399. El panel encola `stop` y
+  recibe **400** nombrando los tres que valen —`start, pause, resume`— en vez de colarlo como un
+  `pause` en silencio; con `pause` el buzon se comporta exactamente igual que antes, y las dos
+  pruebas del buzon pasan enteras (32 y 20 comprobaciones) con las suyas reescritas a `pause`. La
+  fila `stop` escrita directamente en la base, la unica que queda, se lee, se lista y caduca por
+  los dos caminos. El manifiesto publica el conductor en 1.6.0 y su README en 1.6.1, cada uno con
+  su URL versionada, y esa URL sirve el texto nuevo. El frontend compila y su chunk
+  `ProjectDetails` ya no contiene «Detener» ni una sola vez.
 - **El corte en POSIX, ejecutado por fin** (WSL Ubuntu contra el servidor de prueba de Windows). El
   agente arranca en su propio grupo (`pgid` distinto del conductor) con un nieto dentro. Un agente
   que coopera muere entero en ~2 s sin pagar la gracia. Un agente que **ignora `SIGTERM`** es el que
@@ -781,7 +789,7 @@ nieto, que es lo unico que distingue matar al hijo de matar al arbol.
 | Iniciar | reclama una story y lanza el agente en su propio grupo (`pgid` distinto del conductor) |
 | Pausar | los TRES muertos —`sh`, agente y nieto—; el conductor sobrevive y vuelve a esperar |
 | Reanudar | retoma la misma story con la misma configuracion, sin reescribir nada en el panel |
-| Detener | el arbol muerto otra vez |
+| Detener | el arbol muerto otra vez —y de ahi salio la unificacion: hacia lo mismo que Pausar. Ese boton ya no existe |
 
 Y de paso quedaron vistas dos cosas mas contra PROD: la **señal de vida** en verde («Escuchando
 · ultima señal hace 0 s») y el **diario del conductor** llegando a APTS —`parada`, `agente ...
@@ -947,6 +955,36 @@ si esa corrida dura mas del plazo, la orden caduca en vez de arrancar sola al te
 se queria: arrancar horas despues de que alguien lo pidiera es exactamente la sorpresa que la
 caducidad evita.
 
+**Y ya no hay dos botones que hagan lo mismo.** Detener y Pausar eran la misma orden con dos
+nombres: contra el conductor las dos cortaban el arbol del agente, terminaban esa corrida y lo
+devolvian a la espera, y lo unico que cambiaba era la etiqueta del motivo en el diario
+(`orden:stop` frente a `orden:pause`). No era un defecto del daemon: `stop` y `pause` aparecen
+**una sola vez** en `apts-loop.js`, juntos en la misma condicion, y `ordenDeParada` solo se lee
+despues para componer ese motivo. No habia ni una linea que los separase en ningun modo. Se vio
+pulsando los dos contra PROD el 2026-08-08.
+
+Se unifico en **Pausar** y no al reves. El panel no arranca conductores —los arranca una persona
+en la maquina donde vive el `--agent-cmd`—, asi que un boton que apagara el proceso dejaria el
+buzon sin nadie al otro lado y sin forma de volver a levantarlo desde el panel: justo lo que la
+señal de vida vino a hacer visible. El texto de ayuda de la pestaña lo dice ahora, porque con un
+solo boton de parada hay que decir que **no** apaga el conductor.
+
+`CONDUCTOR_COMMANDS` pasa a tener **tres** valores. El CHECK de `conductor_orders.command`
+conserva los cuatro **a proposito**: es suelo de la tabla y no contrato publicado —ningun cliente
+lo ve—, asi que estrecharlo seria una migracion para no dejar pasar nada que la lista de la API ya
+no deja pasar, y convertiria un despliegue sin migraciones en uno con copia previa de la base. La
+asimetria tiene su testigo: el caso 6 de `test_conductor_order_expiry.js` escribe su fila `stop`
+directamente en la base, de modo que una orden anterior a la retirada se sigue leyendo, listando y
+caducando igual, y el dia que alguien estreche el CHECK sin mirar, esa prueba lo dira.
+
+Y **el conductor no se toco**: sigue entendiendo `stop` por si habla con un APTS anterior, asi que
+se queda en **1.6.0**. Sube solo el README, a **1.6.1**, porque describia cuatro botones. La
+premisa de partida —que habia ordenes `stop` historicas en PROD que una migracion romperia— resulto
+falsa al comprobarla: `conductor_orders` esta **vacia** en produccion (las cinco del fixture se
+fueron con el proyecto), y `command` no es un tipo enum de Postgres sino un CHECK, es decir un
+`drop`/`add constraint` sin reescritura de tabla. Aun asi la migracion no compra nada, y por eso no
+se hizo.
+
 De paso, la pestaña Conductor **se refresca sola** cada diez segundos, el mismo intervalo que
 sondea el conductor: mirar mas seguido no adelantaria nada, porque el buzon no se mueve entre
 sus preguntas. Solo corre con esa pestaña delante y la ventana visible, el boton Actualizar
@@ -964,30 +1002,13 @@ primera mano la forma de la respuesta del punto compatible con OpenAI —vector 
 documentacion. Si ese punto contestara con el sobre nativo de Workers AI, el lector ya acepta
 `result.data[0]` y no haria falta tocar nada.
 
-**Detener y Pausar son el mismo boton, y hay que unificarlos en Pausar.** Contra un conductor
-en `--daemon` las dos ordenes hacen exactamente lo mismo: cortan el arbol del agente, terminan
-esa corrida y devuelven el conductor a la espera. No es un defecto del corte —el codigo lo dice
-a proposito, «en espera, una parada no termina el proceso: termina esa corrida», que es lo que
-hace que pausar y volver a arrancar sean una sola sesion—. Y no es solo cosa del daemon:
-**`stop` y `pause` aparecen UNA sola vez en `apts-loop.js`, juntos en la misma condicion**
-(`if (!['stop', 'pause'].includes(orden.command)) return;`), asi que no hay ni una linea que
-los distinga en ningun modo. Lo unico observable que cambia entre uno y otro es la etiqueta del
-motivo que va al diario (`orden:stop` frente a `orden:pause`). El problema, entonces, es lo que
-el panel promete: dos botones que hacen lo mismo. Se vio pulsandolos los dos contra PROD el
-2026-08-08.
-
-Decidido el 2026-08-08: **se unifica en Pausar**, no al reves. El panel encola ordenes para un
-conductor que no arranca el —lo arranca una persona en la maquina donde vive el `--agent-cmd`—,
-asi que un boton que apagara el proceso dejaria el buzon sin nadie al otro lado y sin forma de
-volver a levantarlo desde el panel: justo lo que la señal de vida vino a hacer visible. Queda
-por decidir que pasa con `stop` en el enum de `conductor_orders` y en `CONDUCTOR_COMMANDS`, que
-es superficie ya publicada.
-
 **Editar `workflow_steps` sigue fuera de alcance**, declarado. Las instrucciones paso a paso
 del metodo se editan sembrando el corpus, no desde el panel.
 
-En el repositorio no queda nada mas. Produccion corre lo mismo que `origin/main`, con las 23
-migraciones aplicadas y el frontend recompilado el 2026-08-08.
+En el repositorio no queda nada mas. Produccion tiene las 23 migraciones aplicadas y el frontend
+recompilado el 2026-08-08, y corre lo mismo que `origin/main` **salvo la unificacion de Detener y
+Pausar**, que entra en el siguiente despliegue: no lleva migracion, y hasta que se despliegue el
+panel de produccion sigue mostrando los cuatro botones.
 
 **El `.env` de PROD no necesita ninguna clave nueva.** Tiene diez y ninguna de las que llegaron
 despues es obligatoria: `EMBEDDING_DEFAULT_MODEL` no hace falta porque

@@ -463,8 +463,16 @@ código como red de seguridad, pero ya no es el camino normal.
 ## Órdenes desde el panel
 
 La pestaña **Conductor** de un proyecto deja órdenes en un buzón —**Iniciar**, **Pausar**,
-**Reanudar**, **Detener**— dirigidas al `--agent-name` con el que corre el conductor. El
-conductor pregunta cada diez segundos, también mientras el agente trabaja.
+**Reanudar**— dirigidas al `--agent-name` con el que corre el conductor. El conductor
+pregunta cada diez segundos, también mientras el agente trabaja.
+
+Eran cuatro hasta el 2026-08-08: había además un **Detener** que encolaba `stop`. No era una
+orden distinta —cortaba el árbol del agente, terminaba esa corrida y devolvía el conductor a
+la espera, exactamente igual que `pause`, y lo único que cambiaba era la etiqueta del motivo
+en el diario—, así que se unificó en Pausar. Se unificó en ese sentido y no en el otro porque
+el panel no arranca conductores: apagar el proceso desde ahí dejaría el buzón sin nadie al
+otro lado. El conductor **sigue entendiendo `stop`** —lo que sigue es este script, sin
+cambios— por si habla con un APTS anterior a esa fecha; lo que ya no lo acepta es el panel.
 
 No hay socket a propósito: para un botón que pulsa una persona, diez segundos son
 indistinguibles de instantáneo, y un servidor de WebSocket sería una pieza más —conexión,

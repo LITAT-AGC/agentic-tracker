@@ -450,6 +450,13 @@
                   {{ conductorOrderTtlLabel }}, para que no la ejecute el que arranque mañana.
                 </span>
                 <span class="block mt-1">
+                  <strong>Pausar</strong> corta el árbol de procesos del agente y termina esa corrida.
+                  El conductor sigue vivo y vuelve a escuchar, que es lo que permite retomarlo desde
+                  aquí. Apagar el proceso no se puede desde el panel a propósito: lo arranca una
+                  persona en la máquina donde vive el comando del agente, y una orden que lo apagara
+                  dejaría este buzón sin nadie al otro lado.
+                </span>
+                <span class="block mt-1">
                   <strong>Reanudar</strong> repite la última corrida del conductor sin volver a escribir
                   nada de este formulario. Sólo la recuerda el proceso que la condujo: si se reinició,
                   la rechaza y hay que usar Iniciar.
@@ -501,15 +508,6 @@
                   label="Reanudar"
                   icon="pi pi-play-circle"
                   severity="secondary"
-                  size="small"
-                />
-                <Button
-                  @click="sendConductorOrder('stop')"
-                  :loading="isSendingOrder"
-                  :disabled="!conductorAgentName.trim()"
-                  label="Detener"
-                  icon="pi pi-stop"
-                  severity="danger"
                   size="small"
                 />
                 <span

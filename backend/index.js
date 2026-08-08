@@ -2429,7 +2429,10 @@ const integrationArtifacts = {
     // 1.6.0: documenta `resume` —qué repite, qué recuerda el proceso y no APTS, y por qué
     // un conductor recién arrancado la rechaza— y por qué el corte espera al GRUPO y no
     // al hijo directo.
-    artifactVersion: '1.6.0',
+    // 1.6.1: el panel pasa a tener tres botones y no cuatro —`stop` era `pause` con otro
+    // nombre—, y el manual lo dice, incluido que el script sigue entendiendo `stop` para
+    // hablar con un APTS anterior. Sólo cambia el texto: el conductor se queda en 1.6.0.
+    artifactVersion: '1.6.1',
     kind: 'loop_conductor_manual',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -5324,7 +5327,22 @@ app.post('/api/conductor/journal', apiLimiter, authenticateAgent, async (req, re
 // Buzón, no canal en vivo: el conductor pregunta cada diez segundos. Mismas dos razones
 // que el diario para no ser operación MCP —no es del método y no la llama un agente— y
 // una más: el panel también escribe aquí, y el panel va por sesión, no por clave.
-const CONDUCTOR_COMMANDS = ['start', 'stop', 'pause', 'resume'];
+//
+// Son TRES y no cuatro: `stop` se retiró el 2026-08-08 porque no era una orden distinta.
+// Contra el conductor, `stop` y `pause` caían en la misma condición —una sola línea, sin
+// ninguna rama que los separase en ningún modo—, así que las dos cortaban el árbol del
+// agente, terminaban esa corrida y devolvían el conductor a la espera; lo único que
+// cambiaba entre ellas era la etiqueta del motivo en el diario. Dos botones que hacen lo
+// mismo prometen una diferencia que no existe.
+//
+// Se unificó en `pause` y no al revés porque el panel no arranca conductores —los arranca
+// una persona en la máquina donde vive el `--agent-cmd`—, así que una orden que apagara el
+// proceso dejaría el buzón sin nadie al otro lado y sin forma de volver a levantarlo desde
+// aquí. El CHECK de `conductor_orders.command` conserva los cuatro valores a propósito: es
+// suelo de la tabla y no contrato publicado, así que estrecharlo exigiría una migración
+// para no dejar pasar nada que esta lista ya no deja pasar. El conductor tampoco cambia
+// —sigue entendiendo `stop` si un APTS viejo se lo manda— y por eso sigue en 1.6.0.
+const CONDUCTOR_COMMANDS = ['start', 'pause', 'resume'];
 const CONDUCTOR_ORDER_STATUSES = ['pending', 'acked', 'done', 'cancelled'];
 
 // ---- Señal de vida del conductor ----

@@ -87,8 +87,18 @@ const presenciaDe = (estado, nombre) => (estado.presence || []).find((p) => p.ag
       `${e1.presence_ttl_seconds}s`);
 
     // ---- 2. una orden encolada a un conductor apagado ----
-    const orden = await pedir('POST', '/dashboard/conductor/orders',
+    // De paso, el comando retirado: `stop` era `pause` con otro nombre y ya no se acepta.
+    // El rechazo tiene que NOMBRAR los que si valen, que es lo unico que convierte un 400
+    // en una respuesta util para quien traiga un panel cacheado con el boton viejo.
+    const retirada = await pedir('POST', '/dashboard/conductor/orders',
       { command: 'stop', agent_name: VIVO, project_url: PROYECTO }, galleta);
+    ok(retirada.status === 400, 'el comando retirado `stop` se rechaza en vez de colarse como un pause',
+      `HTTP ${retirada.status}`);
+    ok(/pause/.test((retirada.datos && retirada.datos.error) || '') && !/stop/.test((retirada.datos && retirada.datos.error) || ''),
+      'y el error nombra los tres que valen, sin el retirado', retirada.datos && retirada.datos.error);
+
+    const orden = await pedir('POST', '/dashboard/conductor/orders',
+      { command: 'pause', agent_name: VIVO, project_url: PROYECTO }, galleta);
     ok(orden.status === 200, 'el panel encola la orden igual: escribir la fila siempre funciona', `HTTP ${orden.status}`);
     const e2 = await estado(VIVO);
     const pendiente = (e2.orders || []).find((o) => o.id === orden.datos.order.id);

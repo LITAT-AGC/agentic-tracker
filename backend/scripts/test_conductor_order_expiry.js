@@ -100,7 +100,7 @@ const pedir = async (metodo, ruta, cuerpo, extra = {}) => {
     // que la prueba se adapta: si toca, lo comprueba; si no, espera a poder probar el resto.
     // Para verlo de verdad, arranca el servidor con CONDUCTOR_PRESENCE_TTL_MS muy alto.
     if (Number(inicial.server_uptime_seconds) <= PRESENCIA_S) {
-      const enArranque = await encolar('stop', APAGADO);
+      const enArranque = await encolar('pause', APAGADO);
       await knex('conductor_orders').where({ id: enArranque.id })
         .update({ created_at: new Date(Date.now() - (PLAZO_S * 1000 + 60000)) });
       const eArranque = await estado(APAGADO);
@@ -119,7 +119,7 @@ const pedir = async (metodo, ruta, cuerpo, extra = {}) => {
     }
 
     // ---- 1. el plazo protege el encolar-antes-de-arrancar ----
-    const recien = await encolar('stop', APAGADO);
+    const recien = await encolar('pause', APAGADO);
     ok(Boolean(recien), 'se encola una orden a un conductor que no corre');
     const e1 = await estado(APAGADO);
     const v1 = (e1.orders || []).find((o) => o.id === recien.id);
@@ -137,7 +137,7 @@ const pedir = async (metodo, ruta, cuerpo, extra = {}) => {
     ok((e2.orders || []).some((o) => o.id === recien.id), 'la orden caducada sigue en la lista, con su motivo');
 
     // ---- 3. quien esta escuchando manda sobre el reloj ----
-    const suya = await encolar('stop', VIVO);
+    const suya = await encolar('pause', VIVO);
     const sondeo = await pedir('GET', `/conductor/orders/next?agent_name=${encodeURIComponent(VIVO)}`);
     ok(sondeo.status === 200 && sondeo.datos.order && sondeo.datos.order.id === suya.id,
       'el conductor sondea y recibe la orden que le esperaba', `HTTP ${sondeo.status}`);
@@ -166,6 +166,11 @@ const pedir = async (metodo, ruta, cuerpo, extra = {}) => {
       'una orden vieja que ya se resolvio no se reescribe', f5 && `${f5.status}/${f5.detail}`);
 
     // ---- 6. el radio: el panel de un proyecto no caduca lo ajeno ----
+    // Va con `stop` a proposito, y por eso se escribe en la base en vez de encolarse: es el
+    // comando retirado el 2026-08-08, que la API ya no acepta pero el CHECK de la tabla
+    // sigue admitiendo. Asi se comprueba de paso lo que promete esa asimetria —una fila
+    // escrita antes de la retirada se sigue leyendo, se sigue listando y caduca igual—, que
+    // es justo lo que se romperia el dia que alguien estrechara el CHECK sin mirar.
     const [ajena] = await knex('conductor_orders').insert({
       project_url: null, agent_name: AJENO, command: 'stop',
       created_at: new Date(Date.now() - (PLAZO_S * 1000 + 60000)),
@@ -186,7 +191,7 @@ const pedir = async (metodo, ruta, cuerpo, extra = {}) => {
 
     // ---- 8. callado no es escuchando ----
     if (PRESENCIA_S <= 10) {
-      const callada = await encolar('stop', VIVO);
+      const callada = await encolar('pause', VIVO);
       await envejecer(callada.id);
       await dormir(PRESENCIA_S * 1000 + 1200);
       const e8 = await estado(VIVO);
