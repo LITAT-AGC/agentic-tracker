@@ -5309,6 +5309,42 @@ app.get('/api/dashboard/projects/:url', requireAuth, async (req, res) => {
   }
 });
 
+// Las restricciones del proyecto ya se leian y escribian, pero solo por la superficie de
+// agente (`/api/projects/:url/constraints`, con `authenticateAgent`), y el panel no lleva
+// clave de API sino sesion: por eso el campo seguia sin pantalla. Estas dos rutas son las
+// mismas funciones detras de `requireAuth`; no hay logica duplicada.
+app.get('/api/dashboard/projects/:url/constraints', requireAuth, async (req, res) => {
+  try {
+    const url = normalizeUrl(decodeURIComponent(req.params.url));
+    if (!url) return res.status(400).json({ error: 'Project url is required' });
+
+    const constraints = await getProjectConstraints(url);
+    return res.json(constraints);
+  } catch (error) {
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to read project constraints',
+      logMessage: 'Dashboard project constraints read failed',
+      logContext: { project_url: req.params.url }
+    });
+  }
+});
+
+app.put('/api/dashboard/projects/:url/constraints', requireAuth, async (req, res) => {
+  try {
+    const url = normalizeUrl(decodeURIComponent(req.params.url));
+    if (!url) return res.status(400).json({ error: 'Project url is required' });
+
+    const constraints = await setProjectConstraints(url, parseProjectConstraintsPatch(req.body));
+    return res.json(constraints);
+  } catch (error) {
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to write project constraints',
+      logMessage: 'Dashboard project constraints write failed',
+      logContext: { project_url: req.params.url }
+    });
+  }
+});
+
 app.get('/api/dashboard/projects/:url/backlog', requireAuth, async (req, res) => {
   try {
     const url = normalizeUrl(decodeURIComponent(req.params.url));

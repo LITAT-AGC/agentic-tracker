@@ -242,70 +242,7 @@
       </div>
       </div>
 
-      <div v-if="activeTab === 'execution'" class="space-y-8">
-      <div>
-        <div class="flex items-center gap-2 mb-4">
-          <div class="w-1 h-5 bg-primary-500 rounded-full"></div>
-          <h3 class="text-lg font-bold">Tareas Asociadas</h3>
-        </div>
-
-        <Card class="border border-surface-200" :pt="{ body: { class: 'p-0' }, content: { class: 'p-0' } }">
-          <template #content>
-            <DataTable
-              :value="projectTasks"
-              v-model:filters="taskFilters"
-              filterDisplay="row"
-              :paginator="true"
-              :rows="200"
-              :scrollable="true"
-              scrollHeight="480px"
-              class="w-full text-sm"
-            >
-              <template #empty>
-                <div class="p-6 text-center text-surface-500 text-sm">No hay tareas asignadas a este proyecto aún.</div>
-              </template>
-
-              <Column field="title" header="Título de la Tarea">
-                <template #body="{ data }">
-                  <span class="font-medium text-surface-700">{{ data.title }}</span>
-                </template>
-              </Column>
-              <Column field="agent_name" header="Agente">
-                <template #body="{ data }">
-                  <div class="flex items-center gap-2">
-                    <Avatar :label="data.agent_name ? data.agent_name.charAt(0).toUpperCase() : '?'" shape="circle" size="normal"
-                      :pt="{ root: { class: 'bg-primary text-primary-contrast text-[10px] font-bold' } }" />
-                    <span class="text-xs text-surface-600">{{ data.agent_name || 'Sin asignar' }}</span>
-                  </div>
-                </template>
-              </Column>
-              <Column field="status" header="Estado" filter filterField="status" :showFilterMenu="false">
-                <template #body="{ data }">
-                  <Tag :value="data.status.replace('_', ' ')" :severity="taskStatusSeverity(data.status)" />
-                </template>
-                <template #filter="{ filterModel, filterCallback }">
-                  <MultiSelect
-                    v-model="filterModel.value"
-                    :options="taskStatusOptions"
-                    @change="filterCallback()"
-                    :maxSelectedLabels="1"
-                    class="w-full"
-                  />
-                </template>
-              </Column>
-              <Column field="last_heartbeat" header="Última Señal">
-                <template #body="{ data }">
-                  <span class="text-xs text-surface-500 flex items-center gap-1">
-                    <i class="pi pi-clock"></i>
-                    {{ data.last_heartbeat ? new Date(data.last_heartbeat).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : 'Nunca' }}
-                  </span>
-                </template>
-              </Column>
-            </DataTable>
-          </template>
-        </Card>
-      </div>
-
+      <div v-if="activeTab === 'backlog'" class="space-y-8">
       <div>
         <div class="flex items-center justify-between mb-4">
           <div class="flex items-center gap-2">
@@ -471,6 +408,155 @@
           </template>
         </Card>
       </div>
+      </div>
+
+      <div v-if="activeTab === 'conductor'" class="space-y-8">
+        <div class="flex items-center gap-2 mb-4">
+          <div class="w-1 h-5 bg-amber-500 rounded-full"></div>
+          <h3 class="text-lg font-bold">Control del Conductor</h3>
+        </div>
+
+        <Card class="border border-surface-200">
+          <template #content>
+            <p class="text-sm text-surface-500">
+              Aún no disponible. Desde aquí se podrá iniciar, pausar y detener el conductor del bucle.
+            </p>
+          </template>
+        </Card>
+      </div>
+
+      <div v-if="activeTab === 'config'" class="space-y-8">
+        <div>
+          <div class="flex items-center gap-2 mb-4">
+            <div class="w-1 h-5 bg-sky-500 rounded-full"></div>
+            <h3 class="text-lg font-bold">Restricciones del Proyecto</h3>
+          </div>
+
+          <Card class="border border-surface-200">
+            <template #content>
+              <p class="text-sm text-surface-500 mb-4">
+                Lo que un agente necesita saber para trabajar en este proyecto sin adivinarlo.
+                Un campo vacío se borra y vuelve a heredar lo que traiga el proyecto.
+              </p>
+
+              <Message v-if="constraintsError" severity="error" :closable="false" class="mb-4">{{ constraintsError }}</Message>
+
+              <div v-if="constraintsLoading" class="text-sm text-surface-500">Cargando restricciones...</div>
+
+              <div v-else class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <label class="space-y-2">
+                  <span class="block text-[11px] uppercase tracking-wider text-sky-700/70">Comando de test</span>
+                  <InputText v-model="projectConstraints.test_command" class="w-full" placeholder="npm test" />
+                </label>
+                <label class="space-y-2">
+                  <span class="block text-[11px] uppercase tracking-wider text-sky-700/70">Comando de lint</span>
+                  <InputText v-model="projectConstraints.lint_command" class="w-full" placeholder="npm run lint" />
+                </label>
+                <label class="space-y-2">
+                  <span class="block text-[11px] uppercase tracking-wider text-sky-700/70">Comando de typecheck</span>
+                  <InputText v-model="projectConstraints.typecheck_command" class="w-full" placeholder="npm run typecheck" />
+                </label>
+                <label class="space-y-2">
+                  <span class="block text-[11px] uppercase tracking-wider text-sky-700/70">Framework</span>
+                  <InputText v-model="projectConstraints.framework" class="w-full" placeholder="Vue 3 + Express" />
+                </label>
+                <label class="space-y-2">
+                  <span class="block text-[11px] uppercase tracking-wider text-sky-700/70">Lenguaje</span>
+                  <InputText v-model="projectConstraints.language" class="w-full" placeholder="JavaScript" />
+                </label>
+                <label class="space-y-2 md:col-span-3">
+                  <span class="block text-[11px] uppercase tracking-wider text-sky-700/70">Convenciones</span>
+                  <Textarea v-model="projectConstraints.conventions" class="w-full" rows="4" autoResize />
+                </label>
+              </div>
+
+              <div class="flex flex-wrap items-center gap-3 mt-5">
+                <Button
+                  @click="saveProjectConstraints"
+                  :loading="isSavingConstraints"
+                  :disabled="constraintsLoading"
+                  label="Guardar restricciones"
+                  severity="info"
+                  size="small"
+                />
+                <Button
+                  @click="loadProjectConstraints"
+                  :disabled="constraintsLoading || isSavingConstraints"
+                  label="Recargar"
+                  severity="secondary"
+                  outlined
+                  size="small"
+                />
+                <span v-if="constraintsMessage" class="text-xs text-emerald-600">{{ constraintsMessage }}</span>
+              </div>
+            </template>
+          </Card>
+        </div>
+      </div>
+
+      <div v-if="activeTab === 'logs'" class="space-y-8">
+      <div>
+        <div class="flex items-center gap-2 mb-4">
+          <div class="w-1 h-5 bg-primary-500 rounded-full"></div>
+          <h3 class="text-lg font-bold">Tareas Asociadas</h3>
+        </div>
+
+        <Card class="border border-surface-200" :pt="{ body: { class: 'p-0' }, content: { class: 'p-0' } }">
+          <template #content>
+            <DataTable
+              :value="projectTasks"
+              v-model:filters="taskFilters"
+              filterDisplay="row"
+              :paginator="true"
+              :rows="200"
+              :scrollable="true"
+              scrollHeight="480px"
+              class="w-full text-sm"
+            >
+              <template #empty>
+                <div class="p-6 text-center text-surface-500 text-sm">No hay tareas asignadas a este proyecto aún.</div>
+              </template>
+
+              <Column field="title" header="Título de la Tarea">
+                <template #body="{ data }">
+                  <span class="font-medium text-surface-700">{{ data.title }}</span>
+                </template>
+              </Column>
+              <Column field="agent_name" header="Agente">
+                <template #body="{ data }">
+                  <div class="flex items-center gap-2">
+                    <Avatar :label="data.agent_name ? data.agent_name.charAt(0).toUpperCase() : '?'" shape="circle" size="normal"
+                      :pt="{ root: { class: 'bg-primary text-primary-contrast text-[10px] font-bold' } }" />
+                    <span class="text-xs text-surface-600">{{ data.agent_name || 'Sin asignar' }}</span>
+                  </div>
+                </template>
+              </Column>
+              <Column field="status" header="Estado" filter filterField="status" :showFilterMenu="false">
+                <template #body="{ data }">
+                  <Tag :value="data.status.replace('_', ' ')" :severity="taskStatusSeverity(data.status)" />
+                </template>
+                <template #filter="{ filterModel, filterCallback }">
+                  <MultiSelect
+                    v-model="filterModel.value"
+                    :options="taskStatusOptions"
+                    @change="filterCallback()"
+                    :maxSelectedLabels="1"
+                    class="w-full"
+                  />
+                </template>
+              </Column>
+              <Column field="last_heartbeat" header="Última Señal">
+                <template #body="{ data }">
+                  <span class="text-xs text-surface-500 flex items-center gap-1">
+                    <i class="pi pi-clock"></i>
+                    {{ data.last_heartbeat ? new Date(data.last_heartbeat).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : 'Nunca' }}
+                  </span>
+                </template>
+              </Column>
+            </DataTable>
+          </template>
+        </Card>
+      </div>
 
       <div>
         <div class="flex items-center gap-2 mb-4">
@@ -488,6 +574,8 @@
               :rows="200"
               :scrollable="true"
               scrollHeight="480px"
+              sortField="created_at"
+              :sortOrder="-1"
               class="w-full text-sm"
             >
               <template #empty>
@@ -518,7 +606,7 @@
                   <span class="text-sm text-surface-600 leading-snug">{{ data.message }}</span>
                 </template>
               </Column>
-              <Column field="created_at" header="Hora">
+              <Column field="created_at" header="Hora" sortable>
                 <template #body="{ data }">
                   <span class="text-xs text-surface-500 whitespace-nowrap">
                     {{ new Date(data.created_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) }}
@@ -594,11 +682,18 @@
             <InputNumber v-model="editingBacklog.sort_order" class="w-28" :useGrouping="false" />
           </div>
           <Button
+            @click="cancelBacklogEdit"
+            label="Cerrar"
+            icon="pi pi-times"
+            severity="secondary"
+            outlined
+            class="ml-auto"
+          />
+          <Button
             @click="saveBacklogItem"
             :disabled="isSavingBacklog || !editingBacklog.title?.trim()"
             :label="isSavingBacklog ? 'Guardando...' : backlogDialogMode === 'create' ? 'Crear item' : 'Guardar cambios'"
             severity="help"
-            class="ml-auto"
           />
           <Button
             v-if="backlogDialogMode === 'edit' && editingBacklog.id"
@@ -621,10 +716,16 @@ import { apiFetchJson, getApiErrorMessage } from '../config/api';
 const route = useRoute();
 const router = useRouter();
 
-const activeTab = ref('execution');
+// La pestaña 'Ejecución' mezclaba tres tablas que se miran en momentos distintos: el
+// backlog se edita, los logs se leen despues y el conductor se maneja. Separarlas es lo
+// que permite que cada una crezca sin empujar a las otras fuera de la pantalla.
+const activeTab = ref('backlog');
 const tabOptions = [
-  { label: 'Ejecución', value: 'execution' },
-  { label: 'Semántico', value: 'semantic' }
+  { label: 'Backlog', value: 'backlog' },
+  { label: 'Conductor', value: 'conductor' },
+  { label: 'Logs', value: 'logs' },
+  { label: 'Semántico', value: 'semantic' },
+  { label: 'Configuración', value: 'config' }
 ];
 const selectedProject = ref(null);
 const loadingProject = ref(true);
@@ -633,6 +734,16 @@ const loadError = ref(null);
 const projectTasks = ref([]);
 const projectBacklog = ref([]);
 const projectLogs = ref([]);
+
+// Los seis campos que acepta el parche de restricciones; el orden es el del backend.
+const constraintFields = ['test_command', 'lint_command', 'typecheck_command', 'framework', 'language', 'conventions'];
+const emptyConstraints = () => Object.fromEntries(constraintFields.map((field) => [field, '']));
+const projectConstraints = ref(emptyConstraints());
+const constraintsLoading = ref(false);
+const isSavingConstraints = ref(false);
+const constraintsError = ref(null);
+const constraintsMessage = ref(null);
+
 const backlogError = ref(null);
 const isSavingBacklog = ref(false);
 const isAnalyzingBacklog = ref(false);
@@ -708,7 +819,7 @@ const getInitialBacklogForm = () => ({
 });
 
 const resetDetails = () => {
-  activeTab.value = 'execution';
+  activeTab.value = 'backlog';
   projectTasks.value = [];
   projectBacklog.value = [];
   projectLogs.value = [];
@@ -722,6 +833,11 @@ const resetDetails = () => {
   logFilters.value = {
     action_type: { value: [], matchMode: 'in' }
   };
+  projectConstraints.value = emptyConstraints();
+  constraintsLoading.value = false;
+  isSavingConstraints.value = false;
+  constraintsError.value = null;
+  constraintsMessage.value = null;
   backlogError.value = null;
   editingBacklog.value = null;
   backlogDialogMode.value = 'edit';
@@ -763,6 +879,68 @@ const fetchSemanticStatus = async (url) => {
   }
 };
 
+const applyConstraints = (data) => {
+  projectConstraints.value = Object.fromEntries(
+    constraintFields.map((field) => [field, data?.[field] ?? ''])
+  );
+};
+
+const loadProjectConstraints = async () => {
+  const url = selectedProject.value?.url || String(route.params.projectId || '').trim();
+  if (!url) return;
+
+  constraintsLoading.value = true;
+  constraintsError.value = null;
+  constraintsMessage.value = null;
+
+  try {
+    const { data } = await apiFetchJson(`/dashboard/projects/${encodeURIComponent(url)}/constraints`, {
+      credentials: 'include'
+    }, 'No se pudieron cargar las restricciones del proyecto.');
+
+    applyConstraints(data);
+  } catch (error) {
+    constraintsError.value = getApiErrorMessage(error, 'No se pudieron cargar las restricciones del proyecto.');
+    console.error('Failed to load project constraints', error);
+  } finally {
+    constraintsLoading.value = false;
+  }
+};
+
+const saveProjectConstraints = async () => {
+  const url = selectedProject.value?.url;
+  if (!url) return;
+
+  isSavingConstraints.value = true;
+  constraintsError.value = null;
+  constraintsMessage.value = null;
+
+  try {
+    // Un campo vacio se manda como `null` explicito, que es lo que el backend entiende
+    // por borrar; una cadena vacia se guardaria tal cual y taparia lo heredado.
+    const payload = Object.fromEntries(constraintFields.map((field) => {
+      const value = String(projectConstraints.value[field] ?? '').trim();
+      return [field, value === '' ? null : value];
+    }));
+
+    const { data } = await apiFetchJson(`/dashboard/projects/${encodeURIComponent(url)}/constraints`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(payload)
+    }, 'No se pudieron guardar las restricciones del proyecto.');
+
+    // Se pinta lo EFECTIVO que devuelve el servidor, no lo que se envio.
+    applyConstraints(data);
+    constraintsMessage.value = 'Restricciones guardadas.';
+  } catch (error) {
+    constraintsError.value = getApiErrorMessage(error, 'No se pudieron guardar las restricciones del proyecto.');
+    console.error('Failed to save project constraints', error);
+  } finally {
+    isSavingConstraints.value = false;
+  }
+};
+
 const fetchProjectDetails = async (url) => {
   backlogError.value = null;
 
@@ -775,10 +953,14 @@ const fetchProjectDetails = async (url) => {
     selectedProject.value = data.project || { url };
     projectTasks.value = data.tasks || [];
     projectBacklog.value = data.backlog || [];
-    projectLogs.value = (data.logs || []).map((log) => ({
-      ...log,
-      action_type: log.action_type || 'update'
-    }));
+    // El backend ya sirve `created_at desc`, pero el orden de la tabla no puede depender
+    // de que nadie lo pise mas adelante: se ordena aqui tambien y la columna es sortable.
+    projectLogs.value = (data.logs || [])
+      .map((log) => ({
+        ...log,
+        action_type: log.action_type || 'update'
+      }))
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
     logFilters.value = {
       action_type: {
         value: [...new Set(projectLogs.value.map((log) => log.action_type || 'update'))].sort(),
@@ -804,6 +986,7 @@ const loadProject = async () => {
     }
 
     await fetchProjectDetails(routeProjectId);
+    await loadProjectConstraints();
     await fetchSemanticStatus(routeProjectId);
   } catch (error) {
     loadError.value = error.message;
