@@ -5301,6 +5301,8 @@ app.post('/api/conductor/journal', apiLimiter, authenticateAgent, async (req, re
   if (!taskId) return res.status(400).json({ error: 'task_id is required' });
   if (!message) return res.status(400).json({ error: 'message is required' });
 
+  markConductorSeen(body.agent_name || req.headers['x-apts-agent-name']);
+
   try {
     const logged = await logAgentProgressInternal(taskId, {
       agent_name: body.agent_name || req.headers['x-apts-agent-name'] || null,
@@ -5325,9 +5327,70 @@ app.post('/api/conductor/journal', apiLimiter, authenticateAgent, async (req, re
 const CONDUCTOR_COMMANDS = ['start', 'stop', 'pause', 'resume'];
 const CONDUCTOR_ORDER_STATUSES = ['pending', 'acked', 'done', 'cancelled'];
 
+// ---- Señal de vida del conductor ----
+// El buzón sólo lo atiende quien está corriendo, y hasta ahora el panel no tenía forma de
+// saber si había alguien: una orden dirigida a un conductor apagado se queda `pending`
+// exactamente igual que una que se recogerá en diez segundos. Lo que distingue los dos
+// casos ya pasa por aquí —el sondeo del buzón— así que basta con anotar quién preguntó.
+// Es la señal correcta y no un latido aparte: quien sondea es, por definición, quien puede
+// recoger la orden, y sondean los dos modos, el que espera y el que está conduciendo.
+//
+// Se anota en memoria y no en la base a propósito. Es un dato que caduca en un minuto y no
+// vale nada pasado ese minuto: persistirlo serían seis escrituras por minuto y por
+// conductor para no contestar nada que no conteste un `Map`. Tampoco es una segunda versión
+// de la verdad —no dice qué hace el conductor, sólo cuándo habló—, así que perderla en un
+// reinicio no desincroniza nada: se recupera sola al sondeo siguiente. Ese hueco es el
+// único riesgo real, porque durante unos segundos un conductor vivo parecería apagado, y
+// por eso la respuesta lleva también cuándo arrancó el servidor: el panel calla en vez de
+// afirmar una ausencia que todavía no puede conocer.
+//
+// El plazo se ajusta por entorno y no por bandera, igual que los intervalos del propio
+// conductor y por el mismo motivo: nadie lo toca en una corrida normal, pero una prueba no
+// puede esperar un minuto para ver caducar una señal.
+const CONDUCTOR_PRESENCE_TTL_MS = Number.parseInt(process.env.CONDUCTOR_PRESENCE_TTL_MS, 10) > 0
+  ? Number.parseInt(process.env.CONDUCTOR_PRESENCE_TTL_MS, 10)
+  : 60000; // seis sondeos de margen: uno perdido no es una ausencia
+const CONDUCTOR_PRESENCE_MAX = 200;
+const conductorPresence = new Map();
+const SERVER_STARTED_AT = new Date();
+
+const markConductorSeen = (agentName) => {
+  const name = String(agentName || '').trim();
+  if (!name) return;
+  conductorPresence.set(name, Date.now());
+
+  // Poda perezosa, y sólo cuando el mapa crece: cada nombre son unas decenas de bytes, pero
+  // el nombre lo elige quien llama y un cliente que los invente llenaría la memoria.
+  if (conductorPresence.size > CONDUCTOR_PRESENCE_MAX) {
+    const limit = Date.now() - CONDUCTOR_PRESENCE_TTL_MS;
+    for (const [key, seenAt] of conductorPresence) {
+      if (seenAt < limit) conductorPresence.delete(key);
+    }
+  }
+};
+
+const conductorPresenceOf = (agentName) => {
+  const name = String(agentName || '').trim();
+  const seenAt = name ? conductorPresence.get(name) : null;
+  if (!seenAt) {
+    return { agent_name: name, last_seen_at: null, seconds_ago: null, listening: false };
+  }
+  const elapsed = Date.now() - seenAt;
+  return {
+    agent_name: name,
+    last_seen_at: new Date(seenAt).toISOString(),
+    seconds_ago: Math.max(0, Math.round(elapsed / 1000)),
+    listening: elapsed <= CONDUCTOR_PRESENCE_TTL_MS
+  };
+};
+
 app.get('/api/conductor/orders/next', apiLimiter, authenticateAgent, async (req, res) => {
   const agentName = String(req.query.agent_name || req.headers['x-apts-agent-name'] || '').trim();
   if (!agentName) return res.status(400).json({ error: 'agent_name is required' });
+
+  // Preguntar por el buzón es la señal de vida: se anota antes de contestar, para que valga
+  // también cuando la consulta falle.
+  markConductorSeen(agentName);
 
   try {
     const order = await db('conductor_orders')
@@ -5346,6 +5409,7 @@ app.get('/api/conductor/orders/next', apiLimiter, authenticateAgent, async (req,
 });
 
 app.post('/api/conductor/orders/:id/ack', apiLimiter, authenticateAgent, async (req, res) => {
+  markConductorSeen(req.headers['x-apts-agent-name']);
   const body = req.body && typeof req.body === 'object' ? req.body : {};
   const status = String(body.status || 'acked').trim();
   if (!CONDUCTOR_ORDER_STATUSES.includes(status)) {
@@ -5856,7 +5920,30 @@ app.get('/api/dashboard/projects/:url/conductor', requireAuth, async (req, res) 
         .first()
       : null;
 
-    return res.json({ project_url: url, agent_name: agentName || null, orders, journal, active_task: activeTask || null });
+    // La presencia se responde para el conductor consultado y para el destinatario de cada
+    // orden que sigue pendiente, que no tiene por qué ser el mismo: el listado de arriba
+    // trae también las del proyecto dirigidas a otros nombres, y una orden pendiente sin
+    // nadie escuchando es justo lo que había que poder ver.
+    const presenceNames = new Set();
+    if (agentName) presenceNames.add(agentName);
+    for (const order of orders) {
+      if (order.status === 'pending' && order.agent_name) presenceNames.add(order.agent_name);
+    }
+
+    return res.json({
+      project_url: url,
+      agent_name: agentName || null,
+      orders,
+      journal,
+      active_task: activeTask || null,
+      presence: [...presenceNames].map(conductorPresenceOf),
+      presence_ttl_seconds: Math.round(CONDUCTOR_PRESENCE_TTL_MS / 1000),
+      // Cuánto lleva el servidor en pie, no cuándo arrancó: quien lo lee tiene que
+      // compararlo con el TTL, y hacerlo desde el reloj del navegador metería su desfase
+      // en la única cuenta que decide si el panel puede afirmar una ausencia.
+      server_uptime_seconds: Math.round((Date.now() - SERVER_STARTED_AT.getTime()) / 1000),
+      server_started_at: SERVER_STARTED_AT.toISOString()
+    });
   } catch (error) {
     return sendApiError(res, error, {
       fallbackMessage: 'Failed to read conductor state',

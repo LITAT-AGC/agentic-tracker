@@ -416,16 +416,25 @@
             <div class="flex items-center gap-2">
               <div class="w-1 h-5 bg-amber-500 rounded-full"></div>
               <h3 class="text-lg font-bold">Control del Conductor</h3>
+              <Tag
+                v-if="conductorAgentName.trim()"
+                :value="conductorPresenceState.label"
+                :severity="presenceSeverity(conductorPresenceState.state)"
+                class="text-[11px]"
+              />
             </div>
-            <Button
-              @click="loadConductorState"
-              :disabled="conductorLoading"
-              label="Actualizar"
-              icon="pi pi-refresh"
-              severity="secondary"
-              outlined
-              size="small"
-            />
+            <div class="flex items-center gap-3">
+              <span class="text-[11px] text-surface-400">se actualiza sola cada 10 s</span>
+              <Button
+                @click="loadConductorState()"
+                :disabled="conductorLoading"
+                label="Actualizar"
+                icon="pi pi-refresh"
+                severity="secondary"
+                outlined
+                size="small"
+              />
+            </div>
           </div>
 
           <Message v-if="conductorError" severity="error" :closable="false" class="mb-4">{{ conductorError }}</Message>
@@ -435,6 +444,10 @@
               <p class="text-sm text-surface-500 mb-4">
                 Las órdenes se dejan en un buzón y el conductor las recoge en unos diez segundos.
                 Se dirigen al nombre de agente con el que corre; sin ese nombre no hay a quién hablarle.
+                <span class="block mt-1">
+                  La etiqueta de arriba dice si hay alguien escuchando ese buzón: sólo lo atiende un
+                  conductor en marcha, y una orden dirigida a uno apagado espera ahí sin caducar.
+                </span>
                 <span class="block mt-1">
                   <strong>Reanudar</strong> repite la última corrida del conductor sin volver a escribir
                   nada de este formulario. Sólo la recuerda el proceso que la condujo: si se reinició,
@@ -498,7 +511,11 @@
                   severity="danger"
                   size="small"
                 />
-                <span v-if="conductorMessage" class="text-xs text-emerald-600">{{ conductorMessage }}</span>
+                <span
+                  v-if="conductorMessage"
+                  class="text-xs"
+                  :class="conductorMessageTone === 'ok' ? 'text-emerald-600' : 'text-amber-600'"
+                >{{ conductorMessage }}</span>
               </div>
             </template>
           </Card>
@@ -560,8 +577,31 @@
                   <div class="p-6 text-center text-surface-500 text-sm">Sin órdenes todavía.</div>
                 </template>
                 <Column field="command" header="Orden" />
-                <Column field="agent_name" header="Destinatario" />
-                <Column field="status" header="Estado" />
+                <Column field="agent_name" header="Destinatario">
+                  <template #body="{ data }">
+                    <div class="flex flex-col gap-0.5">
+                      <span>{{ data.agent_name }}</span>
+                      <span
+                        v-if="pendingOrderNote(data)"
+                        class="text-[11px]"
+                        :class="{
+                          'text-emerald-600': pendingOrderNote(data).severity === 'success',
+                          'text-amber-600': pendingOrderNote(data).severity === 'warn',
+                          'text-red-600': pendingOrderNote(data).severity === 'danger',
+                          'text-surface-400': pendingOrderNote(data).severity === 'secondary'
+                        }"
+                      >{{ pendingOrderNote(data).text }}</span>
+                    </div>
+                  </template>
+                </Column>
+                <Column field="status" header="Estado">
+                  <template #body="{ data }">
+                    <div class="flex flex-col gap-0.5">
+                      <span>{{ data.status }}</span>
+                      <span v-if="data.detail" class="text-[11px] text-surface-400">{{ data.detail }}</span>
+                    </div>
+                  </template>
+                </Column>
                 <Column field="created_at" header="Enviada">
                   <template #body="{ data }">
                     <span class="text-xs text-surface-500 whitespace-nowrap">{{ formatDateTime(data.created_at) }}</span>
@@ -980,7 +1020,7 @@
 </template>
 
 <script setup>
-import { computed, ref, onMounted, watch } from 'vue';
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { apiFetchJson, getApiErrorMessage } from '../config/api';
 
@@ -1048,6 +1088,13 @@ const conductorLoading = ref(false);
 const isSendingOrder = ref(false);
 const conductorError = ref(null);
 const conductorMessage = ref(null);
+// Encolar siempre funciona; que alguien la vaya a recoger es otra cosa, y el aviso no puede
+// decir las dos con el mismo color.
+const conductorMessageTone = ref('ok');
+// El mismo sondeo que hace el conductor: mirar mas seguido no adelantaria nada, porque el
+// buzon no se mueve entre sus preguntas. Solo corre con la pestana Conductor delante.
+const CONDUCTOR_REFRESH_MS = 10000;
+let conductorTimer = null;
 
 const backlogError = ref(null);
 const isSavingBacklog = ref(false);
@@ -1145,6 +1192,7 @@ const resetDetails = () => {
   isSendingOrder.value = false;
   conductorError.value = null;
   conductorMessage.value = null;
+  conductorMessageTone.value = 'ok';
   projectAgents.value = [];
   selectedAgentKey.value = null;
   agentForm.value = {};
@@ -1269,11 +1317,13 @@ const saveProjectConstraints = async () => {
 
 const conductorStorageKey = (url) => `apts.conductor.agent_name.${url}`;
 
-const loadConductorState = async () => {
+// Un refresco automatico no puede deshabilitar el boton ni parpadear: quien esta mirando no
+// pidio nada. Solo la pulsacion explicita enciende el indicador de carga.
+const loadConductorState = async ({ silent = false } = {}) => {
   const url = selectedProject.value?.url || String(route.params.projectId || '').trim();
   if (!url) return;
 
-  conductorLoading.value = true;
+  if (!silent) conductorLoading.value = true;
   conductorError.value = null;
 
   try {
@@ -1291,8 +1341,82 @@ const loadConductorState = async () => {
     conductorError.value = getApiErrorMessage(error, 'No se pudo leer el estado del conductor.');
     console.error('Failed to load conductor state', error);
   } finally {
-    conductorLoading.value = false;
+    if (!silent) conductorLoading.value = false;
   }
+};
+
+// ---- Senal de vida ----
+// El buzon lo atiende quien esta corriendo, asi que una orden `pending` significa dos cosas
+// muy distintas segun haya alguien al otro lado o no. El backend anota quien pregunta por el
+// buzon y aqui se traduce a lo unico que se puede afirmar de cada nombre.
+const conductorPresenceByName = computed(() => {
+  const byName = new Map();
+  for (const entry of conductorState.value?.presence || []) {
+    byName.set(entry.agent_name, entry);
+  }
+  return byName;
+});
+
+const formatSecondsAgo = (seconds) => {
+  const value = Number(seconds);
+  if (!Number.isFinite(value)) return '';
+  if (value < 60) return `${Math.max(0, Math.round(value))} s`;
+  if (value < 3600) return `${Math.round(value / 60)} min`;
+  if (value < 86400) return `${Math.round(value / 3600)} h`;
+  return `${Math.round(value / 86400)} d`;
+};
+
+// El registro de presencia vive en la memoria del backend: un servidor recien arrancado no
+// ha tenido tiempo de ver a nadie todavia, y decir 'apagado' ahi seria afirmar algo que
+// nadie sabe. Por eso 'unknown' es un estado y no un caso raro del que no se habla.
+const conductorPresenceFor = (name) => {
+  const key = String(name || '').trim();
+  if (!key) return { state: 'unknown', label: 'Sin nombre de conductor' };
+
+  const entry = conductorPresenceByName.value.get(key);
+  const ttl = Number(conductorState.value?.presence_ttl_seconds) || 60;
+  const uptime = Number(conductorState.value?.server_uptime_seconds);
+
+  if (!entry) return { state: 'unknown', label: 'Sin datos' };
+  if (entry.listening) {
+    return { state: 'listening', label: `Escuchando · última señal hace ${formatSecondsAgo(entry.seconds_ago)}` };
+  }
+  if (entry.last_seen_at) {
+    return { state: 'silent', label: `Sin señal desde hace ${formatSecondsAgo(entry.seconds_ago)}` };
+  }
+  if (Number.isFinite(uptime) && uptime < ttl) {
+    return { state: 'unknown', label: 'El servidor acaba de arrancar: todavía no consta ninguna señal' };
+  }
+  return { state: 'absent', label: 'No hay nadie al otro lado' };
+};
+
+const conductorPresenceState = computed(() => conductorPresenceFor(conductorAgentName.value));
+
+const presenceSeverity = (state) => ({
+  listening: 'success',
+  silent: 'warn',
+  absent: 'danger',
+  unknown: 'secondary'
+}[state] || 'secondary');
+
+// Lo que le pasa a una orden que sigue esperando. Las que ya se recogieron no necesitan
+// explicacion: su estado la da entero.
+const pendingOrderNote = (order) => {
+  if (!order || order.status !== 'pending') return null;
+  const presence = conductorPresenceFor(order.agent_name);
+  if (presence.state === 'listening') return { severity: 'success', text: 'encolada; la recoge en unos segundos' };
+  if (presence.state === 'silent') return { severity: 'warn', text: `sin señal desde hace ${formatSecondsAgo(conductorPresenceByName.value.get(order.agent_name)?.seconds_ago)}` };
+  if (presence.state === 'absent') return { severity: 'danger', text: 'no hay nadie al otro lado' };
+  return { severity: 'secondary', text: 'sin datos del destinatario' };
+};
+
+// El auto-refresco solo tiene sentido con la pestana delante y la ventana visible: una
+// pestana de fondo pidiendo cada diez segundos es trafico que nadie mira.
+const conductorAutoRefresh = () => {
+  if (activeTab.value !== 'conductor') return;
+  if (typeof document !== 'undefined' && document.hidden) return;
+  if (conductorLoading.value || isSendingOrder.value) return;
+  loadConductorState({ silent: true });
 };
 
 const sendConductorOrder = async (command) => {
@@ -1303,6 +1427,7 @@ const sendConductorOrder = async (command) => {
   isSendingOrder.value = true;
   conductorError.value = null;
   conductorMessage.value = null;
+  conductorMessageTone.value = 'ok';
 
   try {
     // Solo `start` lleva configuracion. `resume` no la lleva a proposito: la que repite
@@ -1325,8 +1450,20 @@ const sendConductorOrder = async (command) => {
     }, 'No se pudo enviar la orden al conductor.');
 
     window.localStorage.setItem(conductorStorageKey(url), agentName);
-    conductorMessage.value = `Orden '${command}' encolada. El conductor la recoge en unos diez segundos.`;
-    await loadConductorState();
+    await loadConductorState({ silent: true });
+
+    // El mensaje se compone DESPUES de releer: encolar siempre funciona —escribe una fila—
+    // y decir 'la recoge en unos diez segundos' cuando no hay nadie escuchando es la
+    // promesa que dejaba mudo al buzon.
+    const presence = conductorPresenceFor(agentName);
+    const espera = {
+      listening: 'El conductor la recoge en unos diez segundos.',
+      silent: `Nadie pregunta por ese buzón desde hace ${formatSecondsAgo(conductorPresenceByName.value.get(agentName)?.seconds_ago)}: esperará ahí hasta que alguien la recoja.`,
+      absent: 'Pero no hay ningún conductor escuchando con ese nombre: esperará en el buzón hasta que arranque uno.',
+      unknown: 'Todavía no consta ninguna señal de ese conductor.'
+    }[presence.state];
+    conductorMessage.value = `Orden '${command}' encolada. ${espera}`;
+    conductorMessageTone.value = presence.state === 'listening' ? 'ok' : 'warn';
   } catch (error) {
     conductorError.value = getApiErrorMessage(error, 'No se pudo enviar la orden al conductor.');
     console.error('Failed to send conductor order', error);
@@ -1864,7 +2001,19 @@ watch(() => route.params.projectId, () => {
   loadProject();
 });
 
+// Volver a la pestana no espera al siguiente tic: lo que se mira ahi cambia solo, y llegar
+// a una pantalla con datos de hace diez segundos es justo lo que este refresco evita.
+watch(activeTab, (tab) => {
+  if (tab === 'conductor') loadConductorState({ silent: true });
+});
+
 onMounted(() => {
   loadProject();
+  conductorTimer = window.setInterval(conductorAutoRefresh, CONDUCTOR_REFRESH_MS);
+});
+
+onUnmounted(() => {
+  if (conductorTimer) window.clearInterval(conductorTimer);
+  conductorTimer = null;
 });
 </script>

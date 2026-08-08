@@ -426,6 +426,22 @@ Contra `APTS_test` (puerto 47301; la ultima ronda —la del coste de los embeddi
   a la espera; `resume` sin payload retoma con la MISMA configuracion y el motor sirve la story
   siguiente; y un `resume` que llega mientras el agente corre queda `done` con «ya estaba
   corriendo», sin reiniciar nada.
+- **La señal de vida del conductor**, con `backend/scripts/test_conductor_presence.js` (nuevo;
+  necesita el servidor levantado, porque la presencia vive en la memoria de ESE proceso y no
+  hay forma de mirarla sin el; crea su proyecto y lo borra). Treinta comprobaciones en verde
+  con `CONDUCTOR_PRESENCE_TTL_MS=3000`, que es lo que permite ver caducar una señal sin
+  esperar un minuto. Un conductor que no ha sondeado no esta escuchando y no consta ninguna
+  señal suya; en cuanto sondea, `listening` y `seconds_ago` a 0; pasado el plazo deja de
+  escuchar pero **conserva** `last_seen_at`, que es lo que separa callado de apagado. Dos
+  destinatarios en la misma respuesta —el consultado escuchando y el de una orden pendiente
+  sin señal ninguna—; el acuse y el diario tambien sellan; una orden que ya no esta pendiente
+  no arrastra a su destinatario a la lista; y pedir el estado sin nombre no inventa una fila
+  vacia.
+- **Y con el conductor de verdad**, `apts-loop.js --daemon` contra el servidor de prueba: en
+  espera —sin proyecto y sin agente— aparece escuchando con la señal de un segundo antes, y
+  al matarlo queda con `listening: false` y su ultima señal intacta. Es la comprobacion que
+  importa: la señal que anota el servidor es la que produce el conductor publicado, sin
+  haberlo tocado.
 - **El corte en POSIX, ejecutado por fin** (WSL Ubuntu contra el servidor de prueba de Windows). El
   agente arranca en su propio grupo (`pgid` distinto del conductor) con un nieto dentro. Un agente
   que coopera muere entero en ~2 s sin pagar la gracia. Un agente que **ignora `SIGTERM`** es el que
@@ -783,6 +799,48 @@ Los dos artefactos del conductor suben a `artifact_version` **1.6.0**: quien se 
 la 1.5.0 tiene un boton Reanudar cuya orden no recoge nadie y, en Linux o macOS, un corte
 que cree haber matado al agente. Desplegado el 2026-08-08 con sus tres migraciones.
 
+**Y el panel ya dice si hay alguien al otro lado del buzon.** El buzon solo lo atiende quien
+esta corriendo, asi que una orden `pending` significaba dos cosas muy distintas —«la recoge
+en diez segundos» y «no hay nadie escuchando ese nombre»— y el panel las mostraba
+exactamente igual. Pulsar Detener y no saber si sirvio de algo era el daño real; el que
+las ordenes viejas se acumulen es el otro problema, y sigue abierto.
+
+Lo que las distingue ya pasaba por el servidor: **el sondeo del buzon**. Quien pregunta es,
+por definicion, quien puede recoger la orden, y preguntan los dos modos —el que espera y el
+que esta conduciendo, tambien mientras el agente trabaja—, asi que basta con anotar quien
+pregunto. No hace falta un latido nuevo, ni una columna, ni tocar el conductor: `apts-loop.js`
+no cambia ni una linea y los dos artefactos se quedan en **1.6.0**.
+
+La anotacion vive en la **memoria del proceso** y no en la base. Es un dato que caduca en un
+minuto y no vale nada pasado ese minuto: persistirlo serian seis escrituras por minuto y por
+conductor para no contestar nada que no conteste un `Map`. Tampoco es una segunda version de
+la verdad —no dice que hace el conductor, solo cuando hablo—, asi que perderla en un reinicio
+no desincroniza nada y se recupera sola al sondeo siguiente. Ese hueco es el unico riesgo, y
+esta cubierto: la respuesta lleva `server_uptime_seconds`, y con el servidor recien arrancado
+el panel calla en vez de afirmar una ausencia que todavia no puede conocer. Va en segundos y
+no como fecha a proposito, para que el desfase del reloj del navegador no entre en la unica
+cuenta que decide si se puede afirmar algo.
+
+`GET /api/dashboard/projects/:url/conductor` devuelve `presence[]` con `last_seen_at`,
+`seconds_ago` y `listening` —para el conductor consultado y para el destinatario de cada
+orden que siga pendiente, que no tiene por que ser el mismo—. El plazo son 60 s, seis
+sondeos: un sondeo perdido no es una ausencia. Se ajusta con `CONDUCTOR_PRESENCE_TTL_MS`,
+por entorno y no por bandera, igual que los intervalos del conductor y por el mismo motivo:
+nadie lo toca en una corrida normal, pero una prueba no puede esperar un minuto.
+
+Son **cuatro** estados y no dos, porque «callado» no es «apagado»: escuchando, callado desde
+hace tanto (hablo y dejo de hacerlo), no hay nadie (nunca hablo, y el servidor lleva en pie
+lo suficiente para saberlo) y sin datos (el servidor acaba de arrancar). El aviso que sale al
+encolar se compone **despues** de releer el estado: encolar siempre funciona —escribe una
+fila— y prometer «la recoge en unos diez segundos» cuando no hay nadie escuchando era
+justamente lo que dejaba mudo al buzon.
+
+De paso, la pestaña Conductor **se refresca sola** cada diez segundos, el mismo intervalo que
+sondea el conductor: mirar mas seguido no adelantaria nada, porque el buzon no se mueve entre
+sus preguntas. Solo corre con esa pestaña delante y la ventana visible, el boton Actualizar
+sigue estando, y el refresco automatico no enciende el indicador de carga —quien esta mirando
+no pidio nada—.
+
 ## Abierto
 
 **El camino de Cloudflare no se ha visto devolver un vector.** El `CLOUDFLARE_API_TOKEN` del `.env`
@@ -794,12 +852,12 @@ primera mano la forma de la respuesta del punto compatible con OpenAI —vector 
 documentacion. Si ese punto contestara con el sobre nativo de Workers AI, el lector ya acepta
 `result.data[0]` y no haria falta tocar nada.
 
-**El buzon de ordenes solo lo atiende quien esta corriendo.** Una orden dirigida a un
-conductor que no existe se queda `pending` para siempre, y nadie la caduca: el panel la
-muestra en su lista y no hay forma de distinguir «encolada, ya la recogera» de «no hay nadie
-al otro lado». Con `resume` eso pasaba con todas; ahora solo pasa cuando el conductor esta
-apagado, que es un caso mas raro pero igual de mudo. La pestaña Conductor tampoco se refresca
-sola: hay un boton Actualizar.
+**Nadie caduca una orden pendiente.** Una orden dirigida a un conductor que no esta
+corriendo se queda `pending` para siempre. Ya no es muda —el panel dice si hay alguien al
+otro lado, ver abajo— pero sigue ahi, y la lista de ordenes acumula lo que nunca se
+recogera. Un TTL que las pasara a `cancelled` exige elegir un plazo y, sobre todo, decidir
+quien lo aplica: el sondeo del conductor no sirve, porque el caso a caducar es justamente
+aquel en que no hay conductor sondeando.
 
 **Editar `workflow_steps` sigue fuera de alcance**, declarado. Las instrucciones paso a paso
 del metodo se editan sembrando el corpus, no desde el panel.
