@@ -294,6 +294,15 @@ es lo unico que distingue un frontend nuevo de uno viejo, porque con `try_files`
 responde 200—; y, ya por la URL publica y con credenciales, `initialize` contestando y `tools/list`
 devolviendo **21 operaciones**.
 
+**Comprobado despues del despliegue del 2026-08-08** (`c41ad1b`, sin migraciones), por la URL
+publica y con credenciales leidas en el propio servidor: `tools/list` devuelve **22 operaciones**,
+entre ellas `set_project_constraints`; la guardia de la fase de partida rechaza `phase:
+'solutioning'` nombrando `brief` y `prd`, y no deja proyecto ni iniciativa detras; el manifiesto
+publica `surface_spec` en 1.0.2, `skills_json` en 1.0.1 y la regla nueva dentro de `bootstrap_rule`;
+y las seis comprobaciones del desplegador —`/api/health` local y publico, manifiesto con
+`mcp_endpoint`, `/mcp` por los dos caminos y el bundle del dist nuevo— pasaron. El aviso de `/mcp`
+no salio: nginx lo enruta desde el 2026-08-07.
+
 ## Abierto
 
 **El camino de Cloudflare no se ha visto devolver un vector.** El `CLOUDFLARE_API_TOKEN` del `.env`
