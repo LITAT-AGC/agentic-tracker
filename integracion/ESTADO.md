@@ -138,6 +138,33 @@ El backfill de la migracion recupera lo unico reconstruible: las tareas que su h
 apunta. Las que un `register_task` posterior desbanco no dejaron ningun rastro relacional y no se
 pueden recuperar; la migracion imprime los dos numeros en vez de dar a entender que los cubrio todos.
 
+**El motor reparte las stories por el plan y no por el identificador.** `claimDevStory` ordenaba las
+candidatas del epic por `created_at, id`, y las stories de un epic las escribe el motor en un solo
+lote —`bmad-create-epics-and-stories`—, asi que el `created_at` empata en todas y el desempate lo
+decidia el UUID: reparto al azar. Costo una parada en produccion el 2026-08-08: de las 15 que
+quedaban en fm-synth salio primera la de `sort_order` **240**, la ultima del plan —accesibilidad del
+editor—, que depende de otras cinco todavia sin hacer. El agente lo verifico, se nego a fabricarlas
+como efecto colateral, reporto el bloqueo dos veces y el freno de estancamiento paro el bucle: la
+cadena entera se comporto como debia sobre un reparto que no tenia sentido. Ahora ordena por
+`priority, sort_order` —las dos columnas donde el backlog declara su plan, y las mismas por las que
+ya ordenaba `list_backlog_items`— con `created_at, id` detras como desempate.
+
+**Los artefactos publicados llevan la version en la URL, y el origen dice que no se cacheen.** El
+sitio esta detras de Cloudflare, que cachea por extension: `.js` esta en su lista por defecto, asi
+que `…/conductor/apts-loop.js` se servia desde el borde con `max-age=14400` aunque la ruta cuelgue
+de `/api/` y el origen no mandara ninguna directiva. Se vio el 2026-08-08 justo despues de
+desplegar: el manifiesto anunciaba el conductor en 1.4.0 y la URL entregaba el 1.3.0 —47.683 bytes
+contra los 57.834 del servidor— con `Age: 6345`. Eso rompe justo lo que `artifact_version` promete.
+
+Dos correcciones que se cubren la espalda. `sendIntegrationArtifact` manda `Cache-Control: no-cache`
+—que no prohibe guardar, obliga a revalidar, y con el ETag que pone express cuesta un 304— para
+quien respete las directivas. Y el manifiesto publica cada artefacto con su version dentro de la URL
+(`?v=1.4.0`), que no la lee nadie —la ruta se resuelve por camino— pero mete la version en la CLAVE
+de cache: cualquier intermediario reparte por URL, asi que una version nueva estrena URL y no puede
+recibir los bytes de la anterior, conteste el origen lo que conteste. Descartado aprovechar la URL
+versionada para cachear a largo plazo (`immutable`): la version se bumpea a mano, y un archivo
+editado sin bump quedaria clavado en el borde todo ese plazo.
+
 **`ready_for_dev` ya existe tambien para la API.** La migracion 010 metio ese estado en la columna
 —lo declara en su propia lista, `BACKLOG_STATUSES_NEW`— y el motor lo escribe en CADA story que
 crea, pero la constante `BACKLOG_STATUSES` de `backend/index.js` se quedo con la lista de antes de
@@ -371,6 +398,15 @@ Contra `APTS_test` (puerto 47301; la ultima ronda —la del coste de los embeddi
   `backlog_item_id` da 400 nombrando lo que falta, y `'quizas'` da 400 en vez de colar como `false`;
   por MCP el rechazo llega como `isError`. Y se lee: `get_task` lo devuelve en las dos vistas, y en
   `compact` una tarea sin unidad no paga la clave vacia.
+- **El orden de reparto**, con `backend/scripts/test_dev_story_claim_order.js` (nuevo; transaccion
+  revertida, sin servidor). Montado con los UUID en contra —la primera del plan es la que el criterio
+  viejo dejaba para el final—: reparte primero la de `sort_order` mas bajo y no la que ganaba por
+  identificador; cerrada esa, cae la segunda del plan; y una `priority` mas alta se salta el
+  `sort_order`. Comprobado ademas que la prueba no es vacua: con el orden viejo, tres de las cuatro
+  caen en rojo y siempre gana el mismo UUID.
+- **Las URL versionadas del manifiesto**: cada artefacto se publica con `?v=<artifact_version>` —y
+  la de descarga con `&download=1` detras—, la ruta sirve el mismo contenido con la query puesta, y
+  la respuesta lleva `Cache-Control: no-cache`.
 - **`ready_for_dev` por la API**, con `backend/scripts/test_ready_for_dev_status.js` (nuevo):
   `list_backlog_items` filtra por el estado y devuelve la story que el motor creo asi;
   `update_backlog_item` repone a `ready_for_dev` una story dejada en `blocked`, y la deja en el
@@ -587,23 +623,6 @@ vigilancia de fondo ya le habia puesto: la maquina de metodo no tiene salida des
 historia `344da12c` sigue en `blocked` esperando esa reposicion.
 
 ## Abierto
-
-**Cloudflare sirve los artefactos `.js` hasta cuatro horas viejos.** El sitio esta detras de
-Cloudflare, que cachea por extension: `.js` esta en su lista por defecto, asi que
-`…/integrar/conductor/apts-loop.js` y `…/integrar/scripts/generate-adapters.js` se sirven desde el
-borde con `cf-cache-status: HIT` y `max-age=14400` aunque la ruta cuelgue de `/api/`. Se vio el
-2026-08-08 justo despues del septimo despliegue: el manifiesto ya anunciaba el conductor en 1.4.0 y
-la URL seguia entregando el de 1.3.0 (47.683 bytes contra los 57.834 del servidor, y sin
-`owns_backlog_item` por ninguna parte), con `Age: 6345`. El origen responde bien —comprobado por
-`127.0.0.1:46315`—; el que miente es el borde. Los demas artefactos no estan afectados: el
-manifiesto y `skills.json` salen `DYNAMIC`, porque ni la ruta sin extension ni `.json` entran en esa
-lista.
-
-Es peor que un retraso: `artifact_version` existe para que un cliente sepa que esta bajando, y
-durante esas horas el numero y el contenido no coinciden. La correccion natural es que el origen lo
-diga —`Cache-Control: no-cache` en `sendIntegrationArtifact`, que Cloudflare respeta— y purgar el
-borde una vez; queda sin decidir porque cambia el cacheo de todos los artefactos y eso es una
-decision de infraestructura, no de este cambio.
 
 **El camino de Cloudflare no se ha visto devolver un vector.** El `CLOUDFLARE_API_TOKEN` del `.env`
 es valido y esta activo (`/user/tokens/verify` responde 200) pero no alcanza ninguna cuenta

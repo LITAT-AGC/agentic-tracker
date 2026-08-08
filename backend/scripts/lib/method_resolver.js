@@ -285,10 +285,27 @@ const claimDevStory = async (db, ctx, caller, workflow, step) => {
     if (held && !TERMINAL_STATUSES.includes(held.status)) return { story_id: held.id };
   }
 
-  // Candidatas: stories no-terminales del epic, en orden determinista, bloqueadas para el claim.
+  // Candidatas: stories no-terminales del epic, en el orden en que el backlog las
+  // declara, bloqueadas para el claim.
+  //
+  // El orden lo mandan `priority` y `sort_order`, que es donde vive el plan: son las
+  // mismas dos columnas por las que ordena `list_backlog_items`, y tenerlas y no usarlas
+  // aqui hacia que el motor repartiera por otro criterio que el backlog no puede
+  // expresar. `created_at` e `id` quedan detras como desempate, no como criterio.
+  //
+  // Antes ordenaba solo por esos dos, y el resultado era reparto AL AZAR: las stories de
+  // un epic las crea el motor en un solo lote —`bmad-create-epics-and-stories`—, asi que
+  // el `created_at` empata en las 15 y el desempate lo decidia el UUID. Se vio en
+  // produccion el 2026-08-08: de las 15 que quedaban en fm-synth salio primera la de
+  // `sort_order` 240 —la ULTIMA del plan, accesibilidad del editor—, que depende de otras
+  // cinco todavia sin hacer. El agente verifico, se nego a fabricarlas de paso, reporto el
+  // bloqueo dos veces y el freno de estancamiento paro el bucle. Ningun orden de trabajo
+  // sobrevive a que el reparto lo decida un identificador aleatorio.
   const candidates = await db('backlog_items')
     .where({ epic_id: ctx.epic_id })
     .whereNotIn('status', TERMINAL_STATUSES)
+    .orderBy('priority', 'asc')
+    .orderBy('sort_order', 'asc')
     .orderBy('created_at', 'asc')
     .orderBy('id', 'asc')
     .forUpdate();

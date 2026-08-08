@@ -2864,8 +2864,22 @@ const buildIntegrationManifest = (req) => {
       invocation_name: artifact.invocationName || null,
       invocation_aliases: artifact.invocationAliases || [],
       media_type: artifact.contentType,
-      url: buildAbsoluteUrl(req, artifact.route),
-      download_url: `${buildAbsoluteUrl(req, artifact.route)}?download=1`
+      // La URL publicada lleva la version dentro (`?v=1.4.0`). No la lee nadie —la ruta
+      // se resuelve por camino y el handler ignora la query—: existe para que la version
+      // forme parte de la CLAVE DE CACHE. Cualquier intermediario reparte por URL, asi
+      // que una version nueva estrena URL y no puede recibir los bytes de la anterior,
+      // conteste el origen lo que conteste. Que es justo lo que fallo el 2026-08-08:
+      // Cloudflare cachea por extension y guardo un `.js` que salia sin ninguna
+      // directiva, de modo que el manifiesto anunciaba el conductor en 1.4.0 y la URL
+      // entregaba el 1.3.0 durante horas.
+      //
+      // Es cinturon ademas de tirantes: el `no-cache` del origen ya lo corrige para quien
+      // respete las directivas, y esto lo corrige tambien para quien no. Descartado
+      // aprovecharlo para cachear la URL versionada a largo plazo (`immutable`): la
+      // version la bumpeamos a mano, asi que un archivo editado sin bump quedaria clavado
+      // en el borde durante lo que durase ese plazo.
+      url: `${buildAbsoluteUrl(req, artifact.route)}?v=${encodeURIComponent(artifact.artifactVersion)}`,
+      download_url: `${buildAbsoluteUrl(req, artifact.route)}?v=${encodeURIComponent(artifact.artifactVersion)}&download=1`
     }))
   };
 };
