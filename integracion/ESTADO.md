@@ -572,6 +572,18 @@ historia `344da12c` sigue en `blocked` esperando esa reposicion.
 
 ## Abierto
 
+**Una story `blocked` no tiene reposicion por ninguna de las dos superficies.** La columna
+`backlog_items.status` la escriben dos vocabularios que no se solapan donde hace falta. El motor usa
+`ready_for_dev, in_progress, review, done` y lo escribe el mismo al crear las stories;
+`update_backlog_item` acepta `draft, needs_details, ready, in_progress, review, blocked, done,
+archived` y **rechaza `ready_for_dev`** con 400. Asi que cuando la vigilancia de latidos deja una
+story en `blocked`, el consejo que da el propio motor —`apts_set_status` responde «para reponer la
+story usa `update_backlog_item`, p. ej. status 'ready'»— no la repone: `ready` tampoco esta en
+`STORY_METHOD_TRANSITIONS`, de modo que el siguiente `apts_set_status` a `in_progress` volveria a dar
+409 desde otro estado. Se vio el 2026-08-08 reponiendo la `344da12c`, que hubo que escribir a
+`ready_for_dev` directamente en la base. Salidas posibles: aceptar `ready_for_dev` en
+`update_backlog_item`, o darle salida a `blocked` en la maquina de metodo. Sin decidir.
+
 **Cloudflare sirve los artefactos `.js` hasta cuatro horas viejos.** El sitio esta detras de
 Cloudflare, que cachea por extension: `.js` esta en su lista por defecto, asi que
 `…/integrar/conductor/apts-loop.js` y `…/integrar/scripts/generate-adapters.js` se sirven desde el
