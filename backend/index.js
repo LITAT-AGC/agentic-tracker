@@ -2875,6 +2875,15 @@ const sendIntegrationArtifact = async (req, res, artifactKey) => {
       res.setHeader('Content-Disposition', `attachment; filename="${artifact.fileName}"`);
     }
 
+    // El sitio esta detras de Cloudflare, que cachea por EXTENSION: `.js` esta en su
+    // lista por defecto, asi que estas rutas se servian desde el borde hasta cuatro horas
+    // aunque cuelguen de `/api/`. Eso rompe justo lo que `artifact_version` promete —el
+    // manifiesto anunciaba el conductor en 1.4.0 y la URL entregaba el 1.3.0, visto el
+    // 2026-08-08—, y purgar a mano no es un arreglo: el hueco se reabre en el despliegue
+    // siguiente. `no-cache` no prohibe guardar, obliga a revalidar; con el ETag que pone
+    // express la revalidacion cuesta un 304, asi que la correccion no se paga en ancho de
+    // banda. Va aqui y no en nginx porque el artefacto y su version salen del mismo sitio.
+    res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Content-Type', artifact.contentType);
     return res.send(content);
   } catch (error) {
