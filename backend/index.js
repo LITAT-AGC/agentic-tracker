@@ -50,7 +50,9 @@ const {
   cosineSimilarity,
   createContentHash,
   getEffectiveEmbeddingModel,
-  parseEmbeddingVector
+  parseEmbeddingVector,
+  resolveEmbeddingProvider,
+  DEFAULT_EMBEDDING_MODEL
 } = require('./scripts/lib/semantic_embeddings');
 const rootPackage = require('../package.json');
 const db = createKnex(knexConfig[process.env.NODE_ENV || 'development']);
@@ -252,7 +254,11 @@ const OPENROUTER_CHAT_TIMEOUT_MS = (() => {
   return Number.isInteger(configured) && configured > 0 ? configured : 120000;
 })();
 const DEFAULT_OPENROUTER_MODEL = process.env.OPENROUTER_DEFAULT_MODEL || 'google/gemini-2.0-flash-lite-001';
-const DEFAULT_OPENROUTER_EMBEDDING_MODEL = process.env.OPENROUTER_DEFAULT_EMBEDDING_MODEL || 'openai/text-embedding-3-small';
+// El modelo de embedding por defecto lo resuelve la librería, que es quien lo usa.
+// Repetir aquí la lectura de la variable de entorno hacía que el panel pudiera
+// anunciar un modelo por defecto distinto del que se pide de verdad —y desde que hay
+// dos proveedores, la variable vieja ya no es la única—.
+const DEFAULT_OPENROUTER_EMBEDDING_MODEL = DEFAULT_EMBEDDING_MODEL;
 const CONFIG_KEYS = {
   openrouterModel: 'openrouter_model',
   openrouterEmbeddingModel: 'openrouter_embedding_model'
@@ -656,6 +662,7 @@ const sendBatchRouteError = (res, error, {
 const isSemanticProviderError = (error) => {
   const message = String(error?.message || '').toLowerCase();
   return message.includes('openrouter')
+    || message.includes('cloudflare')
     || message.includes('embedding')
     || message.includes('api key is required');
 };
@@ -1067,6 +1074,24 @@ const dashboardSemanticSearchBodySchema = z.object({
 const enrichSemanticStatusWithPricing = async (semanticStatus) => {
   if (!semanticStatus?.embedding_model) {
     return semanticStatus;
+  }
+
+  // El catálogo de precios es de OpenRouter y sólo tiene modelos suyos. Con un modelo
+  // de Cloudflare, preguntarle era una llamada externa que siempre terminaba sin
+  // coincidencia: mismo resultado —precios a null— sin gastarla. Cloudflare tampoco
+  // publica precio por token, factura en neuronas, así que aquí no hay coste que dar.
+  if (resolveEmbeddingProvider(semanticStatus.embedding_model) !== 'openrouter') {
+    return {
+      ...semanticStatus,
+      pricing: {
+        prompt_price: null,
+        completion_price: null,
+        context_length: null,
+        estimated_input_cost: null,
+        estimated_full_input_cost: null,
+        estimated_incremental_input_cost: null
+      }
+    };
   }
 
   try {
@@ -1507,7 +1532,9 @@ const requestOpenRouterEmbedding = async (inputText, {
     // errores —incluido el vencimiento del plazo, cuyo mensaje nombra a OpenRouter
     // para que isSemanticProviderError() lo reconozca— pasa tal cual.
     if (String(error?.message || '').includes('did not include a valid vector')) {
-      throw createHttpError(502, 'OpenRouter embedding response did not include a valid vector', {
+      // El mensaje se pasa tal cual porque ya nombra al proveedor que falló, que
+      // desde que hay dos no siempre es OpenRouter.
+      throw createHttpError(502, error.message, {
         cause: error
       });
     }

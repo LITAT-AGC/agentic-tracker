@@ -37,8 +37,24 @@ derivan del `id`, asi que el mapa vive explicito en el generador.
 
 El algebra del embedding —`cosineSimilarity`, `parseEmbeddingVector`, `vectorNorm`,
 `buildBugEmbeddingText`— existe una sola vez, en `backend/scripts/lib/semantic_embeddings.js`, y la
-llamada a OpenRouter tambien. Ni `backend/index.js` ni `reembed_bug_embeddings.js` tienen copia
+llamada al proveedor tambien. Ni `backend/index.js` ni `reembed_bug_embeddings.js` tienen copia
 propia.
+
+**Hay dos proveedores de embeddings y ninguna clave que los elija.** El proveedor lo dice el
+identificador del modelo: `@cf/...` sale por Cloudflare Workers AI (punto compatible con OpenAI,
+`accounts/{id}/ai/v1/embeddings`, con `CLOUDFLARE_API_TOKEN` y `CLOUDFLARE_ACCOUNT_ID`; la pasarela
+`CLOUDFLARE_AI_GATEWAY_ID` es opcional) y cualquier otro por OpenRouter. Una segunda clave de
+configuracion solo podria contradecir a la primera, y el modelo ya viaja en `bug_embedding_model` y
+en `openrouter_usage_logs`, asi que el proveedor queda registrado de paso —esa tabla conserva el
+nombre y ahora guarda los dos; lo que Cloudflare no da es coste en dolares, porque factura en
+neuronas, asi que esas filas van con `cost = 0` y solo cuentan tokens—. Lo que ya estaba sigue igual:
+cada proveedor tiene su plazo de espera (`OPENROUTER_EMBEDDING_TIMEOUT_MS`,
+`CLOUDFLARE_EMBEDDING_TIMEOUT_MS`), los dos mensajes de fallo nombran al proveedor para que
+`isSemanticProviderError()` los reconozca como 503, y el modelo efectivo entra en la comparacion del
+hash, con lo que cambiar de proveedor invalida los vectores guardados en vez de darlos por buenos.
+El modelo por defecto es `EMBEDDING_DEFAULT_MODEL` —`OPENROUTER_DEFAULT_EMBEDDING_MODEL` se sigue
+leyendo detras—, y `backend/index.js` lo importa en vez de releer la variable, para que el panel no
+pueda anunciar uno distinto del que se pide.
 
 **Ninguna escritura del agente paga un embedding que no necesite.** Son dos vectores distintos y ya
 no se comportan igual de mal:
@@ -162,6 +178,11 @@ Contra `APTS_test` (puerto 47301; la ultima ronda —la del coste de los embeddi
   busqueda responde igual que antes.
 - Cada destino exige su propia cadena de conexion y ninguna hereda de la otra; sin
   `PG_TEST_CONNECTION_STRING`, `test` falla nombrando la variable en vez de resolver a la principal.
+- **El despacho por proveedor, hasta donde llega el token de hoy.** `openai/text-embedding-3-small`
+  resuelve a OpenRouter y devuelve su vector de 1536 con norma 1,0002 —la ruta que ya existia no
+  cambio—; `@cf/baai/bge-m3` resuelve a Cloudflare, sale por su punto compatible y su fallo llega
+  leido de `errors[]`: `Cloudflare embedding request failed: Authentication error`. Los espacios
+  delante del identificador no confunden al despacho.
 
 ## Produccion
 
@@ -203,7 +224,16 @@ cero; la busqueda de duplicados gasta una y encuentra el bug. `initialize` y `to
 
 ## Abierto
 
-Nada en el repositorio, y produccion ya corre `5344d61` con las 17 migraciones aplicadas.
+**El camino de Cloudflare no se ha visto devolver un vector.** El `CLOUDFLARE_API_TOKEN` del `.env`
+es valido y esta activo (`/user/tokens/verify` responde 200) pero no alcanza ninguna cuenta
+—`/accounts` devuelve la lista vacia—, asi que cada embedding responde `401 Authentication error`.
+Falta un token con permiso **Workers AI: Read** sobre `8816b3e0…`; con el, queda por confirmar de
+primera mano la forma de la respuesta del punto compatible con OpenAI —vector en
+`data[0].embedding` y `usage` con tokens—, que es lo unico que se dio por bueno leyendo la
+documentacion. Si ese punto contestara con el sobre nativo de Workers AI, el lector ya acepta
+`result.data[0]` y no haria falta tocar nada.
+
+En el repositorio no queda nada mas, y produccion corre `5344d61` con las 17 migraciones aplicadas.
 
 Dos cosas quedan fuera de el:
 

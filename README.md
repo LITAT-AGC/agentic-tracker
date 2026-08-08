@@ -166,7 +166,12 @@ DASHBOARD_PASSWORD=replace-with-a-strong-password
 PG_CONNECTION_STRING=postgresql://user:password@host:5432/apts
 PG_TEST_CONNECTION_STRING=postgresql://user:password@host:5432/apts_test
 OPENROUTER_API_KEY=replace-with-your-openrouter-key
-OPENROUTER_DEFAULT_EMBEDDING_MODEL=openai/text-embedding-3-small
+EMBEDDING_DEFAULT_MODEL=openai/text-embedding-3-small
+
+# Opcional: embeddings por Cloudflare Workers AI (modelos `@cf/...`)
+CLOUDFLARE_API_TOKEN=replace-with-your-cloudflare-token
+CLOUDFLARE_ACCOUNT_ID=replace-with-your-cloudflare-account-id
+CLOUDFLARE_AI_GATEWAY_ID=default
 
 # Opcional: alias compatible para despliegues existentes
 DATABASE_URL=postgresql://user:password@host:5432/apts
@@ -176,6 +181,13 @@ Notas:
 
 - APTS usa PostgreSQL por defecto en desarrollo, test y produccion.
 - `backend/knexfile.js` mantiene `sqlite_legacy` solo para migrar datos historicos una vez.
+- El proveedor de embeddings lo decide el identificador del modelo, no una clave aparte: los
+  `@cf/...` salen por Cloudflare Workers AI y el resto por OpenRouter. `EMBEDDING_DEFAULT_MODEL`
+  sustituye a `OPENROUTER_DEFAULT_EMBEDDING_MODEL`, que se sigue leyendo si ya estaba puesta.
+- El token de Cloudflare necesita permiso **Workers AI: Read** sobre esa cuenta; uno valido pero sin
+  ese permiso responde `401 Authentication error` a cada embedding.
+- Cambiar de modelo cambia la dimension del vector: los que ya estan guardados dejan de ser
+  comparables y hay que rehacerlos (`npm run reembed:bugs`, `npm run reindex:semantic`).
 
 ### Migracion one-shot desde SQLite legacy
 
