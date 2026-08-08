@@ -968,10 +968,13 @@ documentacion. Si ese punto contestara con el sobre nativo de Workers AI, el lec
 en `--daemon` las dos ordenes hacen exactamente lo mismo: cortan el arbol del agente, terminan
 esa corrida y devuelven el conductor a la espera. No es un defecto del corte —el codigo lo dice
 a proposito, «en espera, una parada no termina el proceso: termina esa corrida», que es lo que
-hace que pausar y volver a arrancar sean una sola sesion— y el codigo de salida 15 solo se ve
-cuando el conductor corre SIN `--daemon`. El problema es lo que el panel promete: dos botones
-que, contra el unico modo que el panel puede manejar, son indistinguibles. Se vio pulsandolos
-los dos contra PROD el 2026-08-08.
+hace que pausar y volver a arrancar sean una sola sesion—. Y no es solo cosa del daemon:
+**`stop` y `pause` aparecen UNA sola vez en `apts-loop.js`, juntos en la misma condicion**
+(`if (!['stop', 'pause'].includes(orden.command)) return;`), asi que no hay ni una linea que
+los distinga en ningun modo. Lo unico observable que cambia entre uno y otro es la etiqueta del
+motivo que va al diario (`orden:stop` frente a `orden:pause`). El problema, entonces, es lo que
+el panel promete: dos botones que hacen lo mismo. Se vio pulsandolos los dos contra PROD el
+2026-08-08.
 
 Decidido el 2026-08-08: **se unifica en Pausar**, no al reves. El panel encola ordenes para un
 conductor que no arranca el —lo arranca una persona en la maquina donde vive el `--agent-cmd`—,
