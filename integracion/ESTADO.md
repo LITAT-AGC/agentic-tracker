@@ -730,6 +730,20 @@ del servidor guarda LF. Y la cabecera `Cache-Control` del `.js` se ve otra vez c
 `max-age=14400` desde fuera, reescrita por Cloudflare; el `.md` de al lado, que no esta en su
 lista por extension, sale con el `no-cache` del origen.
 
+**Comprobado despues del noveno despliegue del 2026-08-08** (`0858fa1`, **sin migraciones**:
+no hay tabla ni columna nueva, la presencia vive en la memoria del proceso). Entraron dos
+commits, la señal de vida del buzon y la nota del octavo despliegue. El frontend desplegado es
+el nuevo y se comprobo contra el contenido y no contra el 200: el chunk `ProjectDetails` que
+sirve nginx trae los cuatro estados por su texto —«No hay nadie al otro lado», «Sin señal desde
+hace», «El servidor acaba de arrancar», «sin datos del destinatario»— y el «se actualiza sola
+cada 10 s». En el servidor, `backend/index.js` trae las cuatro llamadas a `markConductorSeen` y
+la constante del plazo, y pm2 quedo `online` con **un** reinicio (21 acumulados contra 20), que
+es lo que distingue un arranque bueno del bucle de los auto-chequeos. Las seis comprobaciones
+del desplegador pasaron y el aviso de `/mcp` no salio.
+
+Lo que **no** se ha comprobado en PROD es la pantalla: el panel de produccion pide la
+contraseña del operador. Los cuatro estados se vieron en vivo contra el servidor de prueba.
+
 **El panel ya escribe donde antes solo miraba, y el conductor ya se puede parar.** Tres
 huecos que venian del mismo sitio —lo que APTS sabia hacer no tenia por donde pedirse— se
 cerraron el 2026-08-08.
