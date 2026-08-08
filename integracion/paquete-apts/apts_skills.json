@@ -801,7 +801,7 @@
     },
     {
       "name": "report_blocker",
-      "description": "Emergency skill to use when blocked. Minimum payload via the official MCP server: error_message (pass task_id, the value returned by register_task, unless your integration layer supplies it; the integration layer supplies project_url and agent_name).",
+      "description": "Emergency skill to use when blocked. Minimum payload via the official MCP server: error_message (pass task_id, the value returned by register_task, unless your integration layer supplies it; the integration layer supplies project_url and agent_name). Optionally pass backlog_item_id to name the unit that is blocked: APTS marks that item blocked, plus whatever item the task owns. Name it whenever the blocker is about a specific unit — a task that does not own one (the loop conductor's does not) would otherwise leave the blocker pointing at nothing but the project.",
       "parameters": {
         "oneOf": [
           {
@@ -817,6 +817,9 @@
                 "type": "string"
               },
               "agent_name": {
+                "type": "string"
+              },
+              "backlog_item_id": {
                 "type": "string"
               }
             },
@@ -840,6 +843,9 @@
                   "type": "string"
                 },
                 "agent_name": {
+                  "type": "string"
+                },
+                "backlog_item_id": {
                   "type": "string"
                 }
               },

@@ -1046,7 +1046,13 @@ const reportBlockerBodySchema = z.object({
   task_id: uuidFieldSchema('Task id must be a valid UUID'),
   error_message: nonEmptyStringSchema('Error message is required', 'Error message must be a string'),
   // obligatorio en el servidor, como ya lo exigía el cliente.
-  agent_name: nonEmptyStringSchema('Agent name is required', 'Agent name must be a string')
+  agent_name: nonEmptyStringSchema('Agent name is required', 'Agent name must be a string'),
+  // Qué unidad está bloqueada, dicho y no deducido. Se podría sacar de
+  // `tasks.backlog_item_id`, y a propósito no se hace: la asociación no tiene efectos, y
+  // esa promesa es lo que impide que exista una puerta trasera al lado de la compuerta de
+  // revisión. Aquí el agente NOMBRA lo que está bloqueado, que es un acto explícito suyo
+  // y no una consecuencia automática de a qué unidad pertenecía su tarea.
+  backlog_item_id: uuidFieldSchema('Backlog item id must be a valid UUID', { optional: true })
 });
 
 const heartbeatBodySchema = z.object({
@@ -1167,6 +1173,11 @@ const enrichSemanticStatusWithPricing = async (semanticStatus) => {
 };
 
 const resolveTaskBodySchema = z.object({
+  instruction: nonEmptyStringSchema('Instruction is required', 'Instruction must be a string')
+});
+
+const releasePointerBodySchema = z.object({
+  project_url: nonEmptyStringSchema('Project url is required', 'Project url must be a string', { unwrapQuotes: true }),
   instruction: nonEmptyStringSchema('Instruction is required', 'Instruction must be a string')
 });
 
@@ -3352,7 +3363,8 @@ const reportBlockerInternal = async (payload, { connection = db, deferredWebhook
     project_url: projectUrl,
     task_id: taskId,
     error_message: errorMessage,
-    agent_name: agentName
+    agent_name: agentName,
+    backlog_item_id: backlogItemId
   } = payload;
   const url = normalizeUrl(projectUrl || '');
 
@@ -3365,15 +3377,36 @@ const reportBlockerInternal = async (payload, { connection = db, deferredWebhook
     throw createHttpError(404, 'Task not found');
   }
 
+  if (backlogItemId) {
+    const named = await connection('backlog_items')
+      .where({ id: backlogItemId, project_url: url })
+      .whereNull('deleted_at')
+      .first('id');
+    if (!named) {
+      throw createHttpError(400, 'Backlog item id is not valid for project url');
+    }
+  }
+
   await connection('tasks')
     .where({ id: taskId })
     .update({ status: 'stalled', updated_at: connection.fn.now() });
 
   await connection('projects').where({ url }).update({ status: 'blocked' });
-  const blockedBacklogItems = await connection('backlog_items')
-    .where({ active_task_id: taskId })
-    .update({ status: 'blocked', updated_at: connection.fn.now() })
-    .returning(['id']);
+  // La unidad que el agente nombra, y la que su tarea posea. Son dos caminos y no uno
+  // porque una tarea puede no poseer ninguna —la del conductor no lo hace— y hasta ahora
+  // eso dejaba el bloqueo sin apuntar a nada: se marcaba el proyecto entero, que no
+  // estaba bloqueado, y no la unidad, que si. Nombrar la misma que ya se posee no la
+  // marca dos veces: es el mismo `id` en el `whereIn`.
+  const objetivos = [...new Set([
+    ...(backlogItemId ? [backlogItemId] : []),
+    ...(await connection('backlog_items').where({ active_task_id: taskId }).pluck('id'))
+  ])];
+  const blockedBacklogItems = objetivos.length
+    ? await connection('backlog_items')
+      .whereIn('id', objetivos)
+      .update({ status: 'blocked', updated_at: connection.fn.now() })
+      .returning(['id'])
+    : [];
   await runNonBlockingSemanticOperation(
     () => stageBacklogCoverageDocuments(connection, blockedBacklogItems.map((item) => item.id)),
     { action: 'report_blocker.semantic_sync', task_id: taskId, project_url: url }
@@ -5586,6 +5619,80 @@ app.patch('/api/dashboard/config/openrouter', requireAuth, async (req, res) => {
     return sendApiError(res, error, {
       fallbackMessage: 'Failed to update OpenRouter config',
       logMessage: 'OpenRouter config update failed'
+    });
+  }
+});
+
+// Soltar la unidad que sostiene un puntero de método.
+//
+// El arrendamiento ya existe —`METHOD_CLAIM_TTL_MS`, y «caducar es soltar»— pero solo
+// corre contra los punteros de OTROS agentes: el propio se devuelve tal cual mientras la
+// unidad no sea terminal, y eso es deliberado, porque es lo que permite matar y relanzar
+// el conductor sin perder el sitio. Lo que faltaba era poder devolverla a propósito.
+//
+// Es ruta de panel y no operación de agente por dos razones. Una, que soltar SOLO no
+// sirve al agente: el `apts_next` siguiente vuelve a reclamar la misma unidad, porque
+// sigue siendo la primera del plan. Dos, que el caso real es que una persona mire un
+// atasco y decida; para eso ya existe el precedente de al lado, `/api/tasks/:id/resolve`,
+// que deja su rastro firmado. Este hace lo mismo con el puntero.
+//
+// Sin unidad reclamada no hay nada que soltar y se responde 409 en vez de un 200 que no
+// hizo nada: la diferencia importa cuando alguien lo llama para desatascar algo y quiere
+// saber si desatascó.
+app.post('/api/method/pointers/:agent/release', requireAuth, async (req, res) => {
+  const agentName = normalizeInputString(req.params?.agent, { unwrapQuotes: true });
+  const parsedBody = releasePointerBodySchema.safeParse(req.body || {});
+  if (!parsedBody.success) {
+    return res.status(400).json({ error: zodErrorMessage(parsedBody.error) });
+  }
+
+  const url = normalizeUrl(parsedBody.data.project_url);
+  const { instruction } = parsedBody.data;
+
+  if (!agentName) {
+    return res.status(400).json({ error: 'Agent name is required' });
+  }
+
+  try {
+    const pointer = await db('project_state')
+      .where({ project_url: url, agent_name: agentName })
+      .first('id', 'cursor', 'step_status');
+
+    if (!pointer) {
+      return res.status(404).json({ error: 'Method pointer not found for that project and agent' });
+    }
+
+    const heldStoryId = (pointer.cursor && pointer.cursor.story_id) || null;
+    if (!heldStoryId) {
+      return res.status(409).json({ error: 'That pointer is not holding any unit' });
+    }
+
+    await db('project_state').where({ id: pointer.id }).update({
+      cursor: null,
+      step_status: 'idle',
+      updated_at: db.fn.now()
+    });
+
+    await db('agent_logs').insert({
+      // Sin tarea: lo que se suelta es el puntero del método, que no es de nadie en
+      // particular. La columna es nulable y el rastro vale igual.
+      task_id: null,
+      agent_name: 'Human Supervisor',
+      action_type: 'update',
+      message: `Method claim released for ${agentName} on unit ${heldStoryId}: ${instruction}`
+    });
+
+    return res.json({
+      success: true,
+      agent_name: agentName,
+      project_url: url,
+      released_backlog_item_id: heldStoryId
+    });
+  } catch (error) {
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to release method claim',
+      logMessage: 'Method claim release failed',
+      logContext: { project_url: url, agent_name: agentName }
     });
   }
 });

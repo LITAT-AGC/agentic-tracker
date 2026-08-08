@@ -138,6 +138,35 @@ El backfill de la migracion recupera lo unico reconstruible: las tareas que su h
 apunta. Las que un `register_task` posterior desbanco no dejaron ningun rastro relacional y no se
 pueden recuperar; la migracion imprime los dos numeros en vez de dar a entender que los cubrio todos.
 
+**Un atasco ya tiene dos salidas, y ninguna pasa por escribir la base a mano.**
+
+La primera: `report_blocker` acepta `backlog_item_id` y marca **esa** unidad, ademas de la que la
+tarea posea. El radio estaba invertido —marcaba el proyecto ENTERO, que no estaba bloqueado, y no la
+unidad, que si—, porque solo miraba `active_task_id` y la tarea del conductor no posee ninguna. La
+unidad se **nombra** y no se deduce de `tasks.backlog_item_id` a proposito: la asociacion no tiene
+efectos, y esa promesa es lo que impide abrir una puerta trasera al lado de la compuerta de revision.
+Nombrar una unidad de otro proyecto da 400 y no marca nada por el camino.
+
+La segunda: `POST /api/method/pointers/:agent/release` devuelve la unidad que sostiene un puntero de
+metodo —`cursor` a null, `step_status` a `idle`— con un `agent_logs` firmado `Human Supervisor`, sin
+`task_id` porque lo que se suelta es el puntero y no una tarea. El arrendamiento ya existia
+(`METHOD_CLAIM_TTL_MS`, y «caducar es soltar») pero solo corre contra los punteros de OTROS agentes:
+el propio se devuelve tal cual mientras la unidad no sea terminal, y eso es deliberado, porque es lo
+que permite matar y relanzar el conductor sin perder el sitio. Lo que faltaba era devolverla a
+proposito, y hubo que hacerlo a mano el 2026-08-08 para desatascar fm-synth.
+
+Es ruta de panel y no operacion de agente por dos razones. Una, que soltar SOLO no le sirve al
+agente: el `apts_next` siguiente vuelve a reclamar la misma unidad, porque sigue siendo la primera
+del plan. Dos, que el caso real es que una persona mire un atasco y decida; el precedente de al lado,
+`/api/tasks/:id/resolve`, hace exactamente eso para tareas. Un puntero que no sostiene nada responde
+409 en vez de un 200 que no hizo nada.
+
+Lo que **no** se ha hecho, porque es decision de producto y no defecto: dar a `blocked` salida del
+reparto —`TERMINAL_STATUSES` sigue siendo `done` y `archived`, asi que una unidad bloqueada se
+sigue repartiendo—, que exigiria antes separar los dos significados que hoy comparte ese estado (la
+vigilancia de latidos diciendo «perdi contacto» y el agente diciendo «esto no se puede todavia»); y
+que `projects.status` siga siendo un flag pegajoso cuya unica salida es `/api/tasks/:id/resolve`.
+
 **El motor reparte las stories por el plan y no por el identificador.** `claimDevStory` ordenaba las
 candidatas del epic por `created_at, id`, y las stories de un epic las escribe el motor en un solo
 lote —`bmad-create-epics-and-stories`—, asi que el `created_at` empata en todas y el desempate lo
@@ -398,6 +427,14 @@ Contra `APTS_test` (puerto 47301; la ultima ronda —la del coste de los embeddi
   `backlog_item_id` da 400 nombrando lo que falta, y `'quizas'` da 400 en vez de colar como `false`;
   por MCP el rechazo llega como `isError`. Y se lee: `get_task` lo devuelve en las dos vistas, y en
   `compact` una tarea sin unidad no paga la clave vacia.
+- **Las dos salidas del atasco**, con `backend/scripts/test_blocker_scope_and_release.js` (nuevo),
+  diecinueve comprobaciones. Una tarea que no posee nada nombra su unidad y **esa** queda `blocked`,
+  sin haberla poseido en ningun momento; sin el campo, `report_blocker` marca la que la tarea posee,
+  como hasta ahora; una unidad de otro proyecto da 400 y sigue en su estado. Soltar el claim exige
+  sesion de panel (401 sin ella), un puntero inexistente da 404, uno que no sostiene nada da 409, y
+  el que si sostiene queda con el cursor vacio y en `idle` diciendo cual solto, con el rastro firmado
+  `Human Supervisor` sin `task_id` y con el motivo dentro. La unidad soltada no cambia de estado:
+  vuelve al reparto tal cual.
 - **El orden de reparto**, con `backend/scripts/test_dev_story_claim_order.js` (nuevo; transaccion
   revertida, sin servidor). Montado con los UUID en contra —la primera del plan es la que el criterio
   viejo dejaba para el final—: reparte primero la de `sort_order` mas bajo y no la que ganaba por
