@@ -327,6 +327,14 @@ es lo unico que distingue un frontend nuevo de uno viejo, porque con `try_files`
 responde 200—; y, ya por la URL publica y con credenciales, `initialize` contestando y `tools/list`
 devolviendo **21 operaciones**.
 
+**Comprobado despues del segundo despliegue del 2026-08-08** (`91c5bc5`, sin migraciones), por la
+URL publica: el manifiesto sale con `schema_version` **1.1.0** y **7 artefactos**
+—`skill_markdown`, `agent_guidelines` y `adapter_generator` en 1.1.0—; `supported_runtime_values`,
+los bloques de registro y los `mappings` dicen los mismos dos runtimes, `claudecode` y `opencode`;
+no queda ni una mencion a VS Code en el JSON entero; los dos artefactos del conductor responden 200
+(44 KB el script, 15 KB el README) y `/agentes/apts-method-orchestrator.agent.md` responde 404, que
+es la respuesta correcta ahora. Las seis comprobaciones del desplegador pasaron.
+
 **Comprobado despues del despliegue del 2026-08-08** (`c41ad1b`, sin migraciones), por la URL
 publica y con credenciales leidas en el propio servidor: `tools/list` devuelve **22 operaciones**,
 entre ellas `set_project_constraints`; la guardia de la fase de partida rechaza `phase:
