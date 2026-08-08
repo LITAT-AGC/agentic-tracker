@@ -12,7 +12,7 @@ llego hasta aqui: eso esta en el historial de git.
 | Registro | Una URL y cuatro cabeceras; el manifiesto publica el bloque por runtime |
 | Manifiesto | `GET /api/public/integrar`, `schema_version` 1.1.1 |
 | Runtimes soportados | Dos: Claude Code y opencode |
-| Artefactos publicados | 8; los dos del conductor en `artifact_version` 1.4.0, `skill_markdown`, `agent_guidelines` y `adapter_generator` en 1.1.0, `loop_prompt_code_review` en 1.1.1, `surface_spec` en 1.0.2, `skills_json` en 1.0.2 |
+| Artefactos publicados | 8; los dos del conductor en `artifact_version` 1.5.0, `skill_markdown`, `agent_guidelines` y `adapter_generator` en 1.1.0, `loop_prompt_code_review` en 1.1.1, `surface_spec` en 1.0.2, `skills_json` en 1.0.2 |
 | Descargas necesarias para **llamar** a las operaciones | Ninguna |
 | Descargas necesarias para **conducir** | El spec y el generador (agentes y comandos); el conductor y su README si se quiere el bucle desatendido, y su plantilla de revision si se quiere ademas la compuerta dentro de la sesion del agente |
 
@@ -664,6 +664,49 @@ su `stalled` ya no arrastra la historia. Lo que el desligado no deshace es el `b
 vigilancia de fondo ya le habia puesto: la maquina de metodo no tiene salida desde ese estado
 —`apts_set_status` responde 409 diciendo que se reponga con `update_backlog_item`—, asi que la
 historia `344da12c` sigue en `blocked` esperando esa reposicion.
+
+**El panel ya escribe donde antes solo miraba, y el conductor ya se puede parar.** Tres
+huecos que venian del mismo sitio —lo que APTS sabia hacer no tenia por donde pedirse— se
+cerraron el 2026-08-08.
+
+El primero, las restricciones del proyecto: la logica existia entera desde ese mismo dia,
+pero solo se llegaba a ella por la superficie de agente (`authenticateAgent`), y el panel
+va por sesion. Dos rutas de dashboard sobre las mismas funciones, ninguna logica nueva.
+
+El segundo, el roster del metodo. `entities` guarda persona, principios, estilo e
+instruccion desde la primera siembra y **no las leia nadie**: el paso servido llevaba
+`role`, y `role` era la CLAVE de la entity, no su perfil. Un editor habria editado texto
+que ningun agente recibe. Ahora la lectura pasa por `resolveEntityProfile` —corpus,
+override global `'*'`, override del proyecto, en ese orden, y un campo nulo hereda— y
+`buildStepPayload` adjunta `role_profile`. Solo si alguien edito a ese agente: el perfil
+del corpus pesa unos 650 caracteres y mandarlo en cada paso seria un gasto de contexto que
+nadie pidio; sin override el payload sale byte a byte como salia antes.
+
+Las ediciones **no** se escriben en `entities`, porque `bmad_seed.js` las borraria con su
+`onConflict('key').merge()`. Viven en `entity_overrides`, tabla que el seed no mira. Las
+reglas de conduccion siguen el mismo reparto: `METHOD_CONDUCTION` sigue siendo la fuente
+autoritativa y el override va a `config`, como las restricciones; el manifiesto acepta
+`?project_url=` y mezcla. `schema_version` no cambia —no hay clave nueva— y `role_profile`
+es clave de respuesta, no de entrada, asi que las 22 operaciones tampoco.
+
+El tercero, el conductor. Lanzaba al agente con `spawnSync`, que bloquea el proceso entero:
+no podia latir mientras el agente trabajaba —de ahi que la vigilancia de fondo marcara
+`stalled` una historia larga y hubiera que reanimar la tarea al cerrarla— y no podia
+escuchar, asi que detenerlo era matar el proceso a mano en la maquina donde corriera. Con
+`spawn` late cada cinco minutos, copia su diario a `agent_logs` (`action_type: 'journal'`,
+migracion 022) y sondea un buzon de ordenes cada diez segundos, tambien mientras el agente
+corre. Al recibir `stop` o `pause` mata **el arbol**: `shell: true` interpone `cmd.exe`, asi
+que matar el pid del hijo dejaria al agente vivo escribiendo en APTS. Y sin `--project-url`
+ni `--agent-cmd` ya no falla: espera ordenes.
+
+El buzon (`conductor_orders`, migracion 023) y el diario van por REST y no por MCP: no son
+del metodo, no las llama un agente, y el panel —que tambien escribe ordenes— va por sesion.
+
+Comprobado contra `APTS_test` con el fixture `apts://fixture/toy` llevado a
+`implementation`: el latido avanzando mientras el agente falso dormia, una orden de `stop`
+cortandolo con salida 15 y sin dejar huerfanos (`taskkill /t`), la corrida siguiente
+retomando la misma story `defb4b31`, y `pause` devolviendo al conductor a la espera sin
+matar el proceso. Sin desplegar: hay tres migraciones nuevas.
 
 ## Abierto
 

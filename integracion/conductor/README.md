@@ -323,6 +323,7 @@ operador que puede colgarse.
 | 12 | fuera de alcance — el paso recomendado no lo conduce este script |
 | 13 | estancado — la huella no cambió en N vueltas |
 | 14 | tope de iteraciones |
+| 15 | detenido — alguien lo paró desde el panel |
 | 20 | el agente terminó con error en todos sus intentos |
 
 No hay código nuevo para "falló incluso después de escalar": el motivo es el mismo y el
@@ -437,3 +438,58 @@ gastarse deja un `reintento_innecesario` con lo que el motor respondió en su lu
 reintento de red deja un `reintento_red` con la herramienta, el intento, la espera y el
 motivo; y la tarea de cada unidad deja un `tarea` al abrirse y otro al cerrarse —o un
 `tarea_fallo` si APTS no aceptó la llamada, que no detiene el bucle.
+
+### El diario también se ve en APTS
+
+El archivo local es la fuente de verdad y no cambia. Además, mientras haya una tarea
+abierta, los eventos que se ven desde fuera —`arranque`, `estado`, `agente`,
+`reintento_red`, `tarea_fallo`, `parada`, `cierre`— se copian a APTS como filas de log de
+esa tarea, y aparecen en la pestaña **Logs** del proyecto con acción `journal`. El resto
+de eventos es contabilidad interna del bucle y se queda en el archivo.
+
+El envío es un intento y nada más: sin reintentos, con plazo de cinco segundos y
+tragándose cualquier error. Si APTS no está, el bucle no se entera. `--no-journal-remote`
+(o `APTS_LOOP_NO_JOURNAL_REMOTE=1`) lo apaga.
+
+## Latido durante la ejecución
+
+APTS da por `stalled` una tarea que lleva quince minutos sin señal, y una story tarda más
+que eso. Mientras el agente trabaja, el conductor manda `heartbeat` cada cinco minutos.
+
+Antes no podía: `spawnSync` bloqueaba el proceso entero, así que la vigilancia de fondo
+marcaba la tarea y el conductor tenía que reanimarla al cerrarla. Ese remiendo sigue en el
+código como red de seguridad, pero ya no es el camino normal.
+
+## Órdenes desde el panel
+
+La pestaña **Conductor** de un proyecto deja órdenes en un buzón —**Iniciar**, **Pausar**,
+**Detener**— dirigidas al `--agent-name` con el que corre el conductor. El conductor
+pregunta cada diez segundos, también mientras el agente trabaja.
+
+No hay socket a propósito: para un botón que pulsa una persona, diez segundos son
+indistinguibles de instantáneo, y un servidor de WebSocket sería una pieza más —conexión,
+reconexión, autenticación— a cambio de una latencia que nadie nota.
+
+Al recibir `stop` o `pause`, el conductor mata **el árbol de procesos** del agente y para
+con código 15. En Windows eso es `taskkill /t`: `shell: true` interpone `cmd.exe`, así que
+matar el pid del hijo dejaría al agente vivo escribiendo en APTS mientras el conductor cree
+que lo detuvo. En POSIX el agente se lanza con grupo propio (`detached`) y se mata el grupo,
+con diez segundos de gracia antes de forzar.
+
+Cortar a mitad de una story no rompe nada: se comporta igual que un agente que muere. El
+claim es idempotente y el motor vuelve a servir el mismo paso mientras el puntero siga
+corriendo, así que la corrida siguiente retoma esa misma historia.
+
+## Modo espera
+
+`--daemon` —o invocar el script **sin ningún argumento**— no conduce nada todavía: se
+conecta a APTS y espera una orden de `start`, que trae el proyecto, el comando del agente
+y, si se quiere, los workflows y el escalado de modelo.
+
+La identidad (`--mcp-url`, `--api-key`, `--agent-name`, `--agent-email`) sigue siendo
+obligatoria: sin ella no hay a quién preguntar. Lo que se relaja es sólo lo que la orden
+puede traer. Un `--project-url` sin `--agent-cmd` sigue siendo error de configuración, para
+que una invocación mal escrita no se quede colgada en silencio.
+
+Una parada en modo espera termina esa corrida, no el proceso: el conductor vuelve a
+escuchar, y volver a arrancarlo desde el panel es la misma sesión.

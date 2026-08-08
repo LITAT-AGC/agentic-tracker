@@ -411,18 +411,152 @@
       </div>
 
       <div v-if="activeTab === 'conductor'" class="space-y-8">
-        <div class="flex items-center gap-2 mb-4">
-          <div class="w-1 h-5 bg-amber-500 rounded-full"></div>
-          <h3 class="text-lg font-bold">Control del Conductor</h3>
+        <div>
+          <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-2">
+              <div class="w-1 h-5 bg-amber-500 rounded-full"></div>
+              <h3 class="text-lg font-bold">Control del Conductor</h3>
+            </div>
+            <Button
+              @click="loadConductorState"
+              :disabled="conductorLoading"
+              label="Actualizar"
+              icon="pi pi-refresh"
+              severity="secondary"
+              outlined
+              size="small"
+            />
+          </div>
+
+          <Message v-if="conductorError" severity="error" :closable="false" class="mb-4">{{ conductorError }}</Message>
+
+          <Card class="border border-surface-200">
+            <template #content>
+              <p class="text-sm text-surface-500 mb-4">
+                Las órdenes se dejan en un buzón y el conductor las recoge en unos diez segundos.
+                Se dirigen al nombre de agente con el que corre; sin ese nombre no hay a quién hablarle.
+              </p>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <label class="space-y-2">
+                  <span class="block text-[11px] uppercase tracking-wider text-amber-700/70">Nombre del conductor</span>
+                  <InputText v-model="conductorAgentName" class="w-full" placeholder="conductor-dev" />
+                </label>
+                <label class="space-y-2">
+                  <span class="block text-[11px] uppercase tracking-wider text-amber-700/70">Workflows</span>
+                  <InputText v-model="conductorForm.workflows" class="w-full" placeholder="bmad-dev-story" />
+                </label>
+                <label class="space-y-2 md:col-span-2">
+                  <span class="block text-[11px] uppercase tracking-wider text-amber-700/70">Comando del agente</span>
+                  <InputText v-model="conductorForm.agent_cmd" class="w-full" placeholder="claude -p --model {model} < {prompt_file}" />
+                </label>
+                <label class="space-y-2">
+                  <span class="block text-[11px] uppercase tracking-wider text-amber-700/70">Escalado de modelo</span>
+                  <InputText v-model="conductorForm.model_escalation" class="w-full" placeholder="claude-sonnet-5,claude-opus-5" />
+                </label>
+              </div>
+
+              <div class="flex flex-wrap items-center gap-3 mt-5">
+                <Button
+                  @click="sendConductorOrder('start')"
+                  :loading="isSendingOrder"
+                  :disabled="!conductorAgentName.trim() || !conductorForm.agent_cmd.trim()"
+                  label="Iniciar"
+                  icon="pi pi-play"
+                  severity="success"
+                  size="small"
+                />
+                <Button
+                  @click="sendConductorOrder('pause')"
+                  :loading="isSendingOrder"
+                  :disabled="!conductorAgentName.trim()"
+                  label="Pausar"
+                  icon="pi pi-pause"
+                  severity="warn"
+                  size="small"
+                />
+                <Button
+                  @click="sendConductorOrder('stop')"
+                  :loading="isSendingOrder"
+                  :disabled="!conductorAgentName.trim()"
+                  label="Detener"
+                  icon="pi pi-stop"
+                  severity="danger"
+                  size="small"
+                />
+                <span v-if="conductorMessage" class="text-xs text-emerald-600">{{ conductorMessage }}</span>
+              </div>
+            </template>
+          </Card>
         </div>
 
-        <Card class="border border-surface-200">
-          <template #content>
-            <p class="text-sm text-surface-500">
-              Aún no disponible. Desde aquí se podrá iniciar, pausar y detener el conductor del bucle.
-            </p>
-          </template>
-        </Card>
+        <div>
+          <div class="flex items-center gap-2 mb-4">
+            <div class="w-1 h-5 bg-amber-500 rounded-full"></div>
+            <h4 class="text-base font-bold">Tarea en curso</h4>
+          </div>
+          <Card class="border border-surface-200">
+            <template #content>
+              <div v-if="conductorState?.active_task" class="space-y-1">
+                <p class="text-sm font-medium text-surface-700">{{ conductorState.active_task.title }}</p>
+                <div class="flex flex-wrap items-center gap-3 text-xs text-surface-500">
+                  <Tag :value="conductorState.active_task.status" :severity="taskStatusSeverity(conductorState.active_task.status)" />
+                  <span>última señal: {{ formatDateTime(conductorState.active_task.last_heartbeat) }}</span>
+                </div>
+              </div>
+              <p v-else class="text-sm text-surface-500">
+                Nada en curso para ese nombre de agente.
+              </p>
+            </template>
+          </Card>
+        </div>
+
+        <div>
+          <div class="flex items-center gap-2 mb-4">
+            <div class="w-1 h-5 bg-emerald-500 rounded-full"></div>
+            <h4 class="text-base font-bold">Diario reciente</h4>
+          </div>
+          <Card class="border border-surface-200" :pt="{ body: { class: 'p-0' }, content: { class: 'p-0' } }">
+            <template #content>
+              <DataTable :value="conductorState?.journal || []" class="w-full text-sm">
+                <template #empty>
+                  <div class="p-6 text-center text-surface-500 text-sm">El conductor todavía no escribió nada aquí.</div>
+                </template>
+                <Column field="message" header="Evento" />
+                <Column field="task_title" header="Tarea" />
+                <Column field="created_at" header="Hora">
+                  <template #body="{ data }">
+                    <span class="text-xs text-surface-500 whitespace-nowrap">{{ formatDateTime(data.created_at) }}</span>
+                  </template>
+                </Column>
+              </DataTable>
+            </template>
+          </Card>
+        </div>
+
+        <div>
+          <div class="flex items-center gap-2 mb-4">
+            <div class="w-1 h-5 bg-sky-500 rounded-full"></div>
+            <h4 class="text-base font-bold">Órdenes enviadas</h4>
+          </div>
+          <Card class="border border-surface-200" :pt="{ body: { class: 'p-0' }, content: { class: 'p-0' } }">
+            <template #content>
+              <DataTable :value="conductorState?.orders || []" class="w-full text-sm">
+                <template #empty>
+                  <div class="p-6 text-center text-surface-500 text-sm">Sin órdenes todavía.</div>
+                </template>
+                <Column field="command" header="Orden" />
+                <Column field="agent_name" header="Destinatario" />
+                <Column field="status" header="Estado" />
+                <Column field="created_at" header="Enviada">
+                  <template #body="{ data }">
+                    <span class="text-xs text-surface-500 whitespace-nowrap">{{ formatDateTime(data.created_at) }}</span>
+                  </template>
+                </Column>
+              </DataTable>
+            </template>
+          </Card>
+        </div>
       </div>
 
       <div v-if="activeTab === 'config'" class="space-y-8">
@@ -891,6 +1025,16 @@ const isSavingConduction = ref(false);
 const conductionError = ref(null);
 const conductionMessage = ref(null);
 
+// Control del conductor. El nombre del agente se recuerda por proyecto: es lo que
+// identifica al conductor y escribirlo en cada visita seria absurdo.
+const conductorAgentName = ref('');
+const conductorForm = ref({ agent_cmd: '', workflows: 'bmad-dev-story', model_escalation: '' });
+const conductorState = ref(null);
+const conductorLoading = ref(false);
+const isSendingOrder = ref(false);
+const conductorError = ref(null);
+const conductorMessage = ref(null);
+
 const backlogError = ref(null);
 const isSavingBacklog = ref(false);
 const isAnalyzingBacklog = ref(false);
@@ -980,6 +1124,13 @@ const resetDetails = () => {
   logFilters.value = {
     action_type: { value: [], matchMode: 'in' }
   };
+  conductorAgentName.value = '';
+  conductorForm.value = { agent_cmd: '', workflows: 'bmad-dev-story', model_escalation: '' };
+  conductorState.value = null;
+  conductorLoading.value = false;
+  isSendingOrder.value = false;
+  conductorError.value = null;
+  conductorMessage.value = null;
   projectAgents.value = [];
   selectedAgentKey.value = null;
   agentForm.value = {};
@@ -1099,6 +1250,72 @@ const saveProjectConstraints = async () => {
     console.error('Failed to save project constraints', error);
   } finally {
     isSavingConstraints.value = false;
+  }
+};
+
+const conductorStorageKey = (url) => `apts.conductor.agent_name.${url}`;
+
+const loadConductorState = async () => {
+  const url = selectedProject.value?.url || String(route.params.projectId || '').trim();
+  if (!url) return;
+
+  conductorLoading.value = true;
+  conductorError.value = null;
+
+  try {
+    const query = conductorAgentName.value.trim()
+      ? `?agent_name=${encodeURIComponent(conductorAgentName.value.trim())}`
+      : '';
+    const { data } = await apiFetchJson(
+      `/dashboard/projects/${encodeURIComponent(url)}/conductor${query}`,
+      { credentials: 'include' },
+      'No se pudo leer el estado del conductor.'
+    );
+
+    conductorState.value = data;
+  } catch (error) {
+    conductorError.value = getApiErrorMessage(error, 'No se pudo leer el estado del conductor.');
+    console.error('Failed to load conductor state', error);
+  } finally {
+    conductorLoading.value = false;
+  }
+};
+
+const sendConductorOrder = async (command) => {
+  const url = selectedProject.value?.url;
+  const agentName = conductorAgentName.value.trim();
+  if (!url || !agentName) return;
+
+  isSendingOrder.value = true;
+  conductorError.value = null;
+  conductorMessage.value = null;
+
+  try {
+    // Solo `start` lleva configuracion: las demas ordenes actuan sobre lo que ya corre.
+    const payload = command === 'start'
+      ? {
+        project_url: url,
+        agent_cmd: conductorForm.value.agent_cmd.trim(),
+        workflows: conductorForm.value.workflows.trim() || undefined,
+        model_escalation: conductorForm.value.model_escalation.trim() || undefined
+      }
+      : undefined;
+
+    await apiFetchJson('/dashboard/conductor/orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ command, agent_name: agentName, project_url: url, payload })
+    }, 'No se pudo enviar la orden al conductor.');
+
+    window.localStorage.setItem(conductorStorageKey(url), agentName);
+    conductorMessage.value = `Orden '${command}' encolada. El conductor la recoge en unos diez segundos.`;
+    await loadConductorState();
+  } catch (error) {
+    conductorError.value = getApiErrorMessage(error, 'No se pudo enviar la orden al conductor.');
+    console.error('Failed to send conductor order', error);
+  } finally {
+    isSendingOrder.value = false;
   }
 };
 
@@ -1286,9 +1503,11 @@ const loadProject = async () => {
     }
 
     await fetchProjectDetails(routeProjectId);
+    conductorAgentName.value = window.localStorage.getItem(conductorStorageKey(routeProjectId)) || '';
     await loadProjectConstraints();
     await loadProjectRoster();
     await loadMethodConduction();
+    await loadConductorState();
     await fetchSemanticStatus(routeProjectId);
   } catch (error) {
     loadError.value = error.message;

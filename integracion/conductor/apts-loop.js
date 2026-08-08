@@ -39,7 +39,7 @@
 // sólo avanzan. Un agente que entrega basura y muere después deja un caso que se
 // arregla a mano.
 
-const { spawnSync } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -57,6 +57,9 @@ const SALIDA = {
   fuera_de_alcance: 12,
   estancado: 13,
   tope_iteraciones: 14,
+  // Alguien lo paró desde el panel. No es un fallo: es la salida que pidió una persona,
+  // y por eso no comparte código con `agente_fallo` ni con `estancado`.
+  detenido: 15,
   agente_fallo: 20,
 };
 
@@ -110,6 +113,12 @@ Frenos:
   --no-journal-remote     APTS_LOOP_NO_JOURNAL_REMOTE=1
                           no copiar los eventos del diario a APTS. Por defecto SÍ se
                           copian —los que se ven desde fuera— colgados de esa misma tarea.
+
+Modo espera:
+  --daemon                no conducir nada todavía: conectarse a APTS y esperar órdenes
+                          del panel (iniciar, pausar, detener). La identidad sigue siendo
+                          obligatoria; el proyecto y el comando de agente los trae la
+                          orden de arranque. Invocarlo SIN NINGÚN argumento hace lo mismo.
 
 Avisos al parar:
   --telegram-chat-id ID   APTS_LOOP_TELEGRAM_CHAT_ID   a quién avisar
@@ -789,7 +798,108 @@ const parar = async (cfg, { motivo, detalle, codigo, fase, storyId, iteracion })
   throw new Parada(motivo, codigo);
 };
 
+// ---- órdenes desde el panel ----
+//
+// Van por REST y no por MCP a propósito: no son operaciones del método ni las llama un
+// agente. Meterlas en el contrato subiría la superficie que ve TODO cliente para algo que
+// sólo usa este programa.
+//
+// El sondeo es de diez segundos y no hay socket: para un botón que pulsa una persona, diez
+// segundos son indistinguibles de instantáneo, y un servidor de WebSocket sería una pieza
+// más —conexión, reconexión, autenticación— a cambio de una latencia que nadie nota.
+// Ajustables por entorno igual que la espera entre intentos, y por el mismo motivo: sin
+// bandera porque nadie los toca en una corrida normal, pero una prueba no puede esperar
+// cinco minutos para ver un latido.
+const ORDENES_ESPERA_MS = entero(process.env.APTS_LOOP_ORDERS_MS, 10000);
+const LATIDO_MS = entero(process.env.APTS_LOOP_HEARTBEAT_MS, 5 * 60 * 1000);
+
+const restApts = async (cfg, metodo, ruta, cuerpo) => {
+  const r = await fetch(new URL(ruta, cfg.mcpUrl).toString(), {
+    method: metodo,
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${cfg.apiKey}`,
+      'X-APTS-Project-Url': cfg.projectUrl || '',
+      'X-APTS-Agent-Name': cfg.agentName,
+      'X-APTS-Agent-Email': cfg.agentEmail,
+    },
+    body: cuerpo === undefined ? undefined : JSON.stringify(cuerpo),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (r.status === 401 || r.status === 403) throw new ErrorConfig(`APTS rechazó la credencial (${r.status})`);
+  if (!r.ok) throw new ErrorRed(`APTS respondió ${r.status} en ${ruta}`);
+  return r.json();
+};
+
+// Sondear órdenes NUNCA para el bucle: si APTS no contesta, es que no hay orden que
+// atender, y el trabajo en curso vale más que la obediencia inmediata.
+const siguienteOrden = async (cfg) => {
+  try {
+    const r = await restApts(cfg, 'GET', `/api/conductor/orders/next?agent_name=${encodeURIComponent(cfg.agentName)}`);
+    return r && r.order ? r.order : null;
+  } catch (_error) {
+    return null;
+  }
+};
+
+const acusarOrden = async (cfg, id, estado, detalle) => {
+  try {
+    await restApts(cfg, 'POST', `/api/conductor/orders/${id}/ack`, { status: estado, detail: detalle || null });
+  } catch (_error) { /* el acuse es cortesía, no parte del contrato del bucle */ }
+};
+
 // ---- lanzamiento del agente ----
+
+// El proceso del agente y la orden que lo interrumpió, si la hubo. Viven fuera de
+// `lanzarAgente` porque quien decide matarlo es el vigilante, que corre en paralelo.
+let procesoAgente = null;
+let ordenDeParada = null;
+
+// Matar al hijo NO basta en Windows. `shell: true` interpone `cmd.exe`, así que el pid que
+// devuelve `spawn` es el del shell y el agente —claude, opencode— es su hijo: matar el pid
+// deja al agente vivo, escribiendo en APTS, mientras el conductor cree que lo detuvo. Hace
+// falta el árbol entero, y sin dependencias nuevas: `taskkill /t` en Windows, y en POSIX el
+// grupo de procesos, que existe porque se lanza con `detached`.
+const matarArbol = (hijo) => {
+  if (!hijo || hijo.exitCode !== null || hijo.killed) return;
+  try {
+    if (process.platform === 'win32') {
+      spawn('taskkill', ['/pid', String(hijo.pid), '/t', '/f'], { stdio: 'ignore' });
+      return;
+    }
+    process.kill(-hijo.pid, 'SIGTERM');
+    // Plazo de gracia: un agente a mitad de una escritura merece poder cerrarla. Si sigue
+    // vivo después, ya no es cuestión de cortesía.
+    setTimeout(() => {
+      try { if (hijo.exitCode === null) process.kill(-hijo.pid, 'SIGKILL'); } catch (_) { /* ya murió */ }
+    }, 10000).unref();
+  } catch (_error) { /* el proceso ya no está */ }
+};
+
+// Mientras el agente trabaja, el conductor ya no está bloqueado: puede latir y puede
+// escuchar. Lo primero cierra el agujero que antes se parcheaba reanimando la tarea —APTS
+// da por `stalled` lo que lleva quince minutos sin señal, y una historia tarda más—; lo
+// segundo es lo que hace que "detener" detenga algo de verdad.
+const vigilarAgente = (cfg) => {
+  const latido = setInterval(() => {
+    if (!tareaActual) return;
+    llamarMcp(cfg, 'heartbeat', { task_id: tareaActual.id }).catch(() => {});
+  }, LATIDO_MS);
+
+  const escucha = setInterval(async () => {
+    const orden = await siguienteOrden(cfg);
+    if (!orden || !['stop', 'pause'].includes(orden.command)) return;
+    ordenDeParada = orden;
+    log(`orden recibida: ${orden.command} — cortando el proceso del agente`);
+    registrar(cfg, { evento: 'parada', motivo: `orden:${orden.command}`, detalle: 'pedida desde el panel', orden_id: orden.id });
+    await acusarOrden(cfg, orden.id, 'acked');
+    matarArbol(procesoAgente);
+  }, ORDENES_ESPERA_MS);
+
+  latido.unref();
+  escucha.unref();
+  return () => { clearInterval(latido); clearInterval(escucha); };
+};
 
 const lanzarAgente = (cfg, contexto) => {
   // El número de intento entra en el nombre: si el intento 1 falla, su prompt es lo
@@ -814,21 +924,44 @@ const lanzarAgente = (cfg, contexto) => {
   const cual = cfg.escalera.length > 1 ? ` (intento ${contexto.intento}/${cfg.escalera.length}${contexto.modelo ? `, ${contexto.modelo}` : ''})` : '';
   log(`vuelta ${contexto.iteration}: story ${contexto.story_id}${cual} → ${comando}`);
   const inicio = Date.now();
-  const r = spawnSync(comando, { shell: true, stdio: 'inherit' });
-  const ms = Date.now() - inicio;
 
-  if (r.status === 0) {
-    try { fs.unlinkSync(ficheroPrompt); } catch (_) { /* el prompt es desechable */ }
-  } else {
-    // Si falló, el prompt se conserva: es lo primero que hace falta para diagnosticar.
-    log(`el prompt de esta vuelta queda en ${ficheroPrompt}`);
-  }
-  return { codigo: r.status, ms, error: r.error ? r.error.message : null };
+  // `spawn` y no `spawnSync`: bloquear el proceso entero mientras el agente trabaja era lo
+  // que impedía latir y lo que hacía que "detener" no pudiera detener nada. `stdio:
+  // 'inherit'` se conserva —la salida del agente se sigue viendo en vivo— y `detached` en
+  // POSIX es lo que da grupo de procesos propio para poder matar el árbol.
+  return new Promise((resolve) => {
+    const hijo = spawn(comando, {
+      shell: true,
+      stdio: 'inherit',
+      detached: process.platform !== 'win32',
+    });
+    procesoAgente = hijo;
+    const parar = vigilarAgente(cfg);
+
+    const terminar = (codigo, error) => {
+      parar();
+      procesoAgente = null;
+      const ms = Date.now() - inicio;
+
+      if (codigo === 0) {
+        try { fs.unlinkSync(ficheroPrompt); } catch (_) { /* el prompt es desechable */ }
+      } else {
+        // Si falló, el prompt se conserva: es lo primero que hace falta para diagnosticar.
+        log(`el prompt de esta vuelta queda en ${ficheroPrompt}`);
+      }
+      resolve({ codigo, ms, error });
+    };
+
+    // Un proceso muerto por señal vuelve con `code` null: se normaliza a un código no cero
+    // para que los seis sitios que miran `codigo` sigan leyendo lo mismo que antes.
+    hijo.on('close', (codigo, senal) => terminar(codigo === null ? -1 : codigo, senal ? `terminado por ${senal}` : null));
+    hijo.on('error', (error) => terminar(-1, error.message));
+  });
 };
 
 // ---- configuración ----
 
-const construirConfig = (args) => {
+const construirConfig = (args, { esperando = false } = {}) => {
   const val = (clave, env) => {
     const v = args[clave.replace(/-(\w)/g, (_, c) => c.toUpperCase())] ?? args[clave];
     if (typeof v === 'string' && v.trim()) return v.trim();
@@ -873,15 +1006,20 @@ const construirConfig = (args) => {
   const journal = typeof args.journal === 'string' ? args.journal : path.join('.apts', `${NOMBRE}.jsonl`);
   cfg.journal = journal === 'off' ? null : path.resolve(journal);
 
+  cfg.esperando = esperando;
+
   const faltan = [];
+  // La identidad es obligatoria SIEMPRE, también en espera: sin ella no hay a quién
+  // preguntar por las órdenes. El proyecto y el comando son lo único que la orden puede
+  // traer, y por eso son lo único que se relaja.
   if (!cfg.mcpUrl) faltan.push('--mcp-url / APTS_MCP_URL');
   if (!cfg.apiKey) faltan.push('--api-key / APTS_API_KEY');
-  if (!cfg.projectUrl) faltan.push('--project-url / APTS_PROJECT_URL');
+  if (!cfg.projectUrl && !esperando) faltan.push('--project-url / APTS_PROJECT_URL');
   if (!cfg.agentName) faltan.push('--agent-name / APTS_AGENT_NAME');
   if (!cfg.agentEmail) faltan.push('--agent-email / APTS_AGENT_EMAIL');
   if (faltan.length) throw new ErrorConfig(`falta configuración: ${faltan.join(', ')}`);
 
-  if (!cfg.dryRun && !cfg.agentCmd) {
+  if (!esperando && !cfg.dryRun && !cfg.agentCmd) {
     throw new ErrorConfig('--agent-cmd es obligatorio (o usa --dry-run para inspeccionar sin lanzar nada)');
   }
   // El comando se valida SIEMPRE que exista, también en --dry-run: la documentación
@@ -939,18 +1077,8 @@ const describirIntentos = (intentos) => {
 // no lo mandaba.
 let cfgActual = null;
 
-const main = async () => {
-  const args = parsearArgs(process.argv.slice(2));
-  if (args.help || args.h) { process.stdout.write(AYUDA); return; }
-
-  // Antes de componer nada: la identidad y la política de modelo pueden venir de ahí.
-  const envCargado = cargarEnv(args.dotenv);
-
-  const cfg = construirConfig(args);
-  cfgActual = cfg;
-  const plantillaPrompt = typeof args['prompt-file'] === 'string'
-    ? fs.readFileSync(args['prompt-file'], 'utf8')
-    : PROMPT_POR_DEFECTO;
+const conducir = async (cfg, plantillaPrompt) => {
+  const envCargado = cfg.envFile;
 
   registrar(cfg, {
     evento: 'arranque',
@@ -1111,7 +1239,7 @@ const main = async () => {
         task_id: (tareaActual && tareaActual.id) || '(ninguna)',
       });
 
-      ultimo = lanzarAgente(cfg, { story_id: storyId, iteration: iteracion, intento, modelo, prompt });
+      ultimo = await lanzarAgente(cfg, { story_id: storyId, iteration: iteracion, intento, modelo, prompt });
       intentos.push({ intento, modelo: modelo || null, exit_code: ultimo.codigo, error: ultimo.error });
       registrar(cfg, {
         evento: 'agente',
@@ -1127,6 +1255,20 @@ const main = async () => {
       await anotarTarea(cfg, `intento ${intento}/${cfg.escalera.length}`
         + `${modelo ? ` con ${modelo}` : ''}: salida ${ultimo.codigo}`
         + ` en ${Math.round(ultimo.ms / 1000)} s${ultimo.error ? ` — ${ultimo.error}` : ''}`);
+
+      // Una historia cortada a mitad de paso se comporta igual que un agente que muere:
+      // el claim es idempotente y el motor vuelve a servir el mismo paso mientras el
+      // puntero siga corriendo. Así que aquí no hay nada que deshacer, sólo que parar.
+      if (ordenDeParada) {
+        await parar(cfg, {
+          motivo: `orden:${ordenDeParada.command}`,
+          detalle: 'lo pidió una persona desde el panel',
+          codigo: SALIDA.detenido,
+          fase,
+          storyId,
+          iteracion,
+        });
+      }
 
       if (ultimo.codigo === 0) break;
       if (intento === cfg.escalera.length) break; // agotados: se decide justo debajo
@@ -1179,6 +1321,108 @@ const main = async () => {
     codigo: SALIDA.tope_iteraciones,
     iteracion: cfg.maxIterations,
   });
+};
+
+// ---- modo espera ----
+//
+// Sin proyecto y sin comando de agente, el conductor no tiene nada que conducir todavía,
+// pero sí sabe a quién preguntar. En vez de morir con error de configuración, se queda
+// escuchando: la orden de arranque trae lo que falta. La identidad SÍ sigue siendo
+// obligatoria —sin ella no hay a quién preguntar— y `--project-url` sin `--agent-cmd`
+// sigue siendo error, para que una invocación mal escrita no se quede colgada en silencio.
+const esperarOrdenDeArranque = async (cfg) => {
+  log(`en espera de órdenes como '${cfg.agentName}' (sondeo cada ${ORDENES_ESPERA_MS / 1000} s)`);
+  for (;;) {
+    const orden = await siguienteOrden(cfg);
+    if (orden && orden.command === 'start') {
+      await acusarOrden(cfg, orden.id, 'acked');
+      return orden;
+    }
+    // Las órdenes de parada que lleguen sin nada corriendo se acusan y se tiran: si no,
+    // quedarían por delante de la de arranque para siempre.
+    if (orden) await acusarOrden(cfg, orden.id, 'done', 'sin nada corriendo');
+    await dormir(ORDENES_ESPERA_MS);
+  }
+};
+
+// La orden trae la configuración de ESA corrida. Se compone sobre la que ya existe en vez
+// de reemplazarla: la identidad, el diario y los avisos son del conductor, no de la orden.
+const configDeOrden = (cfg, orden) => {
+  const p = orden.payload || {};
+  const nueva = { ...cfg, esperando: false };
+  if (p.project_url) nueva.projectUrl = String(p.project_url);
+  if (p.agent_cmd) nueva.agentCmd = String(p.agent_cmd);
+  if (p.workflows) {
+    nueva.workflows = new Set(String(p.workflows).split(',').map((s) => s.trim()).filter(Boolean));
+  }
+  if (p.model_escalation) {
+    nueva.politica = resolverPolitica({ 'model-escalation': String(p.model_escalation) });
+    nueva.escalera = nueva.politica.escalera;
+  }
+
+  if (!nueva.projectUrl) throw new ErrorConfig('la orden de arranque no trae project_url');
+  if (!nueva.agentCmd) throw new ErrorConfig('la orden de arranque no trae agent_cmd');
+  if (!nueva.agentCmd.includes('{prompt_file}')) {
+    throw new ErrorConfig('el agent_cmd de la orden no contiene {prompt_file}');
+  }
+  if (nueva.escalera.some(Boolean) && !nueva.agentCmd.includes('{model}')) {
+    throw new ErrorConfig('la orden pide escalado de modelo pero su agent_cmd no contiene {model}');
+  }
+  return nueva;
+};
+
+const main = async () => {
+  const args = parsearArgs(process.argv.slice(2));
+  if (args.help || args.h) { process.stdout.write(AYUDA); return; }
+
+  // Antes de componer nada: la identidad y la política de modelo pueden venir de ahí.
+  const envCargado = cargarEnv(args.dotenv);
+
+  // Sin un solo argumento, la intención es la del anotador: conectarse y esperar. Con
+  // argumentos hay que pedirlo con `--daemon`, para no convertir un error de escritura en
+  // un proceso que se queda quieto sin decir por qué.
+  const esperando = Boolean(args.daemon) || process.argv.slice(2).length === 0;
+
+  const cfg = construirConfig(args, { esperando });
+  cfg.envFile = envCargado;
+  cfgActual = cfg;
+  const plantillaPrompt = typeof args['prompt-file'] === 'string'
+    ? fs.readFileSync(args['prompt-file'], 'utf8')
+    : PROMPT_POR_DEFECTO;
+
+  if (!esperando) {
+    await conducir(cfg, plantillaPrompt);
+    return;
+  }
+
+  if (envCargado) log(`entorno cargado de ${envCargado}`);
+  for (;;) {
+    const orden = await esperarOrdenDeArranque(cfg);
+    let corrida;
+    try {
+      corrida = configDeOrden(cfg, orden);
+    } catch (error) {
+      log(`orden de arranque rechazada: ${error.message}`);
+      await acusarOrden(cfg, orden.id, 'cancelled', error.message);
+      continue;
+    }
+
+    cfgActual = corrida;
+    try {
+      await conducir(corrida, plantillaPrompt);
+    } catch (error) {
+      // En espera, una parada no termina el proceso: termina esa corrida. Es lo que hace
+      // que pausar y volver a arrancar desde el panel sea una sola sesión del conductor.
+      if (!(error instanceof Parada)) throw error;
+      log(`corrida terminada (${error.motivo}); vuelvo a esperar órdenes`);
+    }
+    await acusarOrden(cfg, orden.id, 'done');
+    // La tarea de la corrida anterior ya se cerró en `parar`; el puntero no debe viajar a
+    // la siguiente.
+    tareaActual = null;
+    ordenDeParada = null;
+    cfgActual = cfg;
+  }
 };
 
 main().catch(async (error) => {

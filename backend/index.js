@@ -2386,7 +2386,14 @@ const integrationArtifacts = {
     // Escribe una relación donde antes no escribía ninguna. Contra un APTS anterior al
     // campo el esquema lo descartaría en silencio y la tarea quedaría ligada, que es
     // justo lo que se evita; por eso el conductor comprueba la respuesta y avisa.
-    artifactVersion: '1.4.0',
+    // 1.5.0: lanza al agente con `spawn` en vez de `spawnSync`, y eso cambia tres cosas
+    // observables a la vez: late mientras el agente trabaja (la tarea ya no se marca
+    // `stalled` en las historias largas), copia su diario a APTS, y obedece órdenes del
+    // panel —detener, pausar— matando el árbol de procesos del agente. Además, sin
+    // `--project-url` ni `--agent-cmd` ya no falla: espera órdenes (`--daemon`). Un
+    // cliente que se quedara con la 1.4.0 conserva un conductor que no se puede parar
+    // desde ningún sitio, así que el bump es lo que le permite enterarse.
+    artifactVersion: '1.5.0',
     kind: 'loop_conductor',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -2405,7 +2412,9 @@ const integrationArtifacts = {
     // 1.2.0: documenta el registro de la ejecución en APTS y `--no-task-log`.
     // 1.3.0: documenta `{task_id}` y por qué la tarea del conductor no se liga al item.
     // 1.4.0: documenta `owns_backlog_item` y la diferencia entre asociar y poseer.
-    artifactVersion: '1.4.0',
+    // 1.5.0: documenta el latido durante la ejecución, el diario en APTS
+    // (`--no-journal-remote`), las órdenes desde el panel y el modo espera (`--daemon`).
+    artifactVersion: '1.5.0',
     kind: 'loop_conductor_manual',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -5294,6 +5303,62 @@ app.post('/api/conductor/journal', apiLimiter, authenticateAgent, async (req, re
   }
 });
 
+// ---- Órdenes para el conductor ----
+// Buzón, no canal en vivo: el conductor pregunta cada diez segundos. Mismas dos razones
+// que el diario para no ser operación MCP —no es del método y no la llama un agente— y
+// una más: el panel también escribe aquí, y el panel va por sesión, no por clave.
+const CONDUCTOR_COMMANDS = ['start', 'stop', 'pause', 'resume'];
+const CONDUCTOR_ORDER_STATUSES = ['pending', 'acked', 'done', 'cancelled'];
+
+app.get('/api/conductor/orders/next', apiLimiter, authenticateAgent, async (req, res) => {
+  const agentName = String(req.query.agent_name || req.headers['x-apts-agent-name'] || '').trim();
+  if (!agentName) return res.status(400).json({ error: 'agent_name is required' });
+
+  try {
+    const order = await db('conductor_orders')
+      .where({ agent_name: agentName, status: 'pending' })
+      .orderBy('created_at', 'asc')
+      .first();
+
+    return res.json({ order: order || null });
+  } catch (error) {
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to read conductor orders',
+      logMessage: 'conductor_orders_next failed',
+      logContext: { agent_name: agentName }
+    });
+  }
+});
+
+app.post('/api/conductor/orders/:id/ack', apiLimiter, authenticateAgent, async (req, res) => {
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const status = String(body.status || 'acked').trim();
+  if (!CONDUCTOR_ORDER_STATUSES.includes(status)) {
+    return res.status(400).json({ error: `status must be one of: ${CONDUCTOR_ORDER_STATUSES.join(', ')}` });
+  }
+
+  try {
+    const updated = await db('conductor_orders')
+      .where({ id: req.params.id })
+      .update({
+        status,
+        detail: typeof body.detail === 'string' ? body.detail : null,
+        acked_at: db.fn.now(),
+        updated_at: db.fn.now()
+      })
+      .returning('*');
+
+    if (!updated.length) return res.status(404).json({ error: 'Order not found' });
+    return res.json({ order: updated[0] });
+  } catch (error) {
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to acknowledge conductor order',
+      logMessage: 'conductor_orders_ack failed',
+      logContext: { order_id: req.params.id }
+    });
+  }
+});
+
 // Skill 5: heartbeat
 app.post('/api/tasks/:id/heartbeat', apiLimiter, authenticateAgent, async (req, res) => {
   const parsedParams = taskIdParamSchema.safeParse(req.params || {});
@@ -5702,6 +5767,85 @@ app.put('/api/dashboard/projects/:url/method-conduction', requireAuth, async (re
     return sendApiError(res, error, {
       fallbackMessage: 'Failed to write method conduction',
       logMessage: 'Dashboard method conduction write failed',
+      logContext: { project_url: req.params.url }
+    });
+  }
+});
+
+// El panel escribe las órdenes y lee el estado. No hay estado propio que mantener: lo que
+// se muestra se deduce de lo que el conductor ya deja —su tarea abierta y las filas de
+// diario— más la última orden que se le mandó. Un estado guardado aparte sería una segunda
+// versión de la verdad que se desincronizaría en cuanto alguien matara el proceso a mano.
+app.post('/api/dashboard/conductor/orders', requireAuth, async (req, res) => {
+  const body = req.body && typeof req.body === 'object' ? req.body : {};
+  const command = String(body.command || '').trim();
+  const agentName = String(body.agent_name || '').trim();
+
+  if (!CONDUCTOR_COMMANDS.includes(command)) {
+    return res.status(400).json({ error: `command must be one of: ${CONDUCTOR_COMMANDS.join(', ')}` });
+  }
+  if (!agentName) return res.status(400).json({ error: 'agent_name is required' });
+
+  try {
+    const projectUrl = body.project_url ? normalizeUrl(String(body.project_url)) : null;
+    if (projectUrl) {
+      const project = await db('projects').where({ url: projectUrl }).first();
+      if (!project) return res.status(404).json({ error: 'Project not found' });
+    }
+
+    const [order] = await db('conductor_orders').insert({
+      project_url: projectUrl,
+      agent_name: agentName,
+      command,
+      payload: body.payload == null ? null : JSON.stringify(body.payload)
+    }).returning('*');
+
+    return res.json({ order });
+  } catch (error) {
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to create conductor order',
+      logMessage: 'Dashboard conductor order create failed',
+      logContext: { agent_name: agentName, command }
+    });
+  }
+});
+
+app.get('/api/dashboard/projects/:url/conductor', requireAuth, async (req, res) => {
+  try {
+    const url = normalizeUrl(decodeURIComponent(req.params.url));
+    if (!url) return res.status(400).json({ error: 'Project url is required' });
+
+    const agentName = String(req.query.agent_name || '').trim();
+
+    const orders = await db('conductor_orders')
+      .where((builder) => {
+        builder.where({ project_url: url });
+        if (agentName) builder.orWhere({ agent_name: agentName });
+      })
+      .orderBy('created_at', 'desc')
+      .limit(10);
+
+    const journal = await db('agent_logs')
+      .join('tasks', 'agent_logs.task_id', 'tasks.id')
+      .where('tasks.project_url', url)
+      .where('agent_logs.action_type', 'journal')
+      .orderBy('agent_logs.created_at', 'desc')
+      .limit(10)
+      .select('agent_logs.*', 'tasks.title as task_title');
+
+    const activeTask = agentName
+      ? await db('tasks')
+        .where({ project_url: url, agent_name: agentName })
+        .whereIn('status', ['todo', 'in_progress', 'review'])
+        .orderBy('updated_at', 'desc')
+        .first()
+      : null;
+
+    return res.json({ project_url: url, agent_name: agentName || null, orders, journal, active_task: activeTask || null });
+  } catch (error) {
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to read conductor state',
+      logMessage: 'Dashboard conductor state read failed',
       logContext: { project_url: req.params.url }
     });
   }
