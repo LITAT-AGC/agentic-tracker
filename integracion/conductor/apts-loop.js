@@ -107,6 +107,9 @@ Frenos:
   --no-task-log           APTS_LOOP_NO_TASK_LOG=1
                           no abrir una tarea por unidad en APTS. Por defecto SÍ se abre:
                           es el único rastro de la ejecución que no vive en este disco.
+  --no-journal-remote     APTS_LOOP_NO_JOURNAL_REMOTE=1
+                          no copiar los eventos del diario a APTS. Por defecto SÍ se
+                          copian —los que se ven desde fuera— colgados de esa misma tarea.
 
 Avisos al parar:
   --telegram-chat-id ID   APTS_LOOP_TELEGRAM_CHAT_ID   a quién avisar
@@ -488,13 +491,54 @@ const huella = (estado) => {
 
 // ---- diario ----
 
+// Los eventos que dicen algo desde fuera. El resto —`dry_run`, `tarea_ligada`,
+// `telegram`, `reintento_innecesario`— es contabilidad interna del bucle y se queda en el
+// archivo: llenar la tabla de logs de un proyecto con ella taparía lo que sí importa.
+const EVENTOS_REMOTOS = new Set([
+  'arranque', 'estado', 'agente', 'reintento_red', 'tarea_fallo', 'parada', 'cierre',
+]);
+
+// El diario tiene dos destinos y sólo uno es la fuente de verdad. El archivo local se
+// escribe siempre y de forma síncrona; la copia en APTS es un intento y nada más: sin
+// reintentos, con plazo corto y tragándose cualquier error. Si el servidor está caído, el
+// bucle no se entera —es el mismo principio que ya rige el registro de la ejecución: que
+// APTS no vea una vuelta no puede ser el motivo de que la vuelta no ocurra.
+const enviarDiario = (cfg, evento) => {
+  if (cfg.sinDiarioRemoto || !tareaActual) return;
+  if (!EVENTOS_REMOTOS.has(evento.evento)) return;
+
+  const url = new URL('/api/conductor/journal', cfg.mcpUrl).toString();
+  const mensaje = `${evento.evento}: ${JSON.stringify(evento).slice(0, 400)}`;
+
+  fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${cfg.apiKey}`,
+      'X-APTS-Project-Url': cfg.projectUrl,
+      'X-APTS-Agent-Name': cfg.agentName,
+      'X-APTS-Agent-Email': cfg.agentEmail,
+    },
+    body: JSON.stringify({ task_id: tareaActual.id, message: mensaje, event: evento }),
+    signal: AbortSignal.timeout(5000),
+  }).catch(() => {});
+};
+
 const registrar = (cfg, evento) => {
-  if (!cfg.journal) return;
+  if (cfg.journal) {
+    try {
+      fs.mkdirSync(path.dirname(cfg.journal), { recursive: true });
+      fs.appendFileSync(cfg.journal, `${JSON.stringify({ ts: new Date().toISOString(), ...evento })}\n`, 'utf8');
+    } catch (error) {
+      log(`aviso: no se pudo escribir el diario (${error.message})`);
+    }
+  }
+  // Fuera del try de arriba a propósito: que el archivo local falle no debe impedir el
+  // envío, ni al revés.
   try {
-    fs.mkdirSync(path.dirname(cfg.journal), { recursive: true });
-    fs.appendFileSync(cfg.journal, `${JSON.stringify({ ts: new Date().toISOString(), ...evento })}\n`, 'utf8');
-  } catch (error) {
-    log(`aviso: no se pudo escribir el diario (${error.message})`);
+    enviarDiario(cfg, evento);
+  } catch (_error) {
+    // Ni siquiera se avisa: es el destino prescindible de los dos.
   }
 };
 
@@ -817,6 +861,9 @@ const construirConfig = (args) => {
     // negativo —el registro está puesto por defecto— porque una ejecución sin rastro es
     // el problema que esto vino a arreglar, no una preferencia neutral.
     sinTarea: Boolean(args['no-task-log']) || String(process.env.APTS_LOOP_NO_TASK_LOG || '').trim() === '1',
+    // Misma forma que la anterior y por el mismo motivo: el diario en APTS está puesto
+    // por defecto porque una ejecución sin rastro es el problema, no la preferencia.
+    sinDiarioRemoto: Boolean(args['no-journal-remote']) || String(process.env.APTS_LOOP_NO_JOURNAL_REMOTE || '').trim() === '1',
     workflows: new Set(String(args.workflows || 'bmad-dev-story').split(',').map((s) => s.trim()).filter(Boolean)),
   };
 

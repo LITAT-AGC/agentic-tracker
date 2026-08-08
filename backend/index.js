@@ -26,7 +26,9 @@ const {
   aptsSubmitStep,
   methodStatus,
   setMethodStatus,
-  STORY_METHOD_STATUSES
+  STORY_METHOD_STATUSES,
+  resolveEntityProfile,
+  ENTITY_PROFILE_FIELDS
 } = require('./scripts/lib/method_resolver');
 const { createInitiative, setAgentRole } = require('./scripts/lib/method_bootstrap');
 // Deuda de que esto cierra: la llamada de embedding estaba implementada dos
@@ -2583,6 +2585,89 @@ const METHOD_CONDUCTION = {
 };
 
 
+// ---- Reglas de conduccion por proyecto ----
+// `METHOD_CONDUCTION` es la fuente autoritativa y sigue siendolo: el override no la
+// reemplaza, la pisa campo a campo para el proyecto que lo pide. Se guarda en `config`,
+// con el mismo patron que las restricciones del proyecto, porque es lo mismo —una
+// preferencia por proyecto sobre algo global— y no merece tabla propia.
+const METHOD_CONDUCTION_CONFIG_PREFIX = 'method_conduction:';
+const METHOD_CONDUCTION_FIELDS = Object.keys(METHOD_CONDUCTION);
+
+const getMethodConductionOverride = async (projectUrl, { connection = db } = {}) => {
+  if (!projectUrl) return {};
+  const hasConfigTable = await connection.schema.hasTable('config');
+  if (!hasConfigTable) return {};
+
+  const row = await connection('config')
+    .where({ key: `${METHOD_CONDUCTION_CONFIG_PREFIX}${projectUrl}` })
+    .first();
+
+  const stored = parseJsonObjectOrEmpty(row?.value);
+  const override = {};
+  for (const field of METHOD_CONDUCTION_FIELDS) {
+    if (typeof stored[field] === 'string' && stored[field].trim() !== '') {
+      override[field] = stored[field];
+    }
+  }
+  return override;
+};
+
+const parseMethodConductionPatch = (body = {}) => {
+  const source = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+  const unknown = Object.keys(source)
+    .filter((key) => !METHOD_CONDUCTION_FIELDS.includes(key) && key !== 'url' && key !== 'project_url');
+  if (unknown.length) {
+    throw createHttpError(
+      400,
+      `Unknown method_conduction field(s): ${unknown.join(', ')}. Valid fields: ${METHOD_CONDUCTION_FIELDS.join(', ')}`
+    );
+  }
+
+  const patch = {};
+  for (const field of METHOD_CONDUCTION_FIELDS) {
+    if (!(field in source)) continue;
+    const value = source[field];
+    if (value === null) {
+      patch[field] = null;
+      continue;
+    }
+    if (typeof value !== 'string') {
+      throw createHttpError(400, `${field} must be a string or null`);
+    }
+    patch[field] = value.trim() === '' ? null : value;
+  }
+
+  if (!Object.keys(patch).length) {
+    throw createHttpError(400, `At least one field is required: ${METHOD_CONDUCTION_FIELDS.join(', ')}`);
+  }
+
+  return patch;
+};
+
+const setMethodConductionOverride = async (projectUrl, patch, { connection = db } = {}) => {
+  const project = await connection('projects').where({ url: projectUrl }).first();
+  if (!project) {
+    throw createHttpError(404, 'Project not found');
+  }
+
+  const key = `${METHOD_CONDUCTION_CONFIG_PREFIX}${projectUrl}`;
+  const existing = await connection('config').where({ key }).first();
+  const merged = { ...parseJsonObjectOrEmpty(existing?.value), ...patch };
+  // Un null borra la clave en vez de guardarla: aqui no hay nada debajo que tapar, solo
+  // la constante, y una clave presente en null solo confundiria al siguiente lector.
+  for (const field of METHOD_CONDUCTION_FIELDS) {
+    if (merged[field] === null) delete merged[field];
+  }
+  const value = JSON.stringify(merged);
+
+  await connection('config')
+    .insert({ key, value, updated_at: connection.fn.now() })
+    .onConflict('key')
+    .merge({ value, updated_at: connection.fn.now() });
+
+  return getMethodConductionOverride(projectUrl, { connection });
+};
+
 const normalizeManifestRuntime = (runtime) => {
   if (typeof runtime !== 'string') return null;
 
@@ -2606,8 +2691,14 @@ const isArtifactRuntimeCompatible = (artifact, activeRuntime) => {
   return String(artifact.runtime).toLowerCase() === activeRuntime;
 };
 
-const buildIntegrationManifest = (req) => {
+// `methodConductionOverride`: lo que el proyecto nombrado en `?project_url=` haya pisado.
+// Sin ese parametro la respuesta es la de siempre, clave por clave, y por eso
+// `schema_version` no se mueve: no hay ninguna clave nueva que anunciar.
+const buildIntegrationManifest = (req, methodConductionOverride = null) => {
   const activeRuntime = normalizeManifestRuntime(req.query.runtime);
+  const methodConduction = methodConductionOverride && Object.keys(methodConductionOverride).length
+    ? { ...METHOD_CONDUCTION, ...methodConductionOverride }
+    : METHOD_CONDUCTION;
 
   return {
     service: 'APTS',
@@ -2816,7 +2907,7 @@ const buildIntegrationManifest = (req) => {
     entrypoint: buildAbsoluteUrl(req, publicIntegrationBasePath),
     api_base_url: buildAbsoluteUrl(req, '/api'),
     mcp_endpoint: buildMcpEndpoint(req),
-    method_conduction: METHOD_CONDUCTION,
+    method_conduction: methodConduction,
     auth: {
       type: 'bearer',
       header: 'Authorization',
@@ -2933,8 +3024,22 @@ const sendIntegrationArtifact = async (req, res, artifactKey) => {
   }
 };
 
-app.get(publicIntegrationBasePath, (req, res) => {
-  res.json(buildIntegrationManifest(req));
+app.get(publicIntegrationBasePath, async (req, res) => {
+  // El manifiesto es publico y sin identidad, asi que el proyecto —si lo hay— viaja en la
+  // consulta. Un `project_url` desconocido no es un error: se sirve lo global, que es lo
+  // que ese cliente habria recibido de todos modos.
+  const projectUrl = typeof req.query.project_url === 'string' && req.query.project_url.trim()
+    ? normalizeUrl(req.query.project_url.trim())
+    : null;
+
+  let override = null;
+  try {
+    override = projectUrl ? await getMethodConductionOverride(projectUrl) : null;
+  } catch (error) {
+    logger.warn({ err: error, project_url: projectUrl }, 'method_conduction override read failed');
+  }
+
+  res.json(buildIntegrationManifest(req, override));
 });
 
 app.get(`${publicIntegrationBasePath}/skills.json`, async (req, res) => sendIntegrationArtifact(req, res, 'skills_json'));
@@ -3324,7 +3429,7 @@ const updateTaskStatusInternal = async (taskId, payload, { connection = db, defe
   return { success: true, task_id: taskId, status };
 };
 
-const logAgentProgressInternal = async (taskId, payload, { connection = db } = {}) => {
+const logAgentProgressInternal = async (taskId, payload, { connection = db, actionType = null } = {}) => {
   const {
     agent_name: agentName,
     branch,
@@ -3351,6 +3456,7 @@ const logAgentProgressInternal = async (taskId, payload, { connection = db } = {
     task_id: taskId,
     agent_name: agentName || null,
     branch,
+    action_type: actionType,
     message,
     technical_details: serializedTechnicalDetails
   }).returning('*');
@@ -5151,6 +5257,43 @@ app.post('/api/projects/blockers', apiLimiter, authenticateAgent, async (req, re
   }
 });
 
+// ---- Diario del conductor ----
+// El conductor escribe un JSONL local con cada decision que toma y ese archivo vive en la
+// maquina de quien lo corre: desde APTS, una ejecucion desatendida era una tarea que
+// cambiaba de estado sin que constara por que. Esta ruta le da un segundo destino.
+//
+// No es operacion MCP a proposito: no es del metodo ni la llama un agente, la llama el
+// programa que conduce. Meterla en el contrato subiria la superficie que todo cliente ve
+// para algo que solo usa el conductor.
+//
+// `task_id` es obligatorio porque el listado del panel une `agent_logs` con `tasks` para
+// saber de que proyecto es cada fila: una fila sin tarea seria invisible, y escribir algo
+// que nadie puede leer es peor que no escribirlo.
+app.post('/api/conductor/journal', apiLimiter, authenticateAgent, async (req, res) => {
+  const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+  const taskId = typeof body.task_id === 'string' ? body.task_id.trim() : '';
+  const message = typeof body.message === 'string' ? body.message.trim() : '';
+
+  if (!taskId) return res.status(400).json({ error: 'task_id is required' });
+  if (!message) return res.status(400).json({ error: 'message is required' });
+
+  try {
+    const logged = await logAgentProgressInternal(taskId, {
+      agent_name: body.agent_name || req.headers['x-apts-agent-name'] || null,
+      message,
+      technical_details: body.event === undefined ? null : body.event
+    }, { actionType: 'journal' });
+
+    return res.json(logged);
+  } catch (routeError) {
+    return sendApiError(res, routeError, {
+      fallbackMessage: 'Failed to record conductor journal entry',
+      logMessage: 'conductor_journal failed',
+      logContext: { task_id: taskId }
+    });
+  }
+});
+
 // Skill 5: heartbeat
 app.post('/api/tasks/:id/heartbeat', apiLimiter, authenticateAgent, async (req, res) => {
   const parsedParams = taskIdParamSchema.safeParse(req.params || {});
@@ -5340,6 +5483,225 @@ app.put('/api/dashboard/projects/:url/constraints', requireAuth, async (req, res
     return sendApiError(res, error, {
       fallbackMessage: 'Failed to write project constraints',
       logMessage: 'Dashboard project constraints write failed',
+      logContext: { project_url: req.params.url }
+    });
+  }
+});
+
+// ---- Roster del metodo, editable ----
+// La biblioteca BMAD (`entities`) es de solo lectura a proposito: la siembra el corpus y
+// el seed la reescribe. Lo editable vive en `entity_overrides`, con '*' por ambito global
+// y la URL del proyecto por ambito particular; asi re-sembrar el metodo no borra nada de
+// lo que escriba una persona desde el panel.
+const ENTITY_OVERRIDE_GLOBAL_SCOPE = '*';
+
+const parseEntityOverridePatch = (body = {}) => {
+  const source = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+  const unknown = Object.keys(source).filter((key) => !ENTITY_PROFILE_FIELDS.includes(key));
+  if (unknown.length) {
+    throw createHttpError(
+      400,
+      `Unknown entity field(s): ${unknown.join(', ')}. Valid fields: ${ENTITY_PROFILE_FIELDS.join(', ')}`
+    );
+  }
+
+  const patch = {};
+  for (const field of ENTITY_PROFILE_FIELDS) {
+    if (!(field in source)) continue;
+    const value = source[field];
+    if (value === null) {
+      patch[field] = null;
+      continue;
+    }
+    if (typeof value !== 'string') {
+      throw createHttpError(400, `${field} must be a string or null`);
+    }
+    // Vacio es heredar, no "pisar con vacio": no hay forma de querer que un agente no
+    // tenga persona, y si la hubiera se expresaria borrandola en la biblioteca.
+    patch[field] = value.trim() === '' ? null : value;
+  }
+
+  if (!Object.keys(patch).length) {
+    throw createHttpError(400, `At least one field is required: ${ENTITY_PROFILE_FIELDS.join(', ')}`);
+  }
+
+  return patch;
+};
+
+const setEntityOverride = async (scope, entityKey, patch) => {
+  const entity = await db('entities').where({ key: entityKey }).first('key');
+  if (!entity) {
+    throw createHttpError(404, `Unknown entity key: ${entityKey}`);
+  }
+
+  const existing = await db('entity_overrides')
+    .where({ scope_project_url: scope, entity_key: entityKey })
+    .first();
+  const merged = { ...(existing || {}), ...patch };
+
+  const row = {};
+  for (const field of ENTITY_PROFILE_FIELDS) {
+    row[field] = merged[field] == null ? null : merged[field];
+  }
+
+  const empty = ENTITY_PROFILE_FIELDS.every((field) => row[field] === null);
+  if (empty) {
+    // Un override sin ningun campo no dice nada: se borra la fila en vez de dejarla
+    // vacia, para que "no hay override" sea un solo estado y no dos.
+    await db('entity_overrides').where({ scope_project_url: scope, entity_key: entityKey }).del();
+    return null;
+  }
+
+  await db('entity_overrides')
+    .insert({ scope_project_url: scope, entity_key: entityKey, ...row, updated_at: db.fn.now() })
+    .onConflict(['scope_project_url', 'entity_key'])
+    .merge({ ...row, updated_at: db.fn.now() });
+
+  return db('entity_overrides').where({ scope_project_url: scope, entity_key: entityKey }).first();
+};
+
+const listRoster = async (projectUrl = null) => {
+  const entities = await db('entities')
+    .where({ kind: 'role' })
+    .orderBy('key')
+    .select('key', 'name', 'source_ref', ...ENTITY_PROFILE_FIELDS.filter((field) => field !== 'name'));
+
+  const scopes = projectUrl ? [ENTITY_OVERRIDE_GLOBAL_SCOPE, projectUrl] : [ENTITY_OVERRIDE_GLOBAL_SCOPE];
+  const overrides = await db('entity_overrides').whereIn('scope_project_url', scopes);
+
+  const agents = [];
+  for (const entity of entities) {
+    agents.push({
+      key: entity.key,
+      source_ref: entity.source_ref,
+      library: Object.fromEntries(ENTITY_PROFILE_FIELDS.map((field) => [field, entity[field] ?? null])),
+      global_override: overrides.find(
+        (row) => row.entity_key === entity.key && row.scope_project_url === ENTITY_OVERRIDE_GLOBAL_SCOPE
+      ) || null,
+      project_override: projectUrl
+        ? overrides.find((row) => row.entity_key === entity.key && row.scope_project_url === projectUrl) || null
+        : null,
+      // Lo efectivo es lo que recibe el agente: la misma funcion que usa el motor.
+      effective: await resolveEntityProfile(db, entity.key, projectUrl)
+    });
+  }
+
+  const workflows = await db('workflow_definitions')
+    .orderBy(['phase', 'key'])
+    .select('key', 'phase', 'status', 'source_ref');
+
+  return { agents, workflows };
+};
+
+app.get('/api/dashboard/roster', requireAuth, async (req, res) => {
+  try {
+    return res.json(await listRoster());
+  } catch (error) {
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to load roster',
+      logMessage: 'Dashboard roster read failed'
+    });
+  }
+});
+
+app.put('/api/dashboard/roster/entities/:key', requireAuth, async (req, res) => {
+  try {
+    const override = await setEntityOverride(
+      ENTITY_OVERRIDE_GLOBAL_SCOPE,
+      String(req.params.key || '').trim(),
+      parseEntityOverridePatch(req.body)
+    );
+    return res.json({
+      entity_key: req.params.key,
+      override,
+      effective: await resolveEntityProfile(db, String(req.params.key || '').trim(), null)
+    });
+  } catch (error) {
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to write entity override',
+      logMessage: 'Dashboard entity override write failed',
+      logContext: { entity_key: req.params.key }
+    });
+  }
+});
+
+app.get('/api/dashboard/projects/:url/roster', requireAuth, async (req, res) => {
+  try {
+    const url = normalizeUrl(decodeURIComponent(req.params.url));
+    if (!url) return res.status(400).json({ error: 'Project url is required' });
+
+    return res.json(await listRoster(url));
+  } catch (error) {
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to load project roster',
+      logMessage: 'Dashboard project roster read failed',
+      logContext: { project_url: req.params.url }
+    });
+  }
+});
+
+app.put('/api/dashboard/projects/:url/roster/:key', requireAuth, async (req, res) => {
+  try {
+    const url = normalizeUrl(decodeURIComponent(req.params.url));
+    if (!url) return res.status(400).json({ error: 'Project url is required' });
+
+    const project = await db('projects').where({ url }).first();
+    if (!project) return res.status(404).json({ error: 'Project not found' });
+
+    const entityKey = String(req.params.key || '').trim();
+    const override = await setEntityOverride(url, entityKey, parseEntityOverridePatch(req.body));
+    return res.json({
+      project_url: url,
+      entity_key: entityKey,
+      override,
+      effective: await resolveEntityProfile(db, entityKey, url)
+    });
+  } catch (error) {
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to write project entity override',
+      logMessage: 'Dashboard project entity override write failed',
+      logContext: { project_url: req.params.url, entity_key: req.params.key }
+    });
+  }
+});
+
+app.get('/api/dashboard/projects/:url/method-conduction', requireAuth, async (req, res) => {
+  try {
+    const url = normalizeUrl(decodeURIComponent(req.params.url));
+    if (!url) return res.status(400).json({ error: 'Project url is required' });
+
+    const override = await getMethodConductionOverride(url);
+    return res.json({
+      project_url: url,
+      defaults: METHOD_CONDUCTION,
+      override,
+      effective: { ...METHOD_CONDUCTION, ...override }
+    });
+  } catch (error) {
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to read method conduction',
+      logMessage: 'Dashboard method conduction read failed',
+      logContext: { project_url: req.params.url }
+    });
+  }
+});
+
+app.put('/api/dashboard/projects/:url/method-conduction', requireAuth, async (req, res) => {
+  try {
+    const url = normalizeUrl(decodeURIComponent(req.params.url));
+    if (!url) return res.status(400).json({ error: 'Project url is required' });
+
+    const override = await setMethodConductionOverride(url, parseMethodConductionPatch(req.body));
+    return res.json({
+      project_url: url,
+      defaults: METHOD_CONDUCTION,
+      override,
+      effective: { ...METHOD_CONDUCTION, ...override }
+    });
+  } catch (error) {
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to write method conduction',
+      logMessage: 'Dashboard method conduction write failed',
       logContext: { project_url: req.params.url }
     });
   }

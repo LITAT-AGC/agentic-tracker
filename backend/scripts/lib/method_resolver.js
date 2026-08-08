@@ -275,6 +275,54 @@ const entityKey = async (db, entityId) => {
   return row ? row.key : null;
 };
 
+// ---- Perfil del agente ----
+// La biblioteca guarda persona, principios, estilo e instruccion de cada agente desde el
+// primer dia, y hasta ahora no las leia nadie: el paso servido llevaba `role` y `role` era
+// solo la CLAVE de la entity. Editar un agente no cambiaba nada observable, que es lo que
+// hacia inutil cualquier editor.
+//
+// La lectura pasa por aqui y por ningun otro sitio, para que la mezcla —corpus, override
+// global ('*'), override del proyecto— sea una sola regla. Un campo nulo hereda; el
+// override incompleto es la forma normal de usarlo.
+//
+// `requireOverride`: el perfil del corpus pesa unos 650 caracteres por agente y hasta hoy
+// no viajaba. Mandarlo en cada paso servido seria un gasto de contexto que nadie pidio, y
+// el motor no lo necesita para nada. Asi que al agente solo se le manda el perfil de un
+// agente que alguien EDITO —que es justo el caso en que la edicion tiene que notarse—; sin
+// override, el payload sale byte a byte como salia antes. El panel, que si quiere ver lo
+// efectivo siempre, llama sin la opcion.
+const ENTITY_PROFILE_FIELDS = ['name', 'persona', 'principles', 'communication_style', 'instruction'];
+
+const resolveEntityProfile = async (db, key, projectUrl, { requireOverride = false } = {}) => {
+  if (!key) return null;
+  const base = await db('entities').where({ key }).first(...ENTITY_PROFILE_FIELDS);
+  if (!base) return null;
+
+  const hasOverrides = await db.schema.hasTable('entity_overrides');
+  const scopes = projectUrl ? ['*', projectUrl] : ['*'];
+  const overrides = hasOverrides
+    ? await db('entity_overrides').where({ entity_key: key }).whereIn('scope_project_url', scopes)
+    : [];
+
+  // El global primero y el del proyecto despues, para que el segundo gane.
+  const ordered = ['*', projectUrl]
+    .map((scope) => overrides.find((row) => row.scope_project_url === scope))
+    .filter(Boolean);
+
+  if (requireOverride && !ordered.length) return null;
+
+  const profile = {};
+  for (const field of ENTITY_PROFILE_FIELDS) {
+    let value = base[field] == null ? null : base[field];
+    for (const row of ordered) {
+      if (row[field] != null) value = row[field];
+    }
+    if (value != null && String(value).trim() !== '') profile[field] = value;
+  }
+
+  return Object.keys(profile).length ? profile : null;
+};
+
 // ---- Reparto multi-agente sin colisión (dev-story iterable) ----
 // Devuelve { story_id } reclamado para el caller, o null si no quedan libres.
 // Idempotente: si el caller ya sostiene una story no-terminal, la devuelve sin rebarajar.
@@ -668,6 +716,11 @@ const buildStepPayload = async (db, ctx, {
   const stepKeys = declaresControl
     ? await db('workflow_steps').where({ workflow_id: workflow.id }).pluck('key')
     : [];
+  // El perfil viaja SOLO si alguien edito a este agente: sin override, el payload sale
+  // byte a byte como salia antes y el contexto no paga nada.
+  const roleProfile = await resolveEntityProfile(db, role, ctx.project_url, { requireOverride: true });
+  if (roleProfile) payload.role_profile = roleProfile;
+
   const controlFlow = stepControlFlow(step, stepKeys);
   if (controlFlow) payload.control_flow = controlFlow;
   if (mode === 'await_input') payload.questions = questions || [];
@@ -1095,6 +1148,8 @@ module.exports = {
   nextPhase,
   claimDevStory,
   loadRosterKeys,
+  resolveEntityProfile,
+  ENTITY_PROFILE_FIELDS,
   startPhaseGaps,
   // F3-T1.5 — navegación DAG (exportadas para tests/harness)
   resolvePhaseSpine,

@@ -492,6 +492,129 @@
             </template>
           </Card>
         </div>
+
+        <div>
+          <div class="flex items-center gap-2 mb-4">
+            <div class="w-1 h-5 bg-violet-500 rounded-full"></div>
+            <h3 class="text-lg font-bold">Agentes en este Proyecto</h3>
+          </div>
+
+          <Card class="border border-surface-200">
+            <template #content>
+              <p class="text-sm text-surface-500 mb-4">
+                Pisa el perfil de un agente solo para este proyecto. En gris, lo que hereda hoy.
+                Un campo vacío vuelve a heredar. Solo se le manda al agente el perfil de los que
+                estén editados.
+              </p>
+
+              <Message v-if="rosterError" severity="error" :closable="false" class="mb-4">{{ rosterError }}</Message>
+
+              <div v-if="rosterLoading" class="text-sm text-surface-500">Cargando agentes...</div>
+
+              <div v-else-if="projectAgents.length" class="space-y-4">
+                <label class="block space-y-2 max-w-md">
+                  <span class="block text-[11px] uppercase tracking-wider text-violet-700/70">Agente</span>
+                  <Select
+                    v-model="selectedAgentKey"
+                    :options="projectAgents"
+                    optionLabel="key"
+                    optionValue="key"
+                    class="w-full"
+                    @change="fillAgentForm"
+                  />
+                </label>
+
+                <div v-if="selectedAgent" class="space-y-4">
+                  <label v-for="field in entityProfileFields" :key="field.name" class="block space-y-2">
+                    <span class="block text-[11px] uppercase tracking-wider text-violet-700/70">{{ field.label }}</span>
+                    <InputText
+                      v-if="field.name === 'name'"
+                      v-model="agentForm[field.name]"
+                      class="w-full"
+                      :placeholder="inheritedAgentValue(field.name) || 'sin valor heredado'"
+                    />
+                    <Textarea
+                      v-else
+                      v-model="agentForm[field.name]"
+                      class="w-full"
+                      rows="3"
+                      autoResize
+                      :placeholder="inheritedAgentValue(field.name) || 'sin valor heredado'"
+                    />
+                  </label>
+
+                  <div class="flex flex-wrap items-center gap-3">
+                    <Button
+                      @click="saveAgentOverride"
+                      :loading="isSavingAgent"
+                      label="Guardar para este proyecto"
+                      severity="help"
+                      size="small"
+                    />
+                    <Button
+                      @click="loadProjectRoster"
+                      :disabled="isSavingAgent"
+                      label="Descartar"
+                      severity="secondary"
+                      outlined
+                      size="small"
+                    />
+                    <span v-if="rosterMessage" class="text-xs text-emerald-600">{{ rosterMessage }}</span>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </Card>
+        </div>
+
+        <div>
+          <div class="flex items-center gap-2 mb-4">
+            <div class="w-1 h-5 bg-teal-500 rounded-full"></div>
+            <h3 class="text-lg font-bold">Reglas de Conducción</h3>
+          </div>
+
+          <Card class="border border-surface-200">
+            <template #content>
+              <p class="text-sm text-surface-500 mb-4">
+                Lo que el manifiesto publica como <code>method_conduction</code> para este proyecto
+                (<code>?project_url=</code>). Vacío sirve la regla global.
+              </p>
+
+              <Message v-if="conductionError" severity="error" :closable="false" class="mb-4">{{ conductionError }}</Message>
+
+              <div v-if="conductionLoading" class="text-sm text-surface-500">Cargando reglas...</div>
+
+              <div v-else class="space-y-4">
+                <div v-for="field in conductionFields" :key="field" class="space-y-2">
+                  <span class="block text-[11px] uppercase tracking-wider text-teal-700/70">{{ field }}</span>
+                  <Textarea v-model="conductionForm[field]" class="w-full" rows="3" autoResize />
+                  <p class="text-[11px] text-surface-500 line-clamp-2" :title="conductionDefaults[field]">
+                    Global: {{ (conductionDefaults[field] || '').slice(0, 160) }}...
+                  </p>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-3">
+                  <Button
+                    @click="saveMethodConduction"
+                    :loading="isSavingConduction"
+                    label="Guardar reglas"
+                    severity="info"
+                    size="small"
+                  />
+                  <Button
+                    @click="loadMethodConduction"
+                    :disabled="isSavingConduction"
+                    label="Descartar"
+                    severity="secondary"
+                    outlined
+                    size="small"
+                  />
+                  <span v-if="conductionMessage" class="text-xs text-emerald-600">{{ conductionMessage }}</span>
+                </div>
+              </div>
+            </template>
+          </Card>
+        </div>
       </div>
 
       <div v-if="activeTab === 'logs'" class="space-y-8">
@@ -744,6 +867,30 @@ const isSavingConstraints = ref(false);
 const constraintsError = ref(null);
 const constraintsMessage = ref(null);
 
+// Roster del metodo por proyecto: overrides sobre la biblioteca BMAD.
+const entityProfileFields = [
+  { name: 'name', label: 'Nombre' },
+  { name: 'persona', label: 'Persona' },
+  { name: 'principles', label: 'Principios' },
+  { name: 'communication_style', label: 'Estilo de comunicación' },
+  { name: 'instruction', label: 'Instrucción' }
+];
+const projectAgents = ref([]);
+const selectedAgentKey = ref(null);
+const agentForm = ref({});
+const rosterLoading = ref(false);
+const isSavingAgent = ref(false);
+const rosterError = ref(null);
+const rosterMessage = ref(null);
+
+const conductionFields = ref([]);
+const conductionDefaults = ref({});
+const conductionForm = ref({});
+const conductionLoading = ref(false);
+const isSavingConduction = ref(false);
+const conductionError = ref(null);
+const conductionMessage = ref(null);
+
 const backlogError = ref(null);
 const isSavingBacklog = ref(false);
 const isAnalyzingBacklog = ref(false);
@@ -833,6 +980,20 @@ const resetDetails = () => {
   logFilters.value = {
     action_type: { value: [], matchMode: 'in' }
   };
+  projectAgents.value = [];
+  selectedAgentKey.value = null;
+  agentForm.value = {};
+  rosterLoading.value = false;
+  isSavingAgent.value = false;
+  rosterError.value = null;
+  rosterMessage.value = null;
+  conductionFields.value = [];
+  conductionDefaults.value = {};
+  conductionForm.value = {};
+  conductionLoading.value = false;
+  isSavingConduction.value = false;
+  conductionError.value = null;
+  conductionMessage.value = null;
   projectConstraints.value = emptyConstraints();
   constraintsLoading.value = false;
   isSavingConstraints.value = false;
@@ -941,6 +1102,145 @@ const saveProjectConstraints = async () => {
   }
 };
 
+const selectedAgent = computed(
+  () => projectAgents.value.find((agent) => agent.key === selectedAgentKey.value) || null
+);
+
+// Lo heredado es lo global mezclado con la biblioteca: lo que veria este proyecto si no
+// escribiera nada propio.
+const inheritedAgentValue = (field) => {
+  const agent = selectedAgent.value;
+  if (!agent) return '';
+  return agent.global_override?.[field] || agent.library?.[field] || '';
+};
+
+const fillAgentForm = () => {
+  const agent = selectedAgent.value;
+  agentForm.value = Object.fromEntries(
+    entityProfileFields.map(({ name }) => [name, agent?.project_override?.[name] ?? ''])
+  );
+};
+
+const loadProjectRoster = async () => {
+  const url = selectedProject.value?.url || String(route.params.projectId || '').trim();
+  if (!url) return;
+
+  rosterLoading.value = true;
+  rosterError.value = null;
+  rosterMessage.value = null;
+
+  try {
+    const { data } = await apiFetchJson(`/dashboard/projects/${encodeURIComponent(url)}/roster`, {
+      credentials: 'include'
+    }, 'No se pudo cargar el roster del proyecto.');
+
+    projectAgents.value = data.agents || [];
+    if (!projectAgents.value.some((agent) => agent.key === selectedAgentKey.value)) {
+      selectedAgentKey.value = projectAgents.value[0]?.key || null;
+    }
+    fillAgentForm();
+  } catch (error) {
+    rosterError.value = getApiErrorMessage(error, 'No se pudo cargar el roster del proyecto.');
+    console.error('Failed to load project roster', error);
+  } finally {
+    rosterLoading.value = false;
+  }
+};
+
+const saveAgentOverride = async () => {
+  const url = selectedProject.value?.url;
+  if (!url || !selectedAgentKey.value) return;
+
+  isSavingAgent.value = true;
+  rosterError.value = null;
+  rosterMessage.value = null;
+
+  try {
+    const payload = Object.fromEntries(entityProfileFields.map(({ name }) => {
+      const value = String(agentForm.value[name] ?? '').trim();
+      return [name, value === '' ? null : value];
+    }));
+
+    await apiFetchJson(
+      `/dashboard/projects/${encodeURIComponent(url)}/roster/${encodeURIComponent(selectedAgentKey.value)}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(payload)
+      },
+      'No se pudo guardar el agente para este proyecto.'
+    );
+
+    await loadProjectRoster();
+    rosterMessage.value = 'Agente guardado para este proyecto.';
+  } catch (error) {
+    rosterError.value = getApiErrorMessage(error, 'No se pudo guardar el agente para este proyecto.');
+    console.error('Failed to save project entity override', error);
+  } finally {
+    isSavingAgent.value = false;
+  }
+};
+
+const loadMethodConduction = async () => {
+  const url = selectedProject.value?.url || String(route.params.projectId || '').trim();
+  if (!url) return;
+
+  conductionLoading.value = true;
+  conductionError.value = null;
+  conductionMessage.value = null;
+
+  try {
+    const { data } = await apiFetchJson(`/dashboard/projects/${encodeURIComponent(url)}/method-conduction`, {
+      credentials: 'include'
+    }, 'No se pudieron cargar las reglas de conducción.');
+
+    conductionDefaults.value = data.defaults || {};
+    conductionFields.value = Object.keys(conductionDefaults.value);
+    conductionForm.value = Object.fromEntries(
+      conductionFields.value.map((field) => [field, data.override?.[field] ?? ''])
+    );
+  } catch (error) {
+    conductionError.value = getApiErrorMessage(error, 'No se pudieron cargar las reglas de conducción.');
+    console.error('Failed to load method conduction', error);
+  } finally {
+    conductionLoading.value = false;
+  }
+};
+
+const saveMethodConduction = async () => {
+  const url = selectedProject.value?.url;
+  if (!url) return;
+
+  isSavingConduction.value = true;
+  conductionError.value = null;
+  conductionMessage.value = null;
+
+  try {
+    const payload = Object.fromEntries(conductionFields.value.map((field) => {
+      const value = String(conductionForm.value[field] ?? '').trim();
+      return [field, value === '' ? null : value];
+    }));
+
+    const { data } = await apiFetchJson(`/dashboard/projects/${encodeURIComponent(url)}/method-conduction`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(payload)
+    }, 'No se pudieron guardar las reglas de conducción.');
+
+    conductionForm.value = Object.fromEntries(
+      conductionFields.value.map((field) => [field, data.override?.[field] ?? ''])
+    );
+    conductionMessage.value = 'Reglas guardadas.';
+  } catch (error) {
+    conductionError.value = getApiErrorMessage(error, 'No se pudieron guardar las reglas de conducción.');
+    console.error('Failed to save method conduction', error);
+  } finally {
+    isSavingConduction.value = false;
+  }
+};
+
 const fetchProjectDetails = async (url) => {
   backlogError.value = null;
 
@@ -987,6 +1287,8 @@ const loadProject = async () => {
 
     await fetchProjectDetails(routeProjectId);
     await loadProjectConstraints();
+    await loadProjectRoster();
+    await loadMethodConduction();
     await fetchSemanticStatus(routeProjectId);
   } catch (error) {
     loadError.value = error.message;

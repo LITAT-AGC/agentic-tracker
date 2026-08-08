@@ -30,6 +30,11 @@ const routes = [
         component: () => import('../views/ProjectDetails.vue')
       },
       {
+        path: 'roster',
+        name: 'Roster',
+        component: () => import('../views/Roster.vue')
+      },
+      {
         path: 'settings',
         name: 'Settings',
         component: () => import('../views/Settings.vue')

@@ -101,6 +101,7 @@ const isLoggingOut = ref(false)
 const navItems = [
   { to: '/dashboard/overview', label: 'Resumen', icon: 'pi pi-th-large', match: '/dashboard/overview' },
   { to: '/dashboard/projects', label: 'Proyectos', icon: 'pi pi-folder', match: '/dashboard/projects' },
+  { to: '/dashboard/roster', label: 'Agentes', icon: 'pi pi-users', match: '/dashboard/roster' },
   { to: '/dashboard/settings', label: 'Configuración', icon: 'pi pi-cog', match: '/dashboard/settings' }
 ]
 
