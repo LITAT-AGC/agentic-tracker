@@ -406,7 +406,13 @@ Contra `APTS_test` (puerto 47301; la ultima ronda —la del coste de los embeddi
   caen en rojo y siempre gana el mismo UUID.
 - **Las URL versionadas del manifiesto**: cada artefacto se publica con `?v=<artifact_version>` —y
   la de descarga con `&download=1` detras—, la ruta sirve el mismo contenido con la query puesta, y
-  la respuesta lleva `Cache-Control: no-cache`.
+  la respuesta del origen lleva `Cache-Control: no-cache`.
+- **Y por la URL publica, contra el borde de verdad**: la URL versionada devuelve los 57.834 bytes
+  del servidor con el mismo md5, y a la segunda peticion Cloudflare contesta
+  `cf-cache-status: REVALIDATED` —guarda, pero pregunta al origen antes de servir, que es
+  exactamente lo que `no-cache` pide—. Ojo al leerlo: **la cabecera `Cache-Control` que se ve desde
+  fuera es `max-age=14400`, reescrita por Cloudflare**, no la del origen; por dentro (`127.0.0.1:46315`)
+  sale `no-cache`. Quien mire solo la respuesta publica concluiria que el arreglo no llego.
 - **`ready_for_dev` por la API**, con `backend/scripts/test_ready_for_dev_status.js` (nuevo):
   `list_backlog_items` filtra por el estado y devuelve la story que el motor creo asi;
   `update_backlog_item` repone a `ready_for_dev` una story dejada en `blocked`, y la deja en el
