@@ -124,8 +124,8 @@ sesión del agente: modelo, intento, duración y código de salida. `--no-task-l
 
 Esa tarea viaja al agente en el prompt (`{task_id}`) para que use ésa y no registre otra.
 Sin eso salen dos filas por historia, y la segunda es peor que redundante: la que registra
-el agente va **ligada** al backlog item, y una tarea ligada arrastra al item al cambiar de
-estado.
+el agente pasa a ser la **tarea activa** del backlog item, y el item sigue los cambios de
+estado de su tarea activa.
 
 Existe porque el conductor es lo único que ve la ejecución entera. El agente vive dentro
 de su sesión y el motor sólo guarda lo que el método *produjo*, así que media hora de
@@ -145,11 +145,19 @@ Los estados dicen lo que pasó, y no más:
 el motor, y lo dice en la vuelta siguiente al pasar a otra. Un `done` de cortesía haría del
 registro un sitio donde todo sale bien siempre.
 
-**La tarea no se liga al backlog item**, y no es un olvido. `update_task_status` propaga al
-item ligado —una tarea en `done` pone la historia en `done`—, así que ligarla abriría una
-puerta trasera justo al lado de la compuerta de revisión: cerrar la tarea cerraría la
-unidad sin pasar por el `code_review`. El identificador de la unidad viaja en el título y
-en el `context`.
+**La tarea se asocia a la unidad y no la posee.** Son dos cosas distintas y hasta la
+versión 1.4.0 venían juntas: pasar `backlog_item_id` a `register_task` grababa la
+asociación *y* convertía la tarea en la tarea activa del item, que es el puntero por el que
+`update_task_status` propaga —una tarea en `done` pone la historia en `done`—. Poseerla
+abriría una puerta trasera justo al lado de la compuerta de revisión: cerrar la tarea
+cerraría la unidad sin pasar por el `code_review`. Así que el conductor manda
+`owns_backlog_item: false`: la ejecución queda colgando de su historia, consultable y para
+siempre, y sigue sin poder cerrarla. Antes el vínculo era el título y un JSON dentro de
+`context`, que no es una relación y no se puede consultar.
+
+Ese campo tampoco reanuda: la reanudación se busca por el puntero de propiedad, así que sin
+propiedad no hay a quién reanudar. Es lo que se quiere aquí — cada pasada del conductor
+sobre una unidad es una ejecución distinta.
 
 Dos detalles del camino, por si aparecen en el diario:
 
@@ -206,9 +214,9 @@ el ciclo: apunta a `method_conduction` del manifiesto, que es la fuente autorita
 
 `{task_id}` es la tarea que el conductor abrió para esa unidad, o `(ninguna)` si no pudo.
 Una plantilla propia **debería** pasársela al agente diciéndole que use ésa y no registre
-otra: la que registra un agente por su cuenta va ligada al backlog item, y
-`update_task_status` propaga al item ligado, así que cerrarla pondría la historia en
-`done` sin pasar por el paso terminal. La del conductor no se liga.
+otra: la que registra un agente por su cuenta pasa a ser la tarea activa del backlog item,
+y `update_task_status` propaga por ese puntero, así que cerrarla pondría la historia en
+`done` sin pasar por el paso terminal. La del conductor está asociada y no lo posee.
 
 En `prompts/` viven las variantes versionadas:
 

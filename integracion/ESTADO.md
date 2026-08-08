@@ -10,9 +10,9 @@ llego hasta aqui: eso esta en el historial de git.
 | Superficie de integracion | El endpoint MCP remoto, `POST /mcp` (Streamable HTTP, sin sesion) |
 | Operaciones | 22, derivadas de `apts_skills.json` |
 | Registro | Una URL y cuatro cabeceras; el manifiesto publica el bloque por runtime |
-| Manifiesto | `GET /api/public/integrar`, `schema_version` 1.1.0, 8.565 unidades |
+| Manifiesto | `GET /api/public/integrar`, `schema_version` 1.1.1 |
 | Runtimes soportados | Dos: Claude Code y opencode |
-| Artefactos publicados | 8; los dos del conductor en `artifact_version` 1.3.0, `skill_markdown`, `agent_guidelines`, `adapter_generator` y `loop_prompt_code_review` en 1.1.0, `surface_spec` en 1.0.2, `skills_json` en 1.0.1 |
+| Artefactos publicados | 8; los dos del conductor en `artifact_version` 1.4.0, `skill_markdown`, `agent_guidelines` y `adapter_generator` en 1.1.0, `loop_prompt_code_review` en 1.1.1, `surface_spec` en 1.0.2, `skills_json` en 1.0.2 |
 | Descargas necesarias para **llamar** a las operaciones | Ninguna |
 | Descargas necesarias para **conducir** | El spec y el generador (agentes y comandos); el conductor y su README si se quiere el bucle desatendido, y su plantilla de revision si se quiere ademas la compuerta dentro de la sesion del agente |
 
@@ -102,16 +102,41 @@ El segundo, el registro del conductor: abre **una tarea por unidad**, titulada c
 historia, y la mueve con lo unico medible desde fuera —modelo, intento, duracion y codigo de
 salida—, con `--no-task-log` para apagarlo. Esa tarea viaja al agente en el prompt (`{task_id}`)
 para que use esa y no registre otra, y ahi hay algo mas que evitar una fila duplicada: **la tarea
-que un agente registra por su cuenta va ligada al backlog item**, y `update_task_status` propaga al
-item ligado, asi que cerrarla pondria la historia en `done` sin pasar por la compuerta. Se vio en
-produccion el 2026-08-08 —la tarea `Dev story 344da12c` estaba ligada a su historia— antes de que
-mordiera. La del conductor no se liga, y por eso es la que tiene que usarse.
+que un agente registra por su cuenta se queda con la unidad**, y `update_task_status` propaga por
+ese puntero, asi que cerrarla pondria la historia en `done` sin pasar por la compuerta. Se vio en
+produccion el 2026-08-08 —la tarea `Dev story 344da12c` era la tarea activa de su historia— antes
+de que mordiera. La del conductor no lo es, y por eso es la que tiene que usarse.
 `review` significa que el agente entrego y el motor no lo ha confirmado, y no se asciende a `done`
 por cortesia: quien puede decir que una unidad cerro es el motor, y lo dice en la vuelta siguiente al
-pasar a otra. **La tarea no se liga al backlog item**, y no es un olvido: `update_task_status`
-propaga al item ligado —una tarea en `done` pone la historia en `done`—, asi que ligarla abriria una
-puerta trasera justo al lado de la compuerta de revision. Todo el camino es best-effort: el registro
-de una ejecucion no puede ser el motivo de que la ejecucion pare.
+pasar a otra. Todo el camino es best-effort: el registro de una ejecucion no puede ser el motivo de
+que la ejecucion pare.
+
+**Asociar una tarea a una unidad ya no es poder cerrarla.** Eran la misma cosa y de ahi salian dos
+problemas a la vez. `tasks` no tenia ninguna columna hacia `backlog_items`: el vinculo existia solo
+del otro lado y en singular, `backlog_items.active_task_id`, la tarea de AHORA. Asi que
+`register_task` con `backlog_item_id` pisaba ese puntero y la ejecucion anterior quedaba huerfana
+—se podia preguntar cual es la tarea de esta historia, nunca todas sus ejecuciones—. Y ese mismo
+puntero es lo que dispara la propagacion de estado, de modo que pedir la asociacion traia de regalo
+la capacidad de cerrar la unidad saltandose la compuerta de revision.
+
+Ahora son dos cosas. La **asociacion** es `tasks.backlog_item_id` (migracion 020): informativa,
+permanente, sin efectos, y ninguna escritura de `backlog_items` la mira. La **propiedad** sigue
+siendo `active_task_id` y sigue siendo lo unico que propaga: nada de lo que propagaba dejo de
+propagar. `register_task` acepta `owns_backlog_item` (por defecto `true`, que es lo que hacia hasta
+ahora) y con `false` graba la asociacion sin tocar la tarea activa, sin mover la unidad de estado y
+sin reanudar —la reanudacion se busca POR el puntero de propiedad, asi que sin propiedad no hay a
+quien reanudar, y eso es justo lo que quiere el conductor: cada pasada sobre una unidad es una
+ejecucion distinta—. El campo solo no significa nada y se rechaza con 400, y un valor que no sea
+booleano tambien, porque colar `false` en silencio seria quitarle la propiedad a quien quiso pedirla.
+
+El conductor pasa a usarlo: su tarea cuelga de la historia y sigue sin poder cerrarla. Antes el
+vinculo era el titulo y un JSON dentro de `context`, que no es una relacion y no se puede consultar.
+Un APTS anterior al campo no lo rechazaria —el esquema no es estricto y lo descartaria en silencio,
+ligando la tarea—, asi que el conductor mira la respuesta y avisa por el diario (`tarea_ligada`).
+
+El backfill de la migracion recupera lo unico reconstruible: las tareas que su historia todavia
+apunta. Las que un `register_task` posterior desbanco no dejaron ningun rastro relacional y no se
+pueden recuperar; la migracion imprime los dos numeros en vez de dar a entender que los cubrio todos.
 
 **Un parpadeo de red ya no tumba el bucle.** Cada llamada MCP del conductor reintenta tres veces
 —2 s, 6 s, 18 s— antes de la parada por red, y solo lo que puede salir distinto: el `fetch` que no
@@ -320,6 +345,28 @@ Contra `APTS_test` (puerto 47301; la ultima ronda —la del coste de los embeddi
   y el motivo de la parada.
 - **El `code_ref` se escribe**, comprobado dentro de `test_code_review_gate.js`: el submit terminal
   con `code_ref` deja el hash en la historia.
+- **Asociar frente a poseer**, con `backend/scripts/test_task_backlog_link.js` (nuevo; necesita el
+  servidor levantado porque la validacion del campo vive en el esquema HTTP/MCP, crea su propio
+  proyecto y lo borra entero al terminar). Treinta comprobaciones en verde por los dos caminos.
+  El de siempre no cambia: sin el campo la tarea sigue quedando como tarea activa, la unidad pasa a
+  `in_progress` y una segunda llamada reanuda en vez de duplicar. Con `owns_backlog_item: false` la
+  tarea queda asociada igual, la tarea activa de la unidad no se toca, la unidad no se mueve de
+  estado, una segunda llamada crea otra tarea —dos ejecuciones colgando de la misma historia, que es
+  el historial que no existia— y la respuesta devuelve el campo, que es como un cliente sabe que el
+  servidor lo entendio. La propagacion se comprobo sobre una misma unidad con las dos tareas a la
+  vez: cerrar la asociada la deja en `in_progress` y cerrar la dueña la pone en `done` y suelta el
+  puntero, y la asociada conserva su asociacion despues de cerrada. Los rechazos: el campo sin
+  `backlog_item_id` da 400 nombrando lo que falta, y `'quizas'` da 400 en vez de colar como `false`;
+  por MCP el rechazo llega como `isError`. Y se lee: `get_task` lo devuelve en las dos vistas, y en
+  `compact` una tarea sin unidad no paga la clave vacia.
+- El backfill de la migracion 020 sobre `APTS_test`: `backlog_item_id` recuperado en 93 tareas, 196
+  sin asociacion posible —las que un `register_task` posterior desbanco antes de que la columna
+  existiera—.
+- **El conductor asocia y no posee**, con una iniciativa de prueba en `implementation` y un agente
+  falso, borrada al terminar: abre su tarea titulada con el nombre de la historia y con
+  `backlog_item_id` escrito, y la unidad termina la vuelta con `active_task_id` en `null` y en
+  `ready`, sin que el conductor la haya tocado. El aviso `tarea_ligada` no salio, que es lo correcto
+  contra un servidor que si acepta el campo.
 - **Los reintentos de red del conductor**, por los dos caminos y en seco (`--dry-run`, que resuelve
   la decision sin lanzar agente). Contra un puerto muerto: tres reintentos, tres lineas
   `reintento_red` en el diario con las esperas 2000/6000/18000 ms, y parada por red con codigo 2 a

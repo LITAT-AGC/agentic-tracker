@@ -144,9 +144,10 @@ Unidad asignada: story {story_id} (proyecto {project_url}).
 
 Tarea de ejecución en APTS: {task_id}. Si eso trae un identificador, ésa es tu tarea: úsala
 para \`log_agent_progress\`, \`heartbeat\` y \`report_blocker\`, y NO registres otra. La abrió
-el conductor y NO está ligada al backlog item, a propósito: \`update_task_status\` arrastra al
-item ligado, así que cerrar una tarea ligada pondría la historia en \`done\` sin pasar por lo
-que el paso terminal exige. Manda \`heartbeat\` de vez en cuando —a los quince minutos sin
+el conductor asociada a la unidad pero SIN poseerla (\`owns_backlog_item: false\`), a
+propósito: \`update_task_status\` arrastra al item cuya tarea activa sea ésa, así que cerrar
+una tarea que lo posee pondría la historia en \`done\` sin pasar por lo que el paso terminal
+exige. Si registrás otra, la tuya sí lo poseería. Manda \`heartbeat\` de vez en cuando —a los quince minutos sin
 señal APTS la da por \`stalled\`—. Si dice \`(ninguna)\`, registrá la tuya como siempre.
 
 Antes de nada, lee \`method_conduction\` del manifiesto público (GET /api/public/integrar)
@@ -504,11 +505,13 @@ const registrar = (cfg, evento) => {
 // APTS como un `UPDATE` de estado. Esto abre una tarea por unidad y la va moviendo con lo
 // único que se puede medir desde fuera: modelo, intento, duración y código de salida.
 //
-// La tarea NO se liga al backlog item, y no es un olvido: `update_task_status` propaga al
-// item ligado —una tarea en `done` pone la historia en `done`—, así que ligarla abriría
-// una puerta trasera justo al lado de la compuerta de revisión: cerrar la tarea cerraría
-// la unidad sin pasar por el `code_review`. El id de la unidad viaja en el título y en los
-// mensajes, que es cuanto hace falta para leerla.
+// La tarea SE ASOCIA a la unidad y NO la posee (`owns_backlog_item: false`). Son dos
+// cosas distintas y hasta ahora venían juntas: `update_task_status` propaga al item cuya
+// tarea activa sea ésta —una tarea en `done` pone la historia en `done`—, así que
+// poseerla abriría una puerta trasera justo al lado de la compuerta de revisión: cerrar
+// la tarea cerraría la unidad sin pasar por el `code_review`. Asociada y sin poseer, la
+// ejecución queda consultable desde la historia y sigue sin poder cerrarla. Antes el
+// vínculo era el título y un JSON dentro de `context`, que no es una relación.
 //
 // Todo el camino es best-effort: el registro de una ejecución no puede ser el motivo de
 // que la ejecución pare.
@@ -540,17 +543,37 @@ const abrirTarea = (cfg, storyId, iteracion) => {
   if (cfg.sinTarea) return null;
   return conTarea(cfg, 'abrir la tarea de ejecución', async () => {
     // `register_task` la devuelve ya en `in_progress`, así que no hay una transición
-    // inicial que hacer. Sin `backlog_item_id` tampoco hay reanudación: cada pasada del
-    // conductor sobre una unidad es una ejecución distinta, y mezclarlas escondería
-    // justamente lo que esto viene a enseñar.
+    // inicial que hacer.
+    //
+    // `owns_backlog_item: false` es lo que hace esto posible: la tarea queda asociada a
+    // la unidad —consultable, y para siempre— sin convertirse en su tarea activa. Esa
+    // distinción importa porque el puntero de propiedad es lo único que propaga estado:
+    // una tarea ligada que pasa a `done` cierra la historia, saltándose la compuerta de
+    // revisión del paso terminal. El conductor mueve su tarea a `done` al ver que el
+    // motor pasó a otra unidad, así que ligarla abriría una puerta trasera justo al lado
+    // de la compuerta.
+    //
+    // Tampoco reanuda, y eso también se quiere: cada pasada del conductor sobre una
+    // unidad es una ejecución distinta, y fundirlas escondería justamente el historial
+    // que la asociación viene a construir.
     const r = await llamarMcp(cfg, 'register_task', {
       title: await tituloDeLaUnidad(cfg, storyId),
       context: JSON.stringify({ conductor: NOMBRE, story_id: storyId, iteracion }),
+      backlog_item_id: storyId,
+      owns_backlog_item: false,
     });
     const id = (r && r.task_id) || null;
     if (id) {
       tareaActual = { id, story_id: storyId, ok: false };
       registrar(cfg, { evento: 'tarea', accion: 'abierta', task_id: id, story_id: storyId, iteracion });
+      // Un APTS anterior a este campo no lo rechaza: su esquema lo descarta en silencio y
+      // liga la tarea, que es exactamente lo que veníamos a evitar. La respuesta es lo
+      // único que lo delata, y hay que decirlo: a partir de ahí, el `done` de esta tarea
+      // cierra la historia sin pasar por la compuerta.
+      if (r.owns_backlog_item !== false) {
+        log('aviso: el servidor no aceptó owns_backlog_item; la tarea quedó ligada a la unidad y cerrarla la cerrará');
+        registrar(cfg, { evento: 'tarea_ligada', task_id: id, story_id: storyId, detalle: 'servidor sin owns_backlog_item' });
+      }
     }
     return id;
   });
@@ -1032,9 +1055,10 @@ const main = async () => {
         max_attempts: cfg.escalera.length,
         // La tarea ya está abierta: se le pasa al agente para que use ÉSA y no registre
         // la suya. Dos filas por unidad no es un detalle cosmético — la que registra el
-        // agente va ligada al backlog item, y `update_task_status` propaga al item
-        // ligado, así que cerrarla pondría la historia en `done` sin pasar por la
-        // compuerta de revisión. La del conductor no se liga, y por eso es la buena.
+        // agente pasa a ser la tarea activa del backlog item, y `update_task_status`
+        // propaga por ese puntero, así que cerrarla pondría la historia en `done` sin
+        // pasar por la compuerta de revisión. La del conductor está asociada a la unidad
+        // pero no la posee, y por eso es la buena.
         // `(ninguna)` cuando no se pudo abrir: el prompt lo contempla y el agente
         // registra la suya, que es mejor que quedarse sin rastro.
         task_id: (tareaActual && tareaActual.id) || '(ninguna)',

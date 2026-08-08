@@ -7,9 +7,10 @@ Unidad asignada: story {story_id} (proyecto {project_url}).
 
 Tarea de ejecución en APTS: {task_id}. Si eso trae un identificador, ésa es tu tarea: úsala
 para `log_agent_progress`, `heartbeat` y `report_blocker`, y NO registres otra. La abrió el
-conductor y NO está ligada al backlog item, a propósito: `update_task_status` arrastra al
-item ligado, así que cerrar una tarea ligada pondría la historia en `done` sin pasar por la
-compuerta de revisión. Manda `heartbeat` de vez en cuando —a los quince minutos sin señal
+conductor asociada a la unidad pero SIN poseerla (`owns_backlog_item: false`), a propósito:
+`update_task_status` arrastra al item cuya tarea activa sea ésa, así que cerrar una tarea
+que lo posee pondría la historia en `done` sin pasar por la compuerta de revisión. Si
+registrás otra, la tuya sí lo poseería. Manda `heartbeat` de vez en cuando —a los quince minutos sin señal
 APTS la da por `stalled`—. Si dice `(ninguna)`, registrá la tuya como siempre.
 
 Antes de nada, lee `method_conduction` del manifiesto público (GET /api/public/integrar)

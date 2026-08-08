@@ -2,7 +2,7 @@
   "skills": [
     {
       "name": "register_task",
-      "description": "Create or resume a task in the project. Minimum payload via the official MCP server: title (the integration layer supplies project_url, agent_name, and agent_email). AI-agent flows should use the official MCP server and never generate fresh direct-client bootstrap code. When backlog_item_id points to an active task in todo, in_progress, or stalled, APTS resumes that task instead of creating a duplicate.",
+      "description": "Create or resume a task in the project. Minimum payload via the official MCP server: title (the integration layer supplies project_url, agent_name, and agent_email). AI-agent flows should use the official MCP server and never generate fresh direct-client bootstrap code. When backlog_item_id points to an active task in todo, in_progress, or stalled, APTS resumes that task instead of creating a duplicate. backlog_item_id means two things at once: the task records which unit it belongs to (permanent, informational) AND the task becomes that unit's active task, which is what makes update_task_status propagate to it — a linked task reaching done closes the story. Send owns_backlog_item: false to ask for the association without the ownership: the unit is recorded on the task, the unit's active task is left alone, nothing propagates, and there is no resume (each call is a distinct execution). Default is true, which is the historical behavior.",
       "parameters": {
         "oneOf": [
           {
@@ -25,6 +25,9 @@
               },
               "backlog_item_id": {
                 "type": "string"
+              },
+              "owns_backlog_item": {
+                "type": "boolean"
               }
             },
             "required": [
@@ -54,6 +57,9 @@
                 },
                 "backlog_item_id": {
                   "type": "string"
+                },
+                "owns_backlog_item": {
+                  "type": "boolean"
                 }
               },
               "required": [

@@ -317,6 +317,7 @@ const TASK_COMPACT_SELECT_COLUMNS = [
   'agent_name',
   'status',
   'context',
+  'backlog_item_id',
   'last_heartbeat',
   'created_at',
   'updated_at'
@@ -980,7 +981,28 @@ const registerTaskBodySchema = z.object({
     },
     z.string({ error: 'Context must be a string' }).optional()
   ),
-  backlog_item_id: uuidFieldSchema('Backlog item id must be a valid UUID', { optional: true })
+  backlog_item_id: uuidFieldSchema('Backlog item id must be a valid UUID', { optional: true }),
+  // Asociacion y propiedad eran la misma cosa: pasar `backlog_item_id` escribia
+  // `active_task_id`, y ese puntero es lo que dispara la propagacion de estado. Este
+  // campo las separa. Por defecto `true` porque es lo que hacia hasta ahora, y cambiar
+  // el defecto romperia a todo agente ya escrito —incluida la via de recuperacion, que
+  // resucita una tarea `stalled` volviendo a llamar con `backlog_item_id`—.
+  //
+  // No se acepta cualquier cadena por buena: `parseBooleanFlag` convierte lo que no
+  // entiende en `false`, y aqui eso seria quitarle la propiedad en silencio a quien
+  // quiso pedirla. Solo 'true'/'false' textuales; el resto se rechaza.
+  owns_backlog_item: z.preprocess(
+    (value) => {
+      if (value === undefined) return undefined;
+      if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        if (normalized === 'true') return true;
+        if (normalized === 'false') return false;
+      }
+      return value;
+    },
+    z.boolean({ error: 'owns_backlog_item must be a boolean' }).optional()
+  )
 });
 
 const taskStatusUpdateBodySchema = z.object({
@@ -1181,6 +1203,11 @@ const mapTaskRecord = (task, { view = DEFAULT_RESPONSE_VIEW } = {}) => {
     title: task.title,
     agent_name: task.agent_name || null,
     status: task.status,
+    // Solo cuando hay. La mitad de las tareas de un proyecto real no cuelgan de ninguna
+    // unidad, y en la vista que existe para no gastar contexto un UUID vacio son 55 bytes
+    // por fila que no dicen nada. La ausencia hay que tratarla igual: la columna es
+    // nulable de por si.
+    ...(task.backlog_item_id ? { backlog_item_id: task.backlog_item_id } : {}),
     last_heartbeat: task.last_heartbeat,
     created_at: task.created_at,
     updated_at: task.updated_at,
@@ -2250,7 +2277,10 @@ const integrationRoot = path.join(__dirname, '..', 'integracion');
 //        `agent_runtime_adapters.mappings`: un cliente que leyera el manifiesto
 //        viejo encuentra menos cosas de las que esperaba, y eso hay que poder
 //        verlo en el numero.
-const integrationManifestSchemaVersion = '1.1.0';
+// 1.1.1: `register_task_link_rule` dentro de `task_recovery_policy`. Es clave nueva
+//        —el mismo caso que `method_conduction` en 1.0.1— y no quita ni cambia la
+//        forma de nada, asi que es de parche.
+const integrationManifestSchemaVersion = '1.1.1';
 const publicIntegrationBasePath = '/api/public/integrar';
 
 const integrationArtifacts = {
@@ -2259,7 +2289,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts_skills.json'),
     fileName: 'apts_skills.json',
     contentType: 'application/json; charset=utf-8',
-    artifactVersion: '1.0.1',
+    // 1.0.2: `owns_backlog_item` en `register_task`, que separa asociar de poseer.
+    artifactVersion: '1.0.2',
     kind: 'skills_contract',
     recommended: true,
     usagePriority: 'discovery',
@@ -2329,7 +2360,11 @@ const integrationArtifacts = {
     // 1.3.0: esa tarea se titula con el nombre de la historia y viaja al agente como
     // `{task_id}` para que no registre otra. No es cosmética: la que registra el agente
     // va ligada al backlog item y cerrarla arrastra la historia a `done`.
-    artifactVersion: '1.3.0',
+    // 1.4.0: esa tarea se asocia a la unidad sin poseerla (`owns_backlog_item: false`).
+    // Escribe una relación donde antes no escribía ninguna. Contra un APTS anterior al
+    // campo el esquema lo descartaría en silencio y la tarea quedaría ligada, que es
+    // justo lo que se evita; por eso el conductor comprueba la respuesta y avisa.
+    artifactVersion: '1.4.0',
     kind: 'loop_conductor',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -2347,7 +2382,8 @@ const integrationArtifacts = {
     // 1.1.0: documenta los reintentos de red y las plantillas de prompt de `prompts/`.
     // 1.2.0: documenta el registro de la ejecución en APTS y `--no-task-log`.
     // 1.3.0: documenta `{task_id}` y por qué la tarea del conductor no se liga al item.
-    artifactVersion: '1.3.0',
+    // 1.4.0: documenta `owns_backlog_item` y la diferencia entre asociar y poseer.
+    artifactVersion: '1.4.0',
     kind: 'loop_conductor_manual',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -2366,7 +2402,9 @@ const integrationArtifacts = {
     contentType: 'text/markdown; charset=utf-8',
     // 1.1.0: le dice al agente que use la tarea que el conductor ya abrió (`{task_id}`)
     // en vez de registrar la suya, que iría ligada al backlog item.
-    artifactVersion: '1.1.0',
+    // 1.1.1: esa explicación pasa a hablar de posesión, que es lo que el campo nuevo
+    // separa. Sólo cambia el texto que lee el agente.
+    artifactVersion: '1.1.1',
     kind: 'loop_conductor_prompt',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -2702,7 +2740,8 @@ const buildIntegrationManifest = (req) => {
         ]
       },
       task_recovery_policy: {
-        register_task_resume_rule: 'When register_task includes backlog_item_id and the linked backlog item already has an active task in todo, in_progress, or stalled, APTS resumes that task instead of creating a duplicate.',
+        register_task_resume_rule: 'When register_task includes backlog_item_id and the linked backlog item already has an active task in todo, in_progress, or stalled, APTS resumes that task instead of creating a duplicate. This does not apply with owns_backlog_item: false, which never resumes: resume is looked up through the ownership pointer, so without ownership there is nothing to resume.',
+        register_task_link_rule: 'backlog_item_id grants two separate things. Association: the task permanently records which unit it belonged to, with no effects. Ownership: the task becomes that unit\'s active task, and that pointer is the ONLY thing update_task_status propagates through — a linked task moved to done closes the story, bypassing any gate on the terminal step. Send owns_backlog_item: false to get association without ownership. Use it when something other than the task itself decides when the unit closes, as the loop conductor does.',
         done_transition_rule: 'Task status done is accepted only from review and only when recent execution activity exists (heartbeat or progress log within the freshness window).',
         blocker_transition_rule: 'report_blocker sets task status to stalled and marks the linked backlog item as blocked.',
         stale_heartbeat_rule: 'When heartbeat is stale, background monitoring marks in_progress tasks as stalled and marks linked backlog items as blocked.'
@@ -2950,13 +2989,22 @@ const registerTaskInternal = async (payload, { connection = db } = {}) => {
     agent_name: agentName,
     agent_email: agentEmail,
     context,
-    backlog_item_id: backlogItemId
+    backlog_item_id: backlogItemId,
+    owns_backlog_item: ownsBacklogItem
   } = payload;
   const url = normalizeUrl(projectUrl || '');
 
   if (!url) {
     throw createHttpError(400, 'Project url is required');
   }
+
+  // Sin item no hay nada que poseer, asi que el campo solo no significa nada. Aceptarlo
+  // en silencio seria publicar un campo que no hace nada.
+  if (ownsBacklogItem !== undefined && !backlogItemId) {
+    throw createHttpError(400, 'owns_backlog_item requires backlog_item_id');
+  }
+
+  const owns = ownsBacklogItem !== false;
 
   if (backlogItemId) {
     const linkedBacklogItem = await connection('backlog_items')
@@ -2968,7 +3016,11 @@ const registerTaskInternal = async (payload, { connection = db } = {}) => {
       throw createHttpError(400, 'Backlog item id is not valid for project url');
     }
 
-    if (linkedBacklogItem.active_task_id) {
+    // La reanudacion se busca POR `active_task_id`, que es el puntero de propiedad: sin
+    // propiedad no hay a quien reanudar. Y es justo lo que quiere quien pide asociacion
+    // sola —el conductor—: cada pasada sobre una unidad es una ejecucion distinta, y
+    // fundirlas escondería el historial que esta columna viene a construir.
+    if (owns && linkedBacklogItem.active_task_id) {
       const activeTask = await connection('tasks')
         .where({ id: linkedBacklogItem.active_task_id, project_url: url })
         .first();
@@ -2980,6 +3032,9 @@ const registerTaskInternal = async (payload, { connection = db } = {}) => {
           .where({ id: activeTask.id })
           .update({
             status: 'in_progress',
+            // Una tarea reanudada puede ser anterior a la columna, y esta es la unica
+            // ocasion en que sabemos de que unidad era sin adivinarlo.
+            backlog_item_id: backlogItemId,
             last_heartbeat: connection.fn.now(),
             updated_at: connection.fn.now()
           });
@@ -3001,6 +3056,7 @@ const registerTaskInternal = async (payload, { connection = db } = {}) => {
           task_id: activeTask.id,
           status: 'in_progress',
           backlog_item_id: backlogItemId,
+          owns_backlog_item: true,
           resumed: true,
           previous_task_id: activeTask.id,
           previous_status: previousStatus
@@ -3017,11 +3073,16 @@ const registerTaskInternal = async (payload, { connection = db } = {}) => {
     agent_name: agentName || null,
     agent_email: agentEmail || null,
     context: context ?? null,
+    // La asociacion se escribe siempre que venga el item, la pida como dueña o no: es la
+    // mitad informativa y no tiene efectos.
+    backlog_item_id: backlogItemId || null,
     status: 'in_progress',
     last_heartbeat: connection.fn.now()
   }).returning('*');
 
-  if (backlogItemId) {
+  // Y la propiedad solo si se pide. Esto es lo unico que abre la propagacion de estado:
+  // desde aqui, cerrar la tarea cierra la historia.
+  if (backlogItemId && owns) {
     await connection('backlog_items')
       .where({ id: backlogItemId, project_url: url })
       .update({
@@ -3040,6 +3101,7 @@ const registerTaskInternal = async (payload, { connection = db } = {}) => {
     task_id: task.id,
     status: task.status,
     backlog_item_id: backlogItemId || null,
+    owns_backlog_item: backlogItemId ? owns : false,
     resumed: false,
     previous_task_id: null,
     previous_status: null
