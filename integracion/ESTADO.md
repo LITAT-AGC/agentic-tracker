@@ -55,6 +55,24 @@ cadena. Un cliente que arrancaba desde la URL no podia saber que existia. Ahora 
 su forma depende del runtime, asi que el script sin su manual no se puede usar. El script es
 autocontenido —CommonJS, solo builtins de Node— asi que descargar ese unico archivo basta.
 
+**La revision adversaria entra por prompt, no por motor.** `bmad-code-review` esta sembrado en la
+biblioteca (`bmad:v6.8.0`, fase `implementation`, dueño `bmad-agent-dev`) y describe exactamente lo
+que hace falta —tres capas paralelas: Blind Hunter, Edge Case Hunter, Acceptance Auditor— pero no
+corre nunca: su `routing` trae `required: false`, `resolvePhaseSpine` arma la espina solo con los
+`required`, y no tiene entrada en `WORKFLOW_OUTPUTS`, asi que el motor no sabria cuando darlo por
+cerrado. Sus tres pasos importados, ademas, son la prosa del SKILL.md ("WORKFLOW ARCHITECTURE",
+"FIRST STEP"), no un procedimiento conducible.
+
+Mientras eso no cambie, la compuerta vive en el prompt del conductor:
+`integracion/conductor/prompts/dev-story-revision-adversaria.md`, que se pasa con `--prompt-file`.
+Exige las tres capas en subagentes paralelos antes de entregar el paso 8 de `bmad-dev-story`, y ante
+un hallazgo confirmado —`archivo:linea` mas escenario de fallo concreto— declara la rama que el
+propio metodo ya tiene, `{"goto":"step:5"}`, en vez de parchear en silencio. **APTS no ve rastro de
+esa revision**: solo la story cerrada. Por eso la plantilla exige dejar `docs/reviews/<story_id>.md`
+commiteado en el repositorio destino, que es el unico artefacto observable hasta que el motor tenga
+su `doc_type` `code_review`. La plantilla vive en el repo y **no** es un artefacto publicado: el
+README del conductor, que si lo es, la nombra como variante versionada del repo.
+
 **La fase de partida ya no se puede regalar.** `create_initiative` publica `phase`, y era la unica
 puerta del contrato por la que un cliente podia saltarse fases enteras: el paseo inter-fase arranca
 en `initiatives.phase`, asi que arrancar adelantado no se salta un paso, se salta el trabajo que el

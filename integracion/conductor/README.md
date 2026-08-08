@@ -128,6 +128,40 @@ reportar bloqueo y detenerse en vez de inventar.
 Esto ocurre **dentro de la sesión del agente**: el conductor no lo ve y no puede
 responder por él.
 
+## Plantillas de prompt
+
+La de por defecto está en el propio `apts-loop.js` (`PROMPT_POR_DEFECTO`) y no reexplica
+el ciclo: apunta a `method_conduction` del manifiesto, que es la fuente autoritativa.
+`--prompt-file RUTA` la reemplaza entera. Los marcadores que se sustituyen son
+`{story_id}`, `{agent_name}`, `{project_url}`, `{role}`, `{iteration}`, `{attempt}` y
+`{max_attempts}`; lo que no case con ninguno se queda literal, así que un
+`{"goto":"step:5"}` dentro del texto sobrevive intacto.
+
+En `prompts/` viven las variantes versionadas:
+
+| archivo | qué añade |
+|---|---|
+| `dev-story-revision-adversaria.md` | una compuerta de revisión adversaria antes del paso 8 de `bmad-dev-story` |
+
+**Revisión adversaria.** Reproduce dentro de la sesión del agente lo que
+`bmad-code-review` describe y nunca ejecuta: tres capas en subagentes paralelos —Blind
+Hunter (sólo el diff), Edge Case Hunter (los bordes) y Acceptance Auditor (sólo la story
+y sus criterios)— con triage. Van en subagentes y no en el hilo principal porque ese hilo
+acaba de escribir el código: una capa que hereda su contexto hereda sus puntos ciegos.
+Un hallazgo cuenta sólo con `archivo:línea` y un escenario de fallo concreto; lo demás se
+anota y no se corrige. Si queda alguno confirmado, la validación del paso 8 ha fallado y
+el agente declara la rama que el propio método tiene, `{"goto":"step:5"}`, en vez de
+parchear en silencio — con el tope de revisitas haciendo su trabajo si la unidad no
+sobrevive a las pasadas.
+
+Es una medida **a plazo**: la revisión ocurre dentro de la sesión y APTS no ve rastro de
+ella, sólo la story cerrada. Por eso la plantilla exige dejar
+`docs/reviews/<story_id>.md` commiteado en el repositorio destino: es el único artefacto
+observable hasta que `bmad-code-review` corra como compuerta del motor con su propio
+`doc_type`.
+
+Cuesta: tres subagentes por story, y en reloj entre cuatro y ocho minutos más por vuelta.
+
 ## Avisos al parar
 
 ### Telegram
