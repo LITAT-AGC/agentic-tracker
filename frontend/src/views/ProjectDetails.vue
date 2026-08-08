@@ -435,6 +435,11 @@
               <p class="text-sm text-surface-500 mb-4">
                 Las órdenes se dejan en un buzón y el conductor las recoge en unos diez segundos.
                 Se dirigen al nombre de agente con el que corre; sin ese nombre no hay a quién hablarle.
+                <span class="block mt-1">
+                  <strong>Reanudar</strong> repite la última corrida del conductor sin volver a escribir
+                  nada de este formulario. Sólo la recuerda el proceso que la condujo: si se reinició,
+                  la rechaza y hay que usar Iniciar.
+                </span>
               </p>
 
               <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -473,6 +478,15 @@
                   label="Pausar"
                   icon="pi pi-pause"
                   severity="warn"
+                  size="small"
+                />
+                <Button
+                  @click="sendConductorOrder('resume')"
+                  :loading="isSendingOrder"
+                  :disabled="!conductorAgentName.trim()"
+                  label="Reanudar"
+                  icon="pi pi-play-circle"
+                  severity="secondary"
                   size="small"
                 />
                 <Button
@@ -1291,7 +1305,9 @@ const sendConductorOrder = async (command) => {
   conductorMessage.value = null;
 
   try {
-    // Solo `start` lleva configuracion: las demas ordenes actuan sobre lo que ya corre.
+    // Solo `start` lleva configuracion. `resume` no la lleva a proposito: la que repite
+    // es la que el conductor recuerda, y mandarle una desde aqui seria otro `start` con
+    // otro nombre. Las demas actuan sobre lo que ya corre.
     const payload = command === 'start'
       ? {
         project_url: url,

@@ -463,8 +463,8 @@ código como red de seguridad, pero ya no es el camino normal.
 ## Órdenes desde el panel
 
 La pestaña **Conductor** de un proyecto deja órdenes en un buzón —**Iniciar**, **Pausar**,
-**Detener**— dirigidas al `--agent-name` con el que corre el conductor. El conductor
-pregunta cada diez segundos, también mientras el agente trabaja.
+**Reanudar**, **Detener**— dirigidas al `--agent-name` con el que corre el conductor. El
+conductor pregunta cada diez segundos, también mientras el agente trabaja.
 
 No hay socket a propósito: para un botón que pulsa una persona, diez segundos son
 indistinguibles de instantáneo, y un servidor de WebSocket sería una pieza más —conexión,
@@ -474,7 +474,17 @@ Al recibir `stop` o `pause`, el conductor mata **el árbol de procesos** del age
 con código 15. En Windows eso es `taskkill /t`: `shell: true` interpone `cmd.exe`, así que
 matar el pid del hijo dejaría al agente vivo escribiendo en APTS mientras el conductor cree
 que lo detuvo. En POSIX el agente se lanza con grupo propio (`detached`) y se mata el grupo,
-con diez segundos de gracia antes de forzar.
+con diez segundos de gracia (`APTS_LOOP_KILL_GRACE_MS`) antes de forzar con `SIGKILL`.
+
+**El conductor no para hasta que el árbol está muerto**, y esa espera es la parte que hace
+falta escribir bien. Lo que se mira para saber si el corte terminó es si el **grupo** sigue
+vivo (`kill(-pgid, 0)`), no si terminó el hijo directo: el hijo directo es el shell, y es
+precisamente lo primero que se va con el `SIGTERM`, así que preguntarle a él daría por
+rematado un corte que aún no lo está. Y la gracia se espera dentro del corte, no en un
+temporizador suelto: un temporizador no retiene a un proceso que está a punto de salir. Un
+agente que ignore `SIGTERM` sobrevive los diez segundos, ve la línea «el árbol del agente
+sigue vivo tras 10 s; forzando» y muere; uno que coopere se va en menos de un segundo y no
+paga la espera.
 
 Cortar a mitad de una story no rompe nada: se comporta igual que un agente que muere. El
 claim es idempotente y el motor vuelve a servir el mismo paso mientras el puntero siga
@@ -493,3 +503,20 @@ que una invocación mal escrita no se quede colgada en silencio.
 
 Una parada en modo espera termina esa corrida, no el proceso: el conductor vuelve a
 escuchar, y volver a arrancarlo desde el panel es la misma sesión.
+
+### Reanudar
+
+`resume` es un `start` que no trae configuración: repite la de la **última corrida de ese
+proceso**. Es lo que hace que retomar un `pause` sea un botón y no volver a escribir el
+comando del agente, que es la parte larga del formulario y la que se escribe mal.
+
+Lo que recuerda es el proceso, no APTS, y eso es deliberado: `--agent-cmd` invoca un
+binario **de la máquina donde corre el conductor**, así que una configuración guardada en
+el servidor podría llegarle a otra máquina donde ese comando no existe. Un conductor recién
+arrancado no tiene nada que reanudar aunque el proyecto sí tenga historia: rechaza la orden
+(`cancelled`, «no hay corrida anterior que reanudar») y lo dice por el diario.
+
+Se recuerda la configuración al componerla y no al terminar bien, así que una corrida que
+murió a mitad —agente fallido, tope de vueltas, estancamiento— también se reanuda. Un
+`resume` que llega **mientras el agente trabaja** no es nada: se acusa y se descarta, en
+vez de quedarse en el buzón por delante de la orden de parar.

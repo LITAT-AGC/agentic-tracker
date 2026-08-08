@@ -12,7 +12,7 @@ llego hasta aqui: eso esta en el historial de git.
 | Registro | Una URL y cuatro cabeceras; el manifiesto publica el bloque por runtime |
 | Manifiesto | `GET /api/public/integrar`, `schema_version` 1.1.1 |
 | Runtimes soportados | Dos: Claude Code y opencode |
-| Artefactos publicados | 8; los dos del conductor en `artifact_version` 1.5.0, `skill_markdown`, `agent_guidelines` y `adapter_generator` en 1.1.0, `loop_prompt_code_review` en 1.1.1, `surface_spec` en 1.0.2, `skills_json` en 1.0.2 |
+| Artefactos publicados | 8; los dos del conductor en `artifact_version` 1.6.0, `skill_markdown`, `agent_guidelines` y `adapter_generator` en 1.1.0, `loop_prompt_code_review` en 1.1.1, `surface_spec` en 1.0.2, `skills_json` en 1.0.2 |
 | Descargas necesarias para **llamar** a las operaciones | Ninguna |
 | Descargas necesarias para **conducir** | El spec y el generador (agentes y comandos); el conductor y su README si se quiere el bucle desatendido, y su plantilla de revision si se quiere ademas la compuerta dentro de la sesion del agente |
 
@@ -411,6 +411,30 @@ Contra `APTS_test` (puerto 47301; la ultima ronda —la del coste de los embeddi
   completarse el ciclo, `stalled` cuando el agente falla, y suelta en `review` cuando el conductor
   para por estancamiento tras una entrega buena. Cada tarea con sus registros: un intento por linea
   y el motivo de la parada.
+- **El conductor, contra un agente REAL.** Hasta ahora todo se habia comprobado con un agente falso
+  que duerme. Con `claude -p` de verdad (haiku) hablando MCP contra el servidor de prueba desde un
+  directorio aislado, el fixture toy fue de `implementation` a `phase=done`: el agente escribio sus
+  `log_agent_progress`, reporto un bloqueo legitimo en un intento (no podia crear el commit del
+  `code_ref`), cerro las dos stories en el siguiente y el conductor paro con `PARADA (done):
+  lifecycle completo`. Tres cosas quedan comprobadas de paso: **`stdio: 'inherit'` sigue mostrando
+  la salida del agente en vivo con `spawn`** —el texto del agente aparece intercalado entre las
+  lineas `[apts-loop]`, en orden, por los dos sistemas—; el **latido avanza mientras el agente
+  trabaja**; y la tarea del conductor queda asociada a la unidad sin poseerla.
+- **Las cuatro ordenes del buzon, con el agente real en marcha.** `resume` sin corrida previa se
+  rechaza con `cancelled` y su motivo; `start` con payload arranca; `pause` a mitad corta el arbol
+  —cinco niveles, con `claude.exe` dentro, todos muertos y ningun huerfano— y devuelve el conductor
+  a la espera; `resume` sin payload retoma con la MISMA configuracion y el motor sirve la story
+  siguiente; y un `resume` que llega mientras el agente corre queda `done` con «ya estaba
+  corriendo», sin reiniciar nada.
+- **El corte en POSIX, ejecutado por fin** (WSL Ubuntu contra el servidor de prueba de Windows). El
+  agente arranca en su propio grupo (`pgid` distinto del conductor) con un nieto dentro. Un agente
+  que coopera muere entero en ~2 s sin pagar la gracia. Un agente que **ignora `SIGTERM`** es el que
+  destapo el fallo: con el codigo anterior, treinta segundos despues del `stop` seguian vivos su
+  shell y su nieto, ya reparentados a init, y el conductor hacia rato que habia salido con codigo
+  15. Con el arreglo, espera los diez segundos, avisa («el arbol del agente sigue vivo tras 10 s;
+  forzando»), fuerza, y solo entonces para: cero supervivientes. Windows revalidado con el
+  `taskkill` ya esperado, en modo no-daemon —que es donde el conductor sale justo detras—: dos
+  nietos y su `cmd`, todos muertos.
 - **El `code_ref` se escribe**, comprobado dentro de `test_code_review_gate.js`: el submit terminal
   con `code_ref` deja el hash en la historia.
 - **Asociar frente a poseer**, con `backend/scripts/test_task_backlog_link.js` (nuevo; necesita el
@@ -706,7 +730,33 @@ Comprobado contra `APTS_test` con el fixture `apts://fixture/toy` llevado a
 `implementation`: el latido avanzando mientras el agente falso dormia, una orden de `stop`
 cortandolo con salida 15 y sin dejar huerfanos (`taskkill /t`), la corrida siguiente
 retomando la misma story `defb4b31`, y `pause` devolviendo al conductor a la espera sin
-matar el proceso. Sin desplegar: hay tres migraciones nuevas.
+matar el proceso.
+
+**Y `resume` ya hace algo.** Estaba en el enum de la migracion 023 y en `CONDUCTOR_COMMANDS`
+desde el primer dia, el panel podia encolarlo y **no lo recogia nadie**: la orden se quedaba
+`pending` para siempre. Ahora es un `start` que no trae configuracion —repite la de la
+ultima corrida de ESE proceso—, que es lo que convierte retomar un `pause` en un boton en
+vez de volver a escribir el comando del agente. Lo que recuerda es el proceso y no APTS, a
+proposito: `--agent-cmd` invoca un binario de la maquina donde corre el conductor, asi que
+una configuracion guardada en el servidor podria llegarle a otra maquina donde ese comando
+no existe. Un conductor recien arrancado la rechaza (`cancelled`, «no hay corrida anterior
+que reanudar») en vez de adivinar, y un `resume` que llega mientras el agente trabaja se
+acusa y se descarta, porque dejarlo en el buzon lo pondria por delante de la orden de parar.
+
+**Y el corte remata de verdad en POSIX.** La rama existia escrita y nunca ejecutada, con dos
+fallos que se tapaban entre si: el `SIGKILL` de gracia colgaba de un
+`setTimeout(...).unref()` —que por definicion no retiene el bucle de eventos, y el conductor
+sale con codigo 15 un segundo despues de cortar, asi que la señal no llegaba nunca— y su
+guardian preguntaba por `hijo.exitCode`, es decir por el shell, que es lo PRIMERO que muere
+con el `SIGTERM` mientras sus descendientes siguen. Cualquiera de los dos por separado ya
+bastaba para dejar al agente vivo. Ahora la gracia se espera dentro del corte, lo que se
+mira es si el **grupo** sigue vivo (`kill(-pgid, 0)`), y quien va a parar espera esa promesa
+antes de irse. En Windows el `taskkill /t` pasa a esperarse tambien, por el mismo motivo: en
+modo no-daemon el conductor sale justo detras.
+
+Los dos artefactos del conductor suben a `artifact_version` **1.6.0**: quien se quedara con
+la 1.5.0 tiene un boton Reanudar cuya orden no recoge nadie y, en Linux o macOS, un corte
+que cree haber matado al agente. Sin desplegar: hay tres migraciones nuevas.
 
 ## Abierto
 

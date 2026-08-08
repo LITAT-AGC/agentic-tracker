@@ -2393,7 +2393,19 @@ const integrationArtifacts = {
     // `--project-url` ni `--agent-cmd` ya no falla: espera órdenes (`--daemon`). Un
     // cliente que se quedara con la 1.4.0 conserva un conductor que no se puede parar
     // desde ningún sitio, así que el bump es lo que le permite enterarse.
-    artifactVersion: '1.5.0',
+    // 1.6.0: obedece `resume`, que hasta ahora aceptaba el buzón y no recogía nadie.
+    // Repite la configuración de la última corrida de ese proceso, así que retomar un
+    // `pause` deja de ser volver a escribir el comando del agente. Un cliente con la
+    // 1.5.0 tiene un botón Reanudar en el panel cuya orden se queda pendiente para
+    // siempre, y ese es exactamente el motivo del bump.
+    // Y el corte remata de verdad en POSIX: la rama estaba escrita y nunca ejecutada, y
+    // tenía dos fallos que se tapaban entre sí. El SIGKILL de gracia colgaba de un
+    // `setTimeout(...).unref()`, que por definición no retiene el bucle de eventos —el
+    // conductor salía con código 15 un segundo después y la señal no llegaba nunca—, y su
+    // guardián preguntaba por el hijo directo, que es el shell y lo primero que muere.
+    // Ahora se espera dentro del corte y se pregunta por el GRUPO. Un cliente con la
+    // 1.5.0 en Linux o macOS cree que detuvo al agente y lo deja vivo escribiendo en APTS.
+    artifactVersion: '1.6.0',
     kind: 'loop_conductor',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -2414,7 +2426,10 @@ const integrationArtifacts = {
     // 1.4.0: documenta `owns_backlog_item` y la diferencia entre asociar y poseer.
     // 1.5.0: documenta el latido durante la ejecución, el diario en APTS
     // (`--no-journal-remote`), las órdenes desde el panel y el modo espera (`--daemon`).
-    artifactVersion: '1.5.0',
+    // 1.6.0: documenta `resume` —qué repite, qué recuerda el proceso y no APTS, y por qué
+    // un conductor recién arrancado la rechaza— y por qué el corte espera al GRUPO y no
+    // al hijo directo.
+    artifactVersion: '1.6.0',
     kind: 'loop_conductor_manual',
     recommended: false,
     usagePriority: 'optional_entrypoint',

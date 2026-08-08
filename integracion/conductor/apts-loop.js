@@ -116,9 +116,12 @@ Frenos:
 
 Modo espera:
   --daemon                no conducir nada todavía: conectarse a APTS y esperar órdenes
-                          del panel (iniciar, pausar, detener). La identidad sigue siendo
-                          obligatoria; el proyecto y el comando de agente los trae la
-                          orden de arranque. Invocarlo SIN NINGÚN argumento hace lo mismo.
+                          del panel (iniciar, pausar, reanudar, detener). La identidad
+                          sigue siendo obligatoria; el proyecto y el comando de agente los
+                          trae la orden de arranque. Invocarlo SIN NINGÚN argumento hace
+                          lo mismo. Reanudar no trae configuración: repite la de la
+                          última corrida de ESTE proceso, así que un conductor recién
+                          arrancado no tiene nada que reanudar y la rechaza diciéndolo.
 
 Avisos al parar:
   --telegram-chat-id ID   APTS_LOOP_TELEGRAM_CHAT_ID   a quién avisar
@@ -854,26 +857,68 @@ const acusarOrden = async (cfg, id, estado, detalle) => {
 // `lanzarAgente` porque quien decide matarlo es el vigilante, que corre en paralelo.
 let procesoAgente = null;
 let ordenDeParada = null;
+// El corte en curso, como promesa. Cortar NO termina cuando muere el hijo directo: en
+// POSIX ese hijo es el shell y es justo lo que se va con el primer SIGTERM, mientras sus
+// descendientes siguen. Quien vaya a parar el conductor tiene que esperar esta promesa o
+// se irá antes de rematar, dejando al agente vivo escribiendo en APTS.
+let cortePendiente = null;
+
+// Cuánto se le da al agente para cerrar lo que estuviera escribiendo antes de forzar.
+const GRACIA_CORTE_MS = entero(process.env.APTS_LOOP_KILL_GRACE_MS, 10000);
+
+// ¿Queda alguien en el grupo? La señal 0 no manda nada: sólo pregunta. Y es la pregunta
+// correcta, porque mirar `hijo.exitCode` daría por terminado un corte que no lo está —el
+// hijo directo muere primero por construcción—. `EPERM` es un sí: el grupo existe.
+const grupoVivo = (pgid) => {
+  try {
+    process.kill(-pgid, 0);
+    return true;
+  } catch (error) {
+    return error.code === 'EPERM';
+  }
+};
 
 // Matar al hijo NO basta en Windows. `shell: true` interpone `cmd.exe`, así que el pid que
 // devuelve `spawn` es el del shell y el agente —claude, opencode— es su hijo: matar el pid
 // deja al agente vivo, escribiendo en APTS, mientras el conductor cree que lo detuvo. Hace
 // falta el árbol entero, y sin dependencias nuevas: `taskkill /t` en Windows, y en POSIX el
 // grupo de procesos, que existe porque se lanza con `detached`.
-const matarArbol = (hijo) => {
+const matarArbol = async (hijo) => {
   if (!hijo || hijo.exitCode !== null || hijo.killed) return;
+  const pid = hijo.pid;
+
+  if (process.platform === 'win32') {
+    // Se espera a que `taskkill` termine en vez de lanzarlo y olvidarlo: el conductor para
+    // inmediatamente después, y un corte que no se espera es un corte que puede no ocurrir.
+    await new Promise((resolve) => {
+      const t = spawn('taskkill', ['/pid', String(pid), '/t', '/f'], { stdio: 'ignore' });
+      t.on('close', resolve);
+      t.on('error', resolve);
+    });
+    return;
+  }
+
   try {
-    if (process.platform === 'win32') {
-      spawn('taskkill', ['/pid', String(hijo.pid), '/t', '/f'], { stdio: 'ignore' });
-      return;
-    }
-    process.kill(-hijo.pid, 'SIGTERM');
-    // Plazo de gracia: un agente a mitad de una escritura merece poder cerrarla. Si sigue
-    // vivo después, ya no es cuestión de cortesía.
-    setTimeout(() => {
-      try { if (hijo.exitCode === null) process.kill(-hijo.pid, 'SIGKILL'); } catch (_) { /* ya murió */ }
-    }, 10000).unref();
-  } catch (_error) { /* el proceso ya no está */ }
+    process.kill(-pid, 'SIGTERM');
+  } catch (_error) {
+    return; // el grupo ya no está
+  }
+
+  // Plazo de gracia: un agente a mitad de una escritura merece poder cerrarla. Se espera
+  // AQUÍ DENTRO y no en un temporizador suelto. Antes era un `setTimeout(...).unref()`, y
+  // `unref()` es precisamente lo que impide que el temporizador mantenga vivo el bucle de
+  // eventos: el conductor salía con código 15 un segundo después de cortar y el SIGKILL no
+  // llegaba nunca. Se vio en WSL el 2026-08-08 con un agente que ignora SIGTERM: treinta
+  // segundos más tarde seguían vivos su shell y su nieto, ya reparentados a init.
+  const limite = Date.now() + GRACIA_CORTE_MS;
+  while (Date.now() < limite) {
+    if (!grupoVivo(pid)) return;
+    await dormir(Math.min(500, GRACIA_CORTE_MS));
+  }
+  if (!grupoVivo(pid)) return;
+
+  log(`el árbol del agente sigue vivo tras ${Math.round(GRACIA_CORTE_MS / 1000)} s; forzando`);
+  try { process.kill(-pid, 'SIGKILL'); } catch (_error) { /* se fue entre la pregunta y el disparo */ }
 };
 
 // Mientras el agente trabaja, el conductor ya no está bloqueado: puede latir y puede
@@ -888,12 +933,22 @@ const vigilarAgente = (cfg) => {
 
   const escucha = setInterval(async () => {
     const orden = await siguienteOrden(cfg);
-    if (!orden || !['stop', 'pause'].includes(orden.command)) return;
+    if (!orden) return;
+    // Reanudar lo que ya está corriendo no es nada, pero dejarla en el buzón sí lo es:
+    // quedaría por delante de la orden siguiente —la de parar, justamente— hasta que
+    // alguien la recogiera. Se acusa y se tira aquí mismo.
+    if (orden.command === 'resume') {
+      await acusarOrden(cfg, orden.id, 'done', 'ya estaba corriendo');
+      return;
+    }
+    if (!['stop', 'pause'].includes(orden.command)) return;
     ordenDeParada = orden;
     log(`orden recibida: ${orden.command} — cortando el proceso del agente`);
     registrar(cfg, { evento: 'parada', motivo: `orden:${orden.command}`, detalle: 'pedida desde el panel', orden_id: orden.id });
     await acusarOrden(cfg, orden.id, 'acked');
-    matarArbol(procesoAgente);
+    // Se guarda la promesa y no se espera aquí: el intervalo no puede bloquear al latido.
+    // La espera la hace quien va a parar, que es el único que no puede irse antes.
+    cortePendiente = matarArbol(procesoAgente);
   }, ORDENES_ESPERA_MS);
 
   latido.unref();
@@ -1260,6 +1315,10 @@ const conducir = async (cfg, plantillaPrompt) => {
       // el claim es idempotente y el motor vuelve a servir el mismo paso mientras el
       // puntero siga corriendo. Así que aquí no hay nada que deshacer, sólo que parar.
       if (ordenDeParada) {
+        // Antes de parar, rematar. El hijo directo ya cerró —por eso estamos aquí— pero
+        // el corte puede seguir en su plazo de gracia, y parar ahora sería irse dejando
+        // vivo al agente que se acaba de decir que se detuvo.
+        if (cortePendiente) { await cortePendiente; cortePendiente = null; }
         await parar(cfg, {
           motivo: `orden:${ordenDeParada.command}`,
           detalle: 'lo pidió una persona desde el panel',
@@ -1334,7 +1393,7 @@ const esperarOrdenDeArranque = async (cfg) => {
   log(`en espera de órdenes como '${cfg.agentName}' (sondeo cada ${ORDENES_ESPERA_MS / 1000} s)`);
   for (;;) {
     const orden = await siguienteOrden(cfg);
-    if (orden && orden.command === 'start') {
+    if (orden && (orden.command === 'start' || orden.command === 'resume')) {
       await acusarOrden(cfg, orden.id, 'acked');
       return orden;
     }
@@ -1345,11 +1404,13 @@ const esperarOrdenDeArranque = async (cfg) => {
   }
 };
 
-// La orden trae la configuración de ESA corrida. Se compone sobre la que ya existe en vez
-// de reemplazarla: la identidad, el diario y los avisos son del conductor, no de la orden.
-const configDeOrden = (cfg, orden) => {
+// La orden trae la configuración de ESA corrida. Se compone sobre una base en vez de
+// reemplazarla: la identidad, el diario y los avisos son del conductor, no de la orden.
+// La base la elige quien llama —la del proceso para `start`, la de la corrida anterior
+// para `resume`—, que es lo único que distingue a las dos órdenes.
+const configDeOrden = (base, orden) => {
   const p = orden.payload || {};
-  const nueva = { ...cfg, esperando: false };
+  const nueva = { ...base, esperando: false };
   if (p.project_url) nueva.projectUrl = String(p.project_url);
   if (p.agent_cmd) nueva.agentCmd = String(p.agent_cmd);
   if (p.workflows) {
@@ -1396,17 +1457,37 @@ const main = async () => {
   }
 
   if (envCargado) log(`entorno cargado de ${envCargado}`);
+
+  // Lo que reanuda `resume`: la configuración de la última corrida. Vive en el proceso y
+  // no en APTS porque es lo que ESTE conductor estaba haciendo, y la máquina donde corre
+  // es parte de esa configuración —`--agent-cmd` invoca un binario de este disco—. Un
+  // conductor recién arrancado no tiene nada que reanudar aunque el proyecto sí tenga
+  // historia, y decir eso en voz alta es mejor que adivinar una configuración.
+  let ultimaCorrida = null;
+
   for (;;) {
     const orden = await esperarOrdenDeArranque(cfg);
+
+    const reanudando = orden.command === 'resume';
+    if (reanudando && !ultimaCorrida) {
+      log('orden de reanudación rechazada: este conductor no ha conducido nada todavía');
+      await acusarOrden(cfg, orden.id, 'cancelled', 'no hay corrida anterior que reanudar');
+      continue;
+    }
+
     let corrida;
     try {
-      corrida = configDeOrden(cfg, orden);
+      corrida = configDeOrden(reanudando ? ultimaCorrida : cfg, orden);
     } catch (error) {
       log(`orden de arranque rechazada: ${error.message}`);
       await acusarOrden(cfg, orden.id, 'cancelled', error.message);
       continue;
     }
 
+    if (reanudando) log(`reanudando ${corrida.projectUrl} con la configuración de la corrida anterior`);
+    // Se recuerda al componerla y no al terminar bien: una corrida que murió a mitad es
+    // justamente la que hay que poder reanudar.
+    ultimaCorrida = corrida;
     cfgActual = corrida;
     try {
       await conducir(corrida, plantillaPrompt);
@@ -1421,6 +1502,7 @@ const main = async () => {
     // la siguiente.
     tareaActual = null;
     ordenDeParada = null;
+    cortePendiente = null;
     cfgActual = cfg;
   }
 };
