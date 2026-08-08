@@ -46,7 +46,28 @@ const WORKFLOW_OUTPUTS = {
   // —no da error, da el contexto equivocado— y el siguiente podia no verlo.
   'bmad-create-story': { output: { kind: 'artifact', doc_type: 'story_spec', scope: 'story' } },
   // Ejecutor per-historia (iterable): cierra cuando todas las historias están done.
-  'bmad-dev-story': { output: { kind: 'status', value: 'done' }, iterable: true },
+  //
+  // El `extra` es la revisión adversaria (`bmad-code-review`), y está AQUÍ y no en la
+  // espina de la fase a propósito. La espina se recorre en orden y activa el primer
+  // workflow no-completo, y dev-story sólo está completo cuando TODAS las historias
+  // están done: un `bmad-code-review` colgado detrás de él correría una vez, al final,
+  // sobre el lote entero. Y su completitud sería `artifact-exists` a nivel de
+  // iniciativa, así que un solo documento cerraría el workflow para las 25 historias.
+  // La revisión no es una compuerta de la FASE —no dice nada sobre si implementation
+  // terminó—, es una compuerta de la UNIDAD. Declarada como output del paso terminal
+  // de dev-story corre por historia por construcción, y se captura en el mismo submit
+  // que cierra la unidad.
+  //
+  // `required_for_close`: sin ese artefacto el submit terminal se rechaza. Es lo que
+  // separa una compuerta de un adorno; los `extra` normales (backlog_items) sólo se
+  // capturan si vienen.
+  'bmad-dev-story': {
+    output: { kind: 'status', value: 'done' },
+    extra: [{
+      kind: 'artifact', doc_type: 'code_review', scope: 'story', required_for_close: true,
+    }],
+    iterable: true,
+  },
 };
 
 // Descriptor de output → primitiva que verifica que está satisfecho (completitud).
@@ -73,10 +94,16 @@ const outputToCompletion = (output) => {
 // por-story convertiria "hay una spec" en "hay una spec de cada story", que es
 // otra decision —mas estricta y capaz de plantar una iniciativa en marcha— y no
 // es la que este arreglo viene a tomar.
+//
+// Mira el output primario Y los `extra`: el alcance es del artefacto, no del papel que
+// juega en la completitud. Si sólo mirara el primario, `code_review` —que es un extra—
+// se guardaria con la clave de la iniciativa y las 25 historias compartirian una sola
+// fila de revision, que es exactamente el fallo mudo que `story_spec` acaba de costar.
 const perStoryDocTypes = () => new Set(
   Object.values(WORKFLOW_OUTPUTS)
-    .filter((spec) => spec.output.kind === 'artifact' && spec.output.scope === 'story')
-    .map((spec) => spec.output.doc_type),
+    .flatMap((spec) => [spec.output, ...(spec.extra || [])])
+    .filter((o) => o.kind === 'artifact' && o.scope === 'story')
+    .map((o) => o.doc_type),
 );
 
 // Construye el mapa de completitud a nivel-workflow (consumido por el resolver T1.5).

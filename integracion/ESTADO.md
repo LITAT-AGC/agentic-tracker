@@ -55,23 +55,41 @@ cadena. Un cliente que arrancaba desde la URL no podia saber que existia. Ahora 
 su forma depende del runtime, asi que el script sin su manual no se puede usar. El script es
 autocontenido —CommonJS, solo builtins de Node— asi que descargar ese unico archivo basta.
 
-**La revision adversaria entra por prompt, no por motor.** `bmad-code-review` esta sembrado en la
-biblioteca (`bmad:v6.8.0`, fase `implementation`, dueño `bmad-agent-dev`) y describe exactamente lo
-que hace falta —tres capas paralelas: Blind Hunter, Edge Case Hunter, Acceptance Auditor— pero no
-corre nunca: su `routing` trae `required: false`, `resolvePhaseSpine` arma la espina solo con los
-`required`, y no tiene entrada en `WORKFLOW_OUTPUTS`, asi que el motor no sabria cuando darlo por
-cerrado. Sus tres pasos importados, ademas, son la prosa del SKILL.md ("WORKFLOW ARCHITECTURE",
-"FIRST STEP"), no un procedimiento conducible.
+**La revision adversaria ya es una compuerta, y de la unidad.** `bmad-code-review` esta sembrado en
+la biblioteca (`bmad:v6.8.0`, fase `implementation`, dueño `bmad-agent-dev`) y describe exactamente
+lo que hacia falta —tres capas paralelas: Blind Hunter, Edge Case Hunter, Acceptance Auditor— pero
+no corria nunca: su `routing` trae `required: false` y `resolvePhaseSpine` arma la espina solo con
+los `required`.
 
-Mientras eso no cambie, la compuerta vive en el prompt del conductor:
-`integracion/conductor/prompts/dev-story-revision-adversaria.md`, que se pasa con `--prompt-file`.
-Exige las tres capas en subagentes paralelos antes de entregar el paso 8 de `bmad-dev-story`, y ante
+Colgarlo de la espina tampoco servia, y ese fue el hallazgo que decidio el diseño. La espina se
+recorre en orden y activa el primer workflow NO-completo, y `bmad-dev-story` solo esta completo
+cuando TODAS las historias estan done: un `bmad-code-review` detras de el correria una vez, al
+final, sobre el lote entero. Y su completitud seria `artifact-exists` a nivel de iniciativa, asi que
+un solo documento cerraria el workflow para las 25 historias. La revision no es una compuerta de la
+FASE —no dice nada sobre si implementation termino—: es una compuerta de la UNIDAD.
+
+Asi que entra como output del paso terminal de `bmad-dev-story` y no como nodo de la espina:
+`extra: [{ kind: 'artifact', doc_type: 'code_review', scope: 'story', required_for_close: true }]`
+en `WORKFLOW_OUTPUTS`, que es la fuente unica. Corre por historia por construccion, se captura en el
+mismo submit que cierra la unidad, y deja fila propia en `semantic_documents` con la clave de esa
+unidad. `required_for_close` es lo que la hace compuerta y no adorno: el submit terminal sin
+`output.content` se rechaza con `ok:false` y la story no cierra. Se comprueba **antes** de capturar
+y **sin excepcion para HALT**, porque la captura corre antes que el control y un HALT declarado
+sobre el paso terminal cerraria la story igual: esa puerta volveria opcional la compuerta con solo
+decir que uno se detiene.
+
+La espina no se toco y el corpus no se falseo: `bmad-code-review` sigue sembrado como lo que BMAD
+publica, un workflow a demanda. Sus tres pasos importados son la prosa del SKILL.md ("WORKFLOW
+ARCHITECTURE", "FIRST STEP"), no un procedimiento conducible; el procedimiento real vive en los step
+files del upstream, que el importador no trajo. `dev_story_completion_rule` del manifiesto ya dice
+que el paso terminal declara DOS outputs y que los dos viajan en el mismo submit. `schema_version`
+no cambia: no hay clave nueva.
+
+Del lado del conductor, `integracion/conductor/prompts/dev-story-revision-adversaria.md`
+(`--prompt-file`) exige las tres capas en subagentes paralelos antes de entregar el paso 8, y ante
 un hallazgo confirmado —`archivo:linea` mas escenario de fallo concreto— declara la rama que el
-propio metodo ya tiene, `{"goto":"step:5"}`, en vez de parchear en silencio. **APTS no ve rastro de
-esa revision**: solo la story cerrada. Por eso la plantilla exige dejar `docs/reviews/<story_id>.md`
-commiteado en el repositorio destino, que es el unico artefacto observable hasta que el motor tenga
-su `doc_type` `code_review`. La plantilla vive en el repo y **no** es un artefacto publicado: el
-README del conductor, que si lo es, la nombra como variante versionada del repo.
+propio metodo ya tiene, `{"goto":"step:5"}`, en vez de parchear en silencio. La plantilla vive en el
+repo y **no** es un artefacto publicado: el README del conductor, que si lo es, la nombra.
 
 **La fase de partida ya no se puede regalar.** `create_initiative` publica `phase`, y era la unica
 puerta del contrato por la que un cliente podia saltarse fases enteras: el paseo inter-fase arranca
@@ -248,6 +266,15 @@ Contra `APTS_test` (puerto 47301; la ultima ronda —la del coste de los embeddi
   decision y para con `PARADA (blocked): sin iniciativa activa` y codigo 10, que es exactamente lo
   que su README documenta. No necesita nada instalado: CommonJS y solo builtins de Node.
 - `scripts/test_agent_api.js` y `scripts/test_agent_api_batch.js`, en verde.
+- **La compuerta de revision por unidad**, con `backend/scripts/test_code_review_gate.js` (nuevo:
+  no habia arnes del motor de metodo, solo de la API de agente; corre dentro de una transaccion que
+  se revierte y no necesita el servidor levantado). El submit terminal sin revision se rechaza
+  nombrando `code_review`, y no deja nada detras: la story sigue `in_progress`, no hay artefacto
+  escrito y el cursor no avanza. Con la revision cierra, captura las dos declaraciones
+  (`artifact,status`), la story queda `done` y el documento aterriza en
+  `initiative:<id>:code_review:story:<story>` —no en la clave de la iniciativa—, asi que otra story
+  de la misma iniciativa no lo ve como suyo. La migracion 018 y el sembrado coinciden: tras correr
+  `seed:method:test` el paso 10 sigue con los mismos dos descriptores.
 - El generador es idempotente: una segunda corrida emite los mismos 23 archivos y no cambia el
   arbol.
 - **El bucle publicado no necesita `primitives_palette`.** Con la tabla vaciada —la condicion exacta

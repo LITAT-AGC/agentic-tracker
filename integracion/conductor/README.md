@@ -154,11 +154,13 @@ el agente declara la rama que el propio método tiene, `{"goto":"step:5"}`, en v
 parchear en silencio — con el tope de revisitas haciendo su trabajo si la unidad no
 sobrevive a las pasadas.
 
-Es una medida **a plazo**: la revisión ocurre dentro de la sesión y APTS no ve rastro de
-ella, sólo la story cerrada. Por eso la plantilla exige dejar
-`docs/reviews/<story_id>.md` commiteado en el repositorio destino: es el único artefacto
-observable hasta que `bmad-code-review` corra como compuerta del motor con su propio
-`doc_type`.
+La revisión se escribe una vez y viaja por dos caminos: `docs/reviews/<story_id>.md`
+commiteado en el repositorio destino, y `output.content` del submit terminal, donde el
+motor la guarda como artefacto `code_review` **de esa unidad**. El segundo camino es una
+compuerta de verdad: el paso terminal lo declara `required_for_close`, así que un submit
+sin él se rechaza con `ok:false` y la story no cierra. La plantilla vale también contra un
+servidor que todavía no tenga la compuerta —ahí ese `content` simplemente no se captura—,
+así que no hay que sincronizar el despliegue con el reinicio del conductor.
 
 Cuesta: tres subagentes por story, y en reloj entre cuatro y ocho minutos más por vuelta.
 

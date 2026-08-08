@@ -819,6 +819,27 @@ const aptsSubmitStep = (db, { project_url, agent_name, output }) =>
       };
     }
 
+    // ---- 0.bis. Compuerta de cierre: artefactos `required_for_close` ----
+    // Un `extra` corriente se captura si viene y se ignora si no (backlog_items). Éste
+    // no: la revisión adversaria de la unidad es la condición para cerrarla, y sin este
+    // rechazo sería una recomendación con nombre de compuerta.
+    //
+    // Se comprueba ANTES de capturar y sin excepción para HALT. La captura corre antes
+    // que el control, así que un HALT declarado sobre el paso terminal marcaría la story
+    // done igual: dejar esa puerta abierta volvería opcional la compuerta con sólo
+    // declarar que uno se detiene. Quien no pueda producir la revisión tiene que parar
+    // ANTES del paso terminal y reportar el bloqueo, que es lo que el manifiesto manda.
+    const sinCerrar = declared.find((d) => d.kind === 'artifact' && d.required_for_close
+      && !(typeof out.content === 'string' && out.content.trim()));
+    if (sinCerrar) {
+      return {
+        ok: false,
+        why: `el paso '${step.key}' no cierra la unidad sin el artefacto '${sinCerrar.doc_type}': `
+          + 'mandá su texto en output.content (y su título en output.title). '
+          + 'Si no podés producirlo, no cierres la unidad: reportá el bloqueo y detenete',
+      };
+    }
+
     // ---- 1. Captura de output según el descriptor del paso ----
     const captured = [];
     for (const decl of declared) {

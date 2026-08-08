@@ -100,16 +100,24 @@ revisión.
 
 Si no queda ningún hallazgo confirmado, entrega el paso 8 por el camino normal.
 
-RASTRO. APTS todavía no ve esta revisión, así que sin archivo no queda nada de ella.
-Deja `docs/reviews/{story_id}.md` en el repositorio, commiteado junto con el trabajo de
-la unidad. Corto y sin adornos:
+RASTRO. La revisión se escribe una vez y viaja por dos caminos. Corta y sin adornos:
 - la story y el commit revisado;
 - una línea por capa, con cuántos hallazgos confirmó;
 - los CONFIRMADOS: `archivo:línea`, escenario de fallo, y qué se hizo con cada uno;
 - los ANOTADOS, una línea cada uno, sin desarrollar.
 
-Si volviste al paso 5, ese archivo se actualiza con la pasada nueva; no se duplica ni se
-crea uno por vuelta.
+Los dos caminos:
+1. `docs/reviews/{story_id}.md` en el repositorio, commiteado junto con el trabajo de la
+   unidad.
+2. En el submit terminal, dentro del mismo `output` que cierra la unidad:
+   `output: { status: "done", code_ref: "<hash>", title: "<título>", content: "<la revisión>" }`.
+   El paso terminal declara ese artefacto como `code_review` de ESTA unidad, y donde el
+   motor ya tiene la compuerta el submit sin `content` se rechaza con `ok:false` y la
+   story no cierra. Mira los `outputs[]` que te sirve el paso: son la verdad sobre lo que
+   ese paso espera.
+
+Si volviste al paso 5, la revisión se rehace con la pasada nueva; el archivo se actualiza,
+no se duplica ni se crea uno por vuelta.
 
 No toques el ciclo más allá de esta unidad: no arranques iniciativas, no conduzcas
 fases generativas y no cierres otras stories.
