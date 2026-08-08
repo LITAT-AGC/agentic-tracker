@@ -557,7 +557,7 @@ Contra `APTS_test` (puerto 47301; la ultima ronda —la del coste de los embeddi
 
 ## Produccion
 
-Donde vive, al dia el 2026-08-07:
+Donde vive, al dia el 2026-08-08:
 
 | | |
 |---|---|
@@ -689,6 +689,31 @@ vigilancia de fondo ya le habia puesto: la maquina de metodo no tiene salida des
 —`apts_set_status` responde 409 diciendo que se reponga con `update_backlog_item`—, asi que la
 historia `344da12c` sigue en `blocked` esperando esa reposicion.
 
+**Comprobado despues del octavo despliegue del 2026-08-08** (`99c5cfa`, **con tres
+migraciones**: la 021 `entity_overrides`, la 022 —el CHECK de `agent_logs.action_type` con
+`journal`— y la 023 `conductor_orders`; batch 5). La copia previa quedo en
+`/root/apts-backup-20260808-153424-424d2d4f4.dump` (564 KB). Entraron cuatro commits: las
+cinco pestañas del proyecto y las restricciones editables, el roster BMAD editable con
+`role_profile`, el conductor asincrono con buzon de ordenes, y el arreglo de `resume` y del
+corte del arbol.
+
+En la base del servidor: las dos tablas nuevas existen, el CHECK de `agent_logs` ya admite
+`journal` y el de `conductor_orders.command` trae los cuatro valores, `resume` incluido. Por
+la URL publica: el manifiesto sale con `schema_version` **1.1.1** y **8 artefactos**, con el
+conductor y su README en **1.6.0**; las dos rutas versionadas responden 200 sirviendo lo
+nuevo de verdad —el script (75.567 bytes) trae `grupoVivo`, `GRACIA_CORTE_MS`,
+`cortePendiente` y el rechazo de la reanudacion sin corrida previa, y el README su seccion
+«Reanudar»—; y `tools/list` devuelve **22 operaciones**, `set_project_constraints` entre
+ellas. El frontend desplegado es el nuevo: su chunk `ProjectDetails` trae el boton Reanudar,
+las pestañas y la llamada a `conductor/orders`, y la pagina Roster se sirve aparte. Las seis
+comprobaciones del desplegador pasaron y el aviso de `/mcp` no salio.
+
+El script publicado difiere del local **solo en el fin de linea** —1.528 bytes de diferencia
+sobre 1.528 lineas, y el md5 coincide normalizando a LF—, que es lo de siempre: el checkout
+del servidor guarda LF. Y la cabecera `Cache-Control` del `.js` se ve otra vez como
+`max-age=14400` desde fuera, reescrita por Cloudflare; el `.md` de al lado, que no esta en su
+lista por extension, sale con el `no-cache` del origen.
+
 **El panel ya escribe donde antes solo miraba, y el conductor ya se puede parar.** Tres
 huecos que venian del mismo sitio —lo que APTS sabia hacer no tenia por donde pedirse— se
 cerraron el 2026-08-08.
@@ -756,7 +781,7 @@ modo no-daemon el conductor sale justo detras.
 
 Los dos artefactos del conductor suben a `artifact_version` **1.6.0**: quien se quedara con
 la 1.5.0 tiene un boton Reanudar cuya orden no recoge nadie y, en Linux o macOS, un corte
-que cree haber matado al agente. Sin desplegar: hay tres migraciones nuevas.
+que cree haber matado al agente. Desplegado el 2026-08-08 con sus tres migraciones.
 
 ## Abierto
 
@@ -769,8 +794,18 @@ primera mano la forma de la respuesta del punto compatible con OpenAI —vector 
 documentacion. Si ese punto contestara con el sobre nativo de Workers AI, el lector ya acepta
 `result.data[0]` y no haria falta tocar nada.
 
-En el repositorio no queda nada mas. Produccion corre lo mismo que `origin/main`, con las 17
-migraciones aplicadas y el frontend recompilado el 2026-08-07 —llevaba desde el 21 de junio—.
+**El buzon de ordenes solo lo atiende quien esta corriendo.** Una orden dirigida a un
+conductor que no existe se queda `pending` para siempre, y nadie la caduca: el panel la
+muestra en su lista y no hay forma de distinguir «encolada, ya la recogera» de «no hay nadie
+al otro lado». Con `resume` eso pasaba con todas; ahora solo pasa cuando el conductor esta
+apagado, que es un caso mas raro pero igual de mudo. La pestaña Conductor tampoco se refresca
+sola: hay un boton Actualizar.
+
+**Editar `workflow_steps` sigue fuera de alcance**, declarado. Las instrucciones paso a paso
+del metodo se editan sembrando el corpus, no desde el panel.
+
+En el repositorio no queda nada mas. Produccion corre lo mismo que `origin/main`, con las 23
+migraciones aplicadas y el frontend recompilado el 2026-08-08.
 
 **El `.env` de PROD no necesita ninguna clave nueva.** Tiene diez y ninguna de las que llegaron
 despues es obligatoria: `EMBEDDING_DEFAULT_MODEL` no hace falta porque
