@@ -410,6 +410,21 @@ y las seis comprobaciones del desplegador —`/api/health` local y publico, mani
 `mcp_endpoint`, `/mcp` por los dos caminos y el bundle del dist nuevo— pasaron. El aviso de `/mcp`
 no salio: nginx lo enruta desde el 2026-08-07.
 
+**Comprobado despues del cuarto despliegue del 2026-08-08** (`091e65b`, **con migracion**: la 018,
+la primera que corre en PROD desde el arranque de cero). La copia previa quedo en
+`/root/apts-backup-20260808-020936-ce2fd604f.dump` (556 KB). En la base del servidor: `code_review`
+esta en el enum de `semantic_documents`, y el paso terminal de `bmad-dev-story` (`bmad:v6.8.0`, el
+10) trae los dos descriptores —`status` y el `artifact` `code_review` con `scope: 'story'` y
+`required_for_close: true`—, asi que el recableado alcanzo a la libreria ya sembrada sin necesidad
+de re-sembrar. Por la URL publica, `dev_story_completion_rule` ya publica la regla de los dos
+outputs. Las seis comprobaciones del desplegador pasaron y el aviso de `/mcp` no salio.
+
+Se desplego **con el bucle de fm-synth corriendo contra PROD**, por decision explicita del
+operador y no por descuido: el reinicio de pm2 puede tumbar la llamada MCP de un agente en vuelo, y
+un conductor arrancado antes de este cambio lleva en memoria una plantilla que no manda
+`output.content`, asi que sus submits terminales rebotan hasta que se reinicie. El rechazo es
+autoexplicativo —dice que falta `output.content`—, que es lo que hace el riesgo asumible.
+
 ## Abierto
 
 **El camino de Cloudflare no se ha visto devolver un vector.** El `CLOUDFLARE_API_TOKEN` del `.env`
