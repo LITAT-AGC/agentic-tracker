@@ -194,6 +194,27 @@ recibir los bytes de la anterior, conteste el origen lo que conteste. Descartado
 versionada para cachear a largo plazo (`immutable`): la version se bumpea a mano, y un archivo
 editado sin bump quedaria clavado en el borde todo ese plazo.
 
+**De esas dos correcciones, en el borde solo llega una.** Comprobado el 2026-08-08 contra
+produccion: el origen si manda `no-cache` —se ve en `README.md` y en `skills.json`, los dos con
+`cf-cache-status: DYNAMIC`— pero Cloudflare lo **reescribe** para el `.js`, que vuelve con
+`max-age=14400` y `cf-cache-status: REVALIDATED`. La directiva no alcanza justamente al unico
+artefacto por el que se puso. Lo que sostiene la entrega es la otra mitad: la descarga de
+`?v=1.6.0` coincidio byte a byte con el archivo del repo. La consecuencia practica es que subir
+`artifact_version` deja de ser cortesia y pasa a ser la unica defensa —editar `apts-loop.js` sin
+bumpear puede dejar al borde sirviendo los bytes viejos cuatro horas—, y que la promesa de
+`no-cache` no se puede dar por buena leyendo el codigo del origen: hay que medirla desde fuera.
+
+**El sondeo del buzon ya no ahoga el log.** El conductor en marcha pregunta por ordenes cada diez
+segundos, y cada vuelta escribia una linea HTTP a nivel `info`: 8.640 al dia por conductor, todas
+diciendo lo mismo. Mirar el log durante una implementacion no enseñaba nada del trabajo real —en
+media hora de una corrida de fm-synth, 38 de cada 40 lineas eran el sondeo—, que es el modo exacto
+en que un log deja de servir: no por perder informacion, por sepultarla. Ahora la ruta marca la
+respuesta cuando vuelve sin orden (`res.locals.emptyConductorPoll`) y el middleware la deja en
+`debug`. Se marca en la ruta y no por la URL en el middleware porque lo que separa el ruido de la
+señal no es el camino sino si habia algo en el buzon: la **entrega** de una orden sigue en `info`,
+que es la mitad que interesa mirar. No se pierde nada —con `LOG_LEVEL=debug` vuelve a verse
+entero— y los 4xx y 5xx no se tocan, porque los niveles de error se resuelven antes.
+
 **`ready_for_dev` ya existe tambien para la API.** La migracion 010 metio ese estado en la columna
 —lo declara en su propia lista, `BACKLOG_STATUSES_NEW`— y el motor lo escribe en CADA story que
 crea, pero la constante `BACKLOG_STATUSES` de `backend/index.js` se quedo con la lista de antes de

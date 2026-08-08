@@ -166,6 +166,17 @@ app.use((req, res, next) => {
     }
 
     if (isFrontendServiceRequest(req)) return;
+
+    // El sondeo del buzón que vuelve vacío no es un evento: es el latido de un conductor
+    // en espera, una vuelta cada diez segundos por conductor, y ahogaba el resto del log
+    // —en una ventana de treinta minutos de trabajo real fueron 38 de cada 40 líneas—.
+    // Baja a debug y no se pierde: con LOG_LEVEL=debug vuelve a verse. La ENTREGA de una
+    // orden sí es un evento y se queda en info, que es la mitad que interesa mirar.
+    if (res.locals.emptyConductorPoll) {
+      logger.debug(payload, 'HTTP request');
+      return;
+    }
+
     logger.info(payload, 'HTTP request');
   });
 
@@ -5492,6 +5503,10 @@ app.get('/api/conductor/orders/next', apiLimiter, authenticateAgent, async (req,
       .where({ agent_name: agentName, status: 'pending' })
       .orderBy('created_at', 'asc')
       .first();
+
+    // Sin orden, esta vuelta no cuenta nada; se marca para que el log HTTP la deje en
+    // debug en vez de escribir una línea cada diez segundos por conductor en espera.
+    if (!order) res.locals.emptyConductorPoll = true;
 
     return res.json({ order: order || null });
   } catch (error) {
