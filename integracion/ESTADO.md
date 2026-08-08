@@ -766,6 +766,36 @@ del desplegador pasaron y el aviso de `/mcp` no salio.
 
 Lo que **no** se ha comprobado en PROD es la pantalla: el panel de produccion pide la
 contraseña del operador. Los cuatro estados se vieron en vivo contra el servidor de prueba.
+—Ya no: la señal de vida se vio en verde contra PROD el 2026-08-08, ver abajo.
+
+**`resume` y el corte del arbol, por fin ejercidos contra PROD** (2026-08-08). Hasta ese dia
+todo el buzon se habia probado solo contra el servidor de prueba, y la rama POSIX del corte
+solo en WSL. Se ejercio **por el panel de produccion**, pulsando los botones de verdad, con el
+conductor corriendo **en el propio servidor** —asi ningun secreto sale del `.env`, y de paso la
+rama que se ejerce es la POSIX contra produccion— y un agente falso que solo duerme y lanza un
+nieto, que es lo unico que distingue matar al hijo de matar al arbol.
+
+| paso | resultado |
+|---|---|
+| Reanudar sin corrida previa | `cancelled`, «no hay corrida anterior que reanudar» |
+| Iniciar | reclama una story y lanza el agente en su propio grupo (`pgid` distinto del conductor) |
+| Pausar | los TRES muertos —`sh`, agente y nieto—; el conductor sobrevive y vuelve a esperar |
+| Reanudar | retoma la misma story con la misma configuracion, sin reescribir nada en el panel |
+| Detener | el arbol muerto otra vez |
+
+Y de paso quedaron vistas dos cosas mas contra PROD: la **señal de vida** en verde («Escuchando
+· ultima señal hace 0 s») y el **diario del conductor** llegando a APTS —`parada`, `agente ...
+terminado por SIGTERM`, `exit_code 15`— colgado de la tarea de la unidad.
+
+El escenario se monto conduciendo el ciclo BMAD **real** por MCP con contenido de relleno hasta
+`implementation` —sin sembrar nada y sin tocar el corpus—, sobre un proyecto de fixture propio
+que se borro entero al terminar (3 iniciativas, 4 stories, 22 documentos, 2 tareas, 10 filas de
+diario, 5 ordenes). En PROD volvio a quedar solo `fm-synth`. Dos trampas del montaje, por si
+hay que repetirlo: el motor espera las historias en **`output.stories`** y no bajo el nombre del
+`kind` —mandarlas como `backlog_items` cierra el paso capturando cero, porque las stories son
+`extra` y quien gatea la completitud es el artefacto `epics`—; y el ciclo **vuelve sobre un
+mismo rol mas de una vez**, asi que llevar la cuenta de los roles ya usados en vez del rol
+actual deja al agente plantado en `wait` para siempre.
 
 **Comprobado despues del decimo despliegue del 2026-08-08** (`7396a7e`, **sin migraciones**:
 `cancelled` ya estaba en el enum y el motivo cabe en `detail`). Entraron dos commits, la
@@ -933,6 +963,22 @@ primera mano la forma de la respuesta del punto compatible con OpenAI —vector 
 `data[0].embedding` y `usage` con tokens—, que es lo unico que se dio por bueno leyendo la
 documentacion. Si ese punto contestara con el sobre nativo de Workers AI, el lector ya acepta
 `result.data[0]` y no haria falta tocar nada.
+
+**Detener y Pausar son el mismo boton, y hay que unificarlos en Pausar.** Contra un conductor
+en `--daemon` las dos ordenes hacen exactamente lo mismo: cortan el arbol del agente, terminan
+esa corrida y devuelven el conductor a la espera. No es un defecto del corte —el codigo lo dice
+a proposito, «en espera, una parada no termina el proceso: termina esa corrida», que es lo que
+hace que pausar y volver a arrancar sean una sola sesion— y el codigo de salida 15 solo se ve
+cuando el conductor corre SIN `--daemon`. El problema es lo que el panel promete: dos botones
+que, contra el unico modo que el panel puede manejar, son indistinguibles. Se vio pulsandolos
+los dos contra PROD el 2026-08-08.
+
+Decidido el 2026-08-08: **se unifica en Pausar**, no al reves. El panel encola ordenes para un
+conductor que no arranca el —lo arranca una persona en la maquina donde vive el `--agent-cmd`—,
+asi que un boton que apagara el proceso dejaria el buzon sin nadie al otro lado y sin forma de
+volver a levantarlo desde el panel: justo lo que la señal de vida vino a hacer visible. Queda
+por decidir que pasa con `stop` en el enum de `conductor_orders` y en `CONDUCTOR_COMMANDS`, que
+es superficie ya publicada.
 
 **Editar `workflow_steps` sigue fuera de alcance**, declarado. Las instrucciones paso a paso
 del metodo se editan sembrando el corpus, no desde el panel.
