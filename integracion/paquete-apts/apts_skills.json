@@ -266,6 +266,37 @@
       }
     },
     {
+      "name": "set_project_constraints",
+      "description": "Register the project constraints that get_project_constraints reads back: the test, lint and typecheck commands, plus framework, language and free-text conventions. Use it once you have established how this repo is verified, so later agents do not have to rediscover it. Patch semantics: only the fields present in the call are written, an explicit null clears one, and an unknown field name is rejected instead of silently dropped. Returns the effective constraints after the write. Minimum payload via the official MCP server: at least one field (the integration layer supplies url).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "test_command": {
+            "type": ["string", "null"]
+          },
+          "lint_command": {
+            "type": ["string", "null"]
+          },
+          "typecheck_command": {
+            "type": ["string", "null"]
+          },
+          "framework": {
+            "type": ["string", "null"]
+          },
+          "language": {
+            "type": ["string", "null"]
+          },
+          "conventions": {
+            "type": ["string", "null"]
+          }
+        },
+        "required": []
+      }
+    },
+    {
       "name": "search_similar_bug_reports",
       "description": "Find semantically similar non-deleted bug reports using OpenRouter embeddings to reduce duplicate bug intake. Minimum payload via the official MCP server: query_text (the integration layer supplies url).",
       "parameters": {
@@ -947,7 +978,7 @@
     },
     {
       "name": "create_initiative",
-      "description": "Bootstrap a conducible BMAD method initiative for a project (server-authoritative method engine). Creates - idempotently by (project_url, active status) - an initiative in the 'analysis' phase scoped to the seeded BMAD library (source_ref 'bmad:v6.8.0'), folds in one empty epic (the engine needs an epic in implementation and there is no epic tool), and optionally stores the client's spec as a typed semantic_documents artifact linked to the initiative (the server has no access to the client repo filesystem). Returns { initiative_id, epic_id, phase, created|resumed, roster }, where roster.entity_keys lists the valid entity_key values for set_agent_role in this initiative's library. After bootstrap, apts_next stops returning 'blocked' and delivers the first real step. Minimum payload via the official MCP server: title (the integration layer supplies project_url).",
+      "description": "Bootstrap a conducible BMAD method initiative for a project (server-authoritative method engine). Creates - idempotently by (project_url, active status) - an initiative in the 'analysis' phase scoped to the seeded BMAD library (source_ref 'bmad:v6.8.0'), folds in one empty epic (the engine needs an epic in implementation and there is no epic tool), and optionally stores the client's spec as a typed semantic_documents artifact linked to the initiative (the server has no access to the client repo filesystem). Returns { initiative_id, epic_id, phase, created|resumed, roster }, where roster.entity_keys lists the valid entity_key values for set_agent_role in this initiative's library. After bootstrap, apts_next stops returning 'blocked' and delivers the first real step. Do not pass 'phase': a starting phase later than 'analysis' is rejected unless the artifacts that close the skipped phases already exist for the project (a spec is an input to those steps, not a substitute for their artifacts). Minimum payload via the official MCP server: title (the integration layer supplies project_url).",
       "parameters": {
         "type": "object",
         "properties": {

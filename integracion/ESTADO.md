@@ -8,10 +8,10 @@ llego hasta aqui: eso esta en el historial de git.
 | | |
 |---|---|
 | Superficie de integracion | El endpoint MCP remoto, `POST /mcp` (Streamable HTTP, sin sesion) |
-| Operaciones | 21, derivadas de `apts_skills.json` |
+| Operaciones | 22, derivadas de `apts_skills.json` |
 | Registro | Una URL y cuatro cabeceras; el manifiesto publica el bloque por runtime |
-| Manifiesto | `GET /api/public/integrar`, `schema_version` 1.0.1, 8.678 unidades |
-| Artefactos publicados | 9; `skill_markdown`, `agent_guidelines` y `surface_spec` en `artifact_version` 1.0.1, el resto en 1.0.0 |
+| Manifiesto | `GET /api/public/integrar`, `schema_version` 1.0.1, 8.766 unidades |
+| Artefactos publicados | 9; `surface_spec` en `artifact_version` 1.0.2, `skills_json`, `skill_markdown` y `agent_guidelines` en 1.0.1, el resto en 1.0.0 |
 | Descargas necesarias para operar | Ninguna |
 
 **Identidad.** Viaja en las cabeceras del registro. El servidor no mira el sistema de archivos, el
@@ -21,6 +21,38 @@ rol un agente— y un `project_url` que contradiga la cabecera se rechaza.
 **Conduccion del metodo.** El manifiesto publica `method_conduction`, hermano de `mcp_endpoint`, con
 cinco reglas: `bootstrap_rule`, `identity_switching_rule`, `drive_loop`, `generative_step_rule` y
 `dev_story_completion_rule`. Es la fuente autoritativa; las plantillas de agente apuntan a el.
+
+**La fase de partida ya no se puede regalar.** `create_initiative` publica `phase`, y era la unica
+puerta del contrato por la que un cliente podia saltarse fases enteras: el paseo inter-fase arranca
+en `initiatives.phase`, asi que arrancar adelantado no se salta un paso, se salta el trabajo que el
+motor habria exigido por el camino. Lo encontro produccion el 2026-08-07: un cliente que traia una
+spec arranco en `solutioning` —"analysis y planning ya cubiertos por el SPEC adjunto"— y la
+iniciativa llego a `implementation` sin `brief` y sin `prd`, es decir sin la elicitacion del analyst
+y sin el PM. Ahora `startPhaseGaps` exige que los artefactos que cierran las fases salteadas ya
+existan en el proyecto, y si no da 400 (`PHASE_NOT_REACHABLE`) nombrando cada uno con su fase y su
+workflow. Los lee de la misma espina y del mismo mapa de completitud que usa `apts_next`, asi que no
+hay un segundo criterio que pueda contradecir al primero; y la spec no compra ningun salto, porque
+su `doc_type` es `spec` justamente para no cerrar ninguna fase. Solo corre en el alta: en el resume
+`phase` es inerte, y rechazarlo alli romperia la via de recuperacion del agente que repite su
+llamada original. La regla viaja tambien en `bootstrap_rule` y en la descripcion de la operacion,
+para que el cliente se entere antes de que le rechacen la llamada.
+
+Esto invirtio una dependencia: `method_bootstrap` consulta la espina, asi que ahora importa a
+`method_resolver` y no al reves. `loadRosterKeys` —fuente unica del roster— se mudo con ella.
+
+**Las constraints del proyecto ya se pueden escribir.** `get_project_constraints` existia desde el
+principio y no habia escritor en ninguna de las tres superficies —ni operacion, ni ruta HTTP, ni
+pantalla del panel—, asi que un proyecto nuevo respondia los seis campos en `null` para siempre y el
+agente que si descubria como se verifica el repositorio no tenia donde dejarlo. La operacion 22,
+`set_project_constraints`, cierra el hueco por las dos superficies (`PUT
+/api/projects/:url/constraints`). Es un parche, no un reemplazo: escribe solo los campos que trae la
+llamada, un `null` explicito borra uno —y gana sobre lo que venga de `projects.description`, porque
+queda como clave presente en el JSON de `config`, que es la mitad que pisa a la otra—, un nombre de
+campo inventado se rechaza en vez de descartarse en silencio, y una llamada sin ningun campo tambien,
+porque seria un 200 que no escribe nada. Devuelve lo efectivo, no lo enviado.
+
+De paso, los dos sitios que decian «21 operaciones» dejaron de decir un numero: el manifiesto remite
+a lo que devuelve `tools/list`, que es lo que el cliente va a leer igualmente.
 
 **Una sola fuente por cosa.** Dos auto-chequeos corren al arrancar, antes de escuchar, y abortan con
 `exit 3` si algo se ha separado:
@@ -82,7 +114,7 @@ consulta, que es su unico trabajo y no un efecto lateral.
 `apts-client.js`. `mcp_stdio_runtime.mjs` conserva el nombre por el protocolo que habla, no por un
 transporte: es el nucleo MCP, `dispatch()` devuelve la respuesta y no escribe en ningun sitio, y
 quien llama le pasa el ejecutor. `contract_check.mjs` ejecutado directamente vuelve a funcionar y
-lista las 21 operaciones.
+lista las 22 operaciones.
 
 **Un campo que no existe se rechaza, no se ignora.** `limit` era el nombre que cualquiera le pone al
 tope de la busqueda semantica de bugs; el campo es `top_k`. Como el esquema no es estricto, `limit`
@@ -126,7 +158,22 @@ Contra `APTS_test` (puerto 47301; la ultima ronda —la del coste de los embeddi
 
 - Un cliente que **no descarga nada** conduce el ciclo BMAD completo a `phase=done`: 7 workflows
   generativos, 2 unidades `dev-story` de 10 pasos, 5 cambios de rol, 3 elicitaciones, 52 submits.
-- `initialize` y `tools/list` responden con 21 operaciones.
+- `initialize` y `tools/list` responden con 22 operaciones.
+- **`set_project_constraints`, por las dos superficies.** Escritura parcial: deja `test_command` y
+  `typecheck_command` y el resto en `null`; una segunda llamada agrega `lint_command` y `language`
+  sin borrar los dos primeros; `language: null` borra ese y solo ese. Las comillas que envuelven un
+  comando se pierden, igual que en la lectura. Un campo inventado (`tests_command`) da 400 nombrando
+  los seis validos; una llamada sin ningun campo, tambien; un valor no-cadena, 400 nombrando el
+  campo; y un proyecto que no existe, 404. Por HTTP, `PUT` responde lo mismo que el `GET` de al lado
+  devuelve despues.
+- **La guardia de la fase de partida**, por la libreria y por MCP: `phase: 'solutioning'` en el alta
+  da 400 nombrando `brief` (analysis, `bmad-product-brief`) y `prd` (planning, `bmad-prd`);
+  `implementation` nombra los cinco, con los tres de solutioning en su orden topologico; el alta sin
+  `phase` sigue creando en `analysis` con el roster de 6; repetir la llamada original con
+  `phase: 'solutioning'` sobre la iniciativa viva resume sin rechazar; y con `brief` y `prd` escritos
+  a mano, los huecos de `solutioning` desaparecen y los de `implementation` se reducen a los tres que
+  faltan. Por MCP llega como `isError` con `PHASE_NOT_REACHABLE` en `details` y `retriable: false`.
+  El rechazo no deja residuo: la guardia corre dentro de la transaccion y antes de `ensureProject`.
 - Las 9 rutas de artefacto responden 200.
 - `scripts/test_agent_api.js` y `scripts/test_agent_api_batch.js`, en verde.
 - El generador es idempotente, tambien ahora que escribe las cuatro plantillas publicadas: una

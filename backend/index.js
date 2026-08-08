@@ -242,7 +242,7 @@ const WEBHOOK_DELIVERY_TIMEOUT_MS = (() => {
   return Number.isInteger(configured) && configured > 0 ? configured : 5000;
 })();
 // Las dos llamadas del panel. Estuvieron sin plazo a propósito
-// porque no se alcanzan desde las 21 operaciones, y quedaron anotadas como deuda.
+// porque no se alcanzan desde las operaciones del contrato, y quedaron anotadas como deuda.
 // El listado de modelos es una lectura barata; la de chat es una generación de un
 // modelo de lenguaje, que tarda legítimamente mucho más, así que no comparten valor.
 const OPENROUTER_MODELS_TIMEOUT_MS = (() => {
@@ -1984,6 +1984,89 @@ const getProjectConstraints = async (projectUrl, { connection = db } = {}) => {
   };
 };
 
+// ---- set_project_constraints ----
+// El campo estaba publicado y no podia llenarlo nadie. `get_project_constraints`
+// existia desde el principio, pero no habia escritor en ninguna de las tres
+// superficies —ni operacion MCP, ni ruta HTTP, ni pantalla del panel—, asi que un
+// proyecto nuevo respondia los seis campos en null para siempre y el agente que si
+// descubria los comandos no tenia donde dejarlos. Lo reporto un cliente el
+// 2026-08-08, despues de deducir `npm run test` y `npm run typecheck` leyendo el
+// repositorio y no encontrar como registrarlos.
+//
+// Parche, no reemplazo: se escriben SOLO las claves que trae la llamada, asi que
+// una llamada no borra lo que no nombra. Un null explicito si borra, y gana sobre
+// lo que venga de `projects.description` porque queda como clave presente en el
+// JSON de config, que es la mitad que pisa a la otra en getProjectConstraints.
+const PROJECT_CONSTRAINT_FIELDS = [
+  'test_command',
+  'lint_command',
+  'typecheck_command',
+  'framework',
+  'language',
+  'conventions'
+];
+
+// Un campo mal escrito se rechaza, no se ignora: aceptarlo y descartarlo en
+// silencio devolveria 200 sobre una constraint que nunca se guardo —el mismo
+// defecto que ya se cerro con `limit` en la busqueda semantica—. Y una llamada sin
+// ningun campo tampoco pasa: seria un 200 que no escribe nada.
+const parseProjectConstraintsPatch = (body = {}) => {
+  const source = body && typeof body === 'object' && !Array.isArray(body) ? body : {};
+  const unknown = Object.keys(source)
+    .filter((key) => !PROJECT_CONSTRAINT_FIELDS.includes(key) && key !== 'url' && key !== 'project_url');
+  if (unknown.length) {
+    throw createHttpError(
+      400,
+      `Unknown constraint field(s): ${unknown.join(', ')}. Valid fields: ${PROJECT_CONSTRAINT_FIELDS.join(', ')}`
+    );
+  }
+
+  const patch = {};
+  for (const field of PROJECT_CONSTRAINT_FIELDS) {
+    if (!(field in source)) continue;
+    const value = source[field];
+    if (value === null) {
+      patch[field] = null;
+      continue;
+    }
+    if (typeof value !== 'string') {
+      throw createHttpError(400, `${field} must be a string or null`);
+    }
+    // Mismo trato que en la lectura: los comandos y las etiquetas pierden las
+    // comillas que las envuelven; `conventions` es prosa y se respeta tal cual.
+    patch[field] = normalizeInputString(value, { unwrapQuotes: field !== 'conventions' }) || null;
+  }
+
+  if (!Object.keys(patch).length) {
+    throw createHttpError(
+      400,
+      `At least one constraint field is required: ${PROJECT_CONSTRAINT_FIELDS.join(', ')}`
+    );
+  }
+
+  return patch;
+};
+
+const setProjectConstraints = async (projectUrl, patch, { connection = db } = {}) => {
+  const project = await connection('projects').where({ url: projectUrl }).first();
+  if (!project) {
+    throw createHttpError(404, 'Project not found');
+  }
+
+  const constraintsConfigKey = `${PROJECT_CONSTRAINTS_CONFIG_PREFIX}${projectUrl}`;
+  const existing = await connection('config').where({ key: constraintsConfigKey }).first();
+  const value = JSON.stringify({ ...parseJsonObjectOrEmpty(existing?.value), ...patch });
+
+  await connection('config')
+    .insert({ key: constraintsConfigKey, value, updated_at: connection.fn.now() })
+    .onConflict('key')
+    .merge({ value, updated_at: connection.fn.now() });
+
+  // Devuelve lo EFECTIVO, no lo enviado: es la unica forma de que el llamante vea
+  // el resultado de la fusion con `projects.description` sin una segunda llamada.
+  return getProjectConstraints(projectUrl, { connection });
+};
+
 const listBacklogItems = async (
   projectUrl,
   status,
@@ -2165,7 +2248,7 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts_skills.json'),
     fileName: 'apts_skills.json',
     contentType: 'application/json; charset=utf-8',
-    artifactVersion: '1.0.0',
+    artifactVersion: '1.0.1',
     kind: 'skills_contract',
     recommended: true,
     usagePriority: 'discovery',
@@ -2242,7 +2325,7 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'runtime-adapters', 'spec', 'apts-surface.json'),
     fileName: 'apts-surface.json',
     contentType: 'application/json; charset=utf-8',
-    artifactVersion: '1.0.1',
+    artifactVersion: '1.0.2',
     kind: 'runtime_surface_spec',
     recommended: true,
     usagePriority: 'discovery',
@@ -2395,7 +2478,8 @@ const METHOD_CONDUCTION = {
     'Before conducting, ensure the initiative and roster exist. Both operations are idempotent.',
     '1. Call create_initiative with the initiative title and, when the client repo has a spec, pass it as spec_artifact: { title, content } so the server stores it as a typed semantic_documents artifact linked to the initiative (the server has no access to the client filesystem). It returns { initiative_id, epic_id, phase, created|resumed } and folds in one empty epic. Calling it again resumes the existing active initiative instead of duplicating, so it is also the recovery path for an agent that lost its context.',
     '2. Register the role roster with one set_agent_role call per BMAD role: one distinct agent_name per role, each bound to its method entity via entity_key. The valid entity_key values come in create_initiative\'s roster.entity_keys (and in apts_next while the caller still has no pointer). The server resolves entity_key to entity_id against the initiative\'s library, scoped by source_ref, and persists it non-null. An unset entity_id makes apts_next wait forever: do not skip the roster. set_agent_role rejects an entity_key that is not in the initiative\'s library.',
-    '3. Pick a stable, deterministic agent_name per role and reuse the same name whenever acting as that role, so re-runs upsert the same pointer instead of duplicating.'
+    '3. Pick a stable, deterministic agent_name per role and reuse the same name whenever acting as that role, so re-runs upsert the same pointer instead of duplicating.',
+    'Do NOT pass phase. The engine starts at analysis and produces the brief and the PRD itself; a client spec is the INPUT to those steps, not a substitute for their artifacts, and it is stored as doc_type spec precisely so it closes no phase. A starting phase later than analysis is rejected unless the artifacts that close the skipped phases already exist for the project.'
   ].join('\n'),
   identity_switching_rule: [
     'The conducting client is several roles at once. The server names the role a step requires in the role field:',
@@ -2642,7 +2726,7 @@ const buildIntegrationManifest = (req) => {
         forbidden_content: ['APTS_API_KEY', 'other secrets', 'tokens', 'credentials']
       },
       recommended_first_steps: [
-        'Register the remote MCP server: copy the block for your runtime from mcp_endpoint.registration_by_runtime as-is. No file has to be downloaded to use the 21 operations.',
+        'Register the remote MCP server: copy the block for your runtime from mcp_endpoint.registration_by_runtime as-is. No file has to be downloaded to use the operations that tools/list returns.',
         'If APTS_API_KEY is not yet present in the environment, request it from the operator, together with the project identity values the registration block references.',
         'Call the tools with minimal payloads: the integration layer supplies project_url and agent identity through the registration headers.',
         'Ensure the project has AGENTS.md or .github/copilot-instructions.md. Create AGENTS.md from apts-agent-guidelines.md if neither file exists, or merge/update one APTS-managed section if an instruction file already exists.',
@@ -3602,6 +3686,7 @@ const MCP_IDENTITY_FIELDS_BY_OPERATION = {
   read_project_context: ['url'],
   list_backlog_items: ['url'],
   get_project_constraints: ['url'],
+  set_project_constraints: ['url'],
   search_similar_bug_reports: ['url'],
   create_backlog_item: ['project_url'],
   update_task_status: ['task_id', 'project_url', 'agent_name', 'agent_email'],
@@ -3801,6 +3886,17 @@ const mcpLocalExecutor = {
       return getProjectConstraints(url);
     },
     { fallbackMessage: 'Failed to read project constraints', logMessage: 'read_project_constraints failed' }
+  ),
+
+  setProjectConstraints: (payload) => runMcpOperation(
+    () => {
+      const url = normalizeUrl(payload?.url);
+      if (!url) {
+        throw createHttpError(400, 'Project url is required');
+      }
+      return setProjectConstraints(url, parseProjectConstraintsPatch(payload));
+    },
+    { fallbackMessage: 'Failed to write project constraints', logMessage: 'write_project_constraints failed' }
   ),
 
   searchSimilarBugReports: (payload) => runMcpOperation(
@@ -4324,6 +4420,27 @@ app.get('/api/projects/:url/constraints', apiLimiter, authenticateAgent, async (
     return sendApiError(res, routeError, {
       fallbackMessage: 'Failed to read project constraints',
       logMessage: 'read_project_constraints failed',
+      logContext: { project_url: req.params.url }
+    });
+  }
+});
+
+// set_project_constraints: hermana de escritura de la ruta de arriba. Parche —solo
+// los campos que vienen— sobre la fila `config` del proyecto; responde lo efectivo.
+app.put('/api/projects/:url/constraints', apiLimiter, authenticateAgent, async (req, res) => {
+  try {
+    const url = normalizeUrl(decodeURIComponent(req.params.url));
+
+    if (!url) {
+      return res.status(400).json({ error: 'Project url is required' });
+    }
+
+    const constraints = await setProjectConstraints(url, parseProjectConstraintsPatch(req.body));
+    return res.json(constraints);
+  } catch (routeError) {
+    return sendApiError(res, routeError, {
+      fallbackMessage: 'Failed to write project constraints',
+      logMessage: 'write_project_constraints failed',
       logContext: { project_url: req.params.url }
     });
   }

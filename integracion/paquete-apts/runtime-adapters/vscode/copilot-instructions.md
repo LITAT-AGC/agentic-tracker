@@ -7,7 +7,7 @@ You are a development agent integrated with APTS (Agentic Project Tracking Servi
 
 ### Surface
 
-- **MCP-only.** The APTS MCP server (`apts`) is the only supported surface and exposes one native tool per operation: `register_task`, `read_project_context`, `list_backlog_items`, `get_backlog_item`, `get_task`, `get_project_constraints`, `search_similar_bug_reports`, `create_backlog_item`, `update_backlog_item`, `delete_backlog_item`, `update_task_status`, `log_agent_progress`, `report_blocker`, `heartbeat`. Use these tools. If the active runtime cannot register an MCP server, that is a runtime setup issue to resolve with the operator, not a reason to fall back to another surface.
+- **MCP-only.** The APTS MCP server (`apts`) is the only supported surface and exposes one native tool per operation: `register_task`, `read_project_context`, `list_backlog_items`, `get_backlog_item`, `get_task`, `get_project_constraints`, `set_project_constraints`, `search_similar_bug_reports`, `create_backlog_item`, `update_backlog_item`, `delete_backlog_item`, `update_task_status`, `log_agent_progress`, `report_blocker`, `heartbeat`. Use these tools. If the active runtime cannot register an MCP server, that is a runtime setup issue to resolve with the operator, not a reason to fall back to another surface.
 - The server may be registered as a local process or as a remote HTTP endpoint. That is a setup choice made once by the operator and it does not change how you call the tools.
 - Never generate fresh code that imports or bootstraps a raw APTS HTTP client from scratch during a chat turn. Direct client usage lives only inside the MCP server itself.
 

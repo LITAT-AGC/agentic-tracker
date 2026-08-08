@@ -29,9 +29,6 @@
 const { resolvePhaseStep, evaluatePrimitive } = require('./method_primitives');
 const { buildWorkflowCompletion } = require('./method_outputs');
 const { applyRewire } = require('../importer/rewire');
-// Fuente única del roster. `method_bootstrap` no importa este módulo, así que no
-// hay ciclo.
-const { loadRosterKeys } = require('./method_bootstrap');
 
 const LIFECYCLE = ['analysis', 'planning', 'solutioning', 'implementation', 'done'];
 const TERMINAL_STATUSES = ['done', 'archived'];
@@ -139,6 +136,18 @@ const nextPhase = (phase) => {
   return i >= 0 && i < LIFECYCLE.length - 1 ? LIFECYCLE[i + 1] : 'done';
 };
 
+// Fuente única del roster: las claves de rol de una librería, ordenadas. La usan
+// `apts_next` (cuando el agente no tiene puntero), `create_initiative` (para
+// publicarlo al arrancar) y el rechazo de `set_agent_role`.
+//
+// Vive aquí y no en `method_bootstrap` porque la dependencia sólo puede apuntar en
+// un sentido, y desde que el bootstrap consulta la espina de fase (startPhaseGaps)
+// el sentido es `method_bootstrap` → este módulo.
+const loadRosterKeys = (db, sourceRef) => db('entities')
+  .where({ source_ref: sourceRef, kind: 'role' })
+  .orderBy('key', 'asc')
+  .pluck('key');
+
 const loadActiveInitiative = (db, projectUrl) =>
   db('initiatives')
     .where({ project_url: projectUrl, status: 'active' })
@@ -176,6 +185,45 @@ const resolvePhaseSpine = async (db, phase, track, sourceRef) => {
     return wf ? [wf] : [];
   }
   return topoSortRequired(required);
+};
+
+// ---- Guardia de la fase de partida (create_initiative) ----
+// `create_initiative` publica `phase`, y es la única puerta del contrato por la que
+// un cliente puede saltarse trabajo que el motor habría exigido por el camino: el
+// paseo inter-fase arranca en `initiatives.phase`, así que una fase de partida
+// adelantada no se salta un paso, se salta fases enteras.
+//
+// Lo encontró producción el 2026-08-07. Un cliente que traía una spec arrancó en
+// 'solutioning' —"analysis y planning ya cubiertos por el SPEC adjunto"— y la
+// iniciativa llegó a implementation sin `brief` y sin `prd`: sin la elicitación del
+// analyst y sin el PM. El servidor no pudo negarse porque la llamada era legal.
+//
+// La guardia dice lo que el motor ya sabía: saltarse una fase exige que los
+// artefactos que la cierran YA existan en el proyecto. Se leen de la misma espina y
+// del mismo mapa de completitud que usa `apts_next`, así que no hay un segundo
+// criterio que pueda contradecir al primero. Y una spec no compra ningún salto: su
+// doc_type es 'spec' justamente para no cerrar ninguna fase (method_bootstrap.js).
+//
+// Se busca por `project_url` y no por iniciativa: en el camino de alta la iniciativa
+// todavía no existe, y el caso legítimo que esto deja pasar es exactamente ése —un
+// proyecto que ya produjo esos artefactos en una iniciativa anterior—.
+//
+// Devuelve los huecos como dato; traducirlos a un 400 es de quien la llama.
+const startPhaseGaps = async (db, { project_url, track, source_ref, phase }) => {
+  const target = LIFECYCLE.indexOf(phase);
+  if (target <= 0) return []; // 'analysis' (o fase desconocida): no se salta nada
+  const gaps = [];
+  for (const earlier of LIFECYCLE.slice(0, target)) {
+    const spine = await resolvePhaseSpine(db, earlier, track, source_ref);
+    for (const wf of spine) {
+      const spec = WORKFLOW_COMPLETION[wf.key];
+      if (!spec || spec.primitive !== 'artifact-exists') continue;
+      const docType = spec.params.doc_type;
+      const row = await db('semantic_documents').where({ project_url, doc_type: docType }).first('id');
+      if (!row) gaps.push({ phase: earlier, workflow_key: wf.key, doc_type: docType });
+    }
+  }
+  return gaps;
 };
 
 const loadSteps = (db, workflowId) =>
@@ -958,6 +1006,8 @@ module.exports = {
   LIFECYCLE,
   nextPhase,
   claimDevStory,
+  loadRosterKeys,
+  startPhaseGaps,
   // F3-T1.5 — navegación DAG (exportadas para tests/harness)
   resolvePhaseSpine,
   resolveWorkflowVerdict,

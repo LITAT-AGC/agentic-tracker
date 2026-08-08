@@ -8,6 +8,7 @@
       "mcp__apts__get_backlog_item",
       "mcp__apts__get_task",
       "mcp__apts__get_project_constraints",
+      "mcp__apts__set_project_constraints",
       "mcp__apts__search_similar_bug_reports",
       "mcp__apts__create_backlog_item",
       "mcp__apts__update_backlog_item",

@@ -22,6 +22,9 @@
 // validación), sin Express (eso es la ruta fina en index.js).
 
 const crypto = require('crypto');
+// El motor es de allí: la espina de fase, el mapa de completitud y el roster. Este
+// módulo los consulta, no los reimplementa.
+const { loadRosterKeys, startPhaseGaps } = require('./method_resolver');
 
 const DEFAULT_TRACK = 'method';
 const DEFAULT_SOURCE_REF = 'bmad:v6.8.0';
@@ -30,19 +33,6 @@ const DEFAULT_PHASE = 'analysis';
 // recuperable por doc_type vía resolveNeed; distinto de 'brief' (que PRODUCE el
 // step product-brief) para no marcar 'analysis' como completa de entrada.
 const SPEC_DOC_TYPE = 'spec';
-
-// Claves de rol de una librería, ordenadas. Fuente única del roster: la usan
-// `create_initiative` (para publicarlo al arrancar), `apts_next` (cuando el agente
-// no tiene puntero) y el rechazo de `set_agent_role`.
-//
-// Deuda de F6 que esto cierra: el roster no era descubrible por ninguna de las 21
-// operaciones. Un cliente que no descarga el paquete no tenía de dónde sacar las
-// claves, así que la única vía era llamar a `set_agent_role` con una clave inventada
-// y leerlas en el mensaje de error. Ahora fallar primero deja de ser obligatorio.
-const loadRosterKeys = (db, sourceRef) => db('entities')
-  .where({ source_ref: sourceRef, kind: 'role' })
-  .orderBy('key', 'asc')
-  .pluck('key');
 
 // Asegura la fila `projects` (FK NOT NULL de initiatives/epics). Idempotente:
 // no pisa el `name` de un proyecto ya existente.
@@ -140,6 +130,21 @@ const createInitiative = (db, {
           entity_keys: await loadRosterKeys(trx, existing.source_ref),
         },
       };
+    }
+
+    // ---- Guardia: la fase de partida no puede saltarse trabajo sin hacer ----
+    // Sólo en el alta. El camino de resume ya retornó arriba: allí `phase` es inerte
+    // (manda la de la iniciativa viva) y rechazarlo rompería la vía de recuperación
+    // del agente que repite su llamada original tras perder el contexto.
+    const gaps = await startPhaseGaps(trx, { project_url, track, source_ref, phase });
+    if (gaps.length) {
+      throw badRequest(
+        `phase '${phase}' se salta ${gaps.length} artefacto(s) que el motor exige antes: `
+        + `${gaps.map((g) => `${g.doc_type} (fase '${g.phase}', workflow '${g.workflow_key}')`).join(', ')}. `
+        + `Arrancá en '${DEFAULT_PHASE}' y dejá que el motor los produzca; `
+        + 'spec_artifact es entrada de esos pasos, no sustituto de sus artefactos',
+        'PHASE_NOT_REACHABLE',
+      );
     }
 
     // ---- Alta: project (FK) → initiative ('analysis') → epic vacío plegado ----
@@ -286,7 +291,6 @@ const setAgentRole = (db, {
 module.exports = {
   createInitiative,
   setAgentRole,
-  loadRosterKeys,
   writeSpecArtifact,
   ensureProject,
   SPEC_DOC_TYPE,
