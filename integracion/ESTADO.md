@@ -12,7 +12,7 @@ llego hasta aqui: eso esta en el historial de git.
 | Registro | Una URL y cuatro cabeceras; el manifiesto publica el bloque por runtime |
 | Manifiesto | `GET /api/public/integrar`, `schema_version` 1.1.0, 8.565 unidades |
 | Runtimes soportados | Dos: Claude Code y opencode |
-| Artefactos publicados | 8; `skill_markdown`, `agent_guidelines`, `adapter_generator` y los dos del conductor en `artifact_version` 1.1.0, `surface_spec` en 1.0.2, `skills_json` en 1.0.1, `loop_prompt_code_review` en 1.0.0 |
+| Artefactos publicados | 8; los dos del conductor en `artifact_version` 1.2.0, `skill_markdown`, `agent_guidelines` y `adapter_generator` en 1.1.0, `surface_spec` en 1.0.2, `skills_json` en 1.0.1, `loop_prompt_code_review` en 1.0.0 |
 | Descargas necesarias para **llamar** a las operaciones | Ninguna |
 | Descargas necesarias para **conducir** | El spec y el generador (agentes y comandos); el conductor y su README si se quiere el bucle desatendido, y su plantilla de revision si se quiere ademas la compuerta dentro de la sesion del agente |
 
@@ -84,6 +84,28 @@ ARCHITECTURE", "FIRST STEP"), no un procedimiento conducible; el procedimiento r
 files del upstream, que el importador no trajo. `dev_story_completion_rule` del manifiesto ya dice
 que el paso terminal declara DOS outputs y que los dos viajan en el mismo submit. `schema_version`
 no cambia: no hay clave nueva.
+
+**La ejecucion ya deja rastro, y el commit ya no se tira.** Lo noto el operador el 2026-08-08 mirando
+lo poco que APTS guardaba de una ejecucion de 34 minutos: 7 tareas y 6 registros, todos de sesiones
+interactivas anteriores; del bucle, ninguno. El motivo era estructural —APTS tiene dos superficies y
+el bucle solo usaba una—: el motor guarda lo que el metodo PRODUJO (cursor, pasos, artefactos,
+estado del backlog) y la API de agente guarda lo que PASO (tareas, registros, latidos), y el
+conductor vivia entero en la primera. Una historia cerrada era un `UPDATE` de estado.
+
+Dos arreglos. El primero, `code_ref`: el contrato pedia el hash del commit en el submit terminal, el
+motor lo devolvia dentro de `captured[]` y no habia donde escribirlo, asi que APTS no podia decir que
+commit cerro que historia. Ahora es columna de `backlog_items` (migracion 019) y viaja tambien en la
+vista `compact`, que es la que leen los agentes por defecto. Se guarda solo si viene: un submit sin
+hash no borra el que una entrega anterior dejo.
+
+El segundo, el registro del conductor: abre **una tarea por unidad** y la mueve con lo unico medible
+desde fuera —modelo, intento, duracion y codigo de salida—, con `--no-task-log` para apagarlo.
+`review` significa que el agente entrego y el motor no lo ha confirmado, y no se asciende a `done`
+por cortesia: quien puede decir que una unidad cerro es el motor, y lo dice en la vuelta siguiente al
+pasar a otra. **La tarea no se liga al backlog item**, y no es un olvido: `update_task_status`
+propaga al item ligado —una tarea en `done` pone la historia en `done`—, asi que ligarla abriria una
+puerta trasera justo al lado de la compuerta de revision. Todo el camino es best-effort: el registro
+de una ejecucion no puede ser el motivo de que la ejecucion pare.
 
 **Un parpadeo de red ya no tumba el bucle.** Cada llamada MCP del conductor reintenta tres veces
 —2 s, 6 s, 18 s— antes de la parada por red, y solo lo que puede salir distinto: el `fetch` que no
@@ -283,6 +305,15 @@ Contra `APTS_test` (puerto 47301; la ultima ronda —la del coste de los embeddi
   decision y para con `PARADA (blocked): sin iniciativa activa` y codigo 10, que es exactamente lo
   que su README documenta. No necesita nada instalado: CommonJS y solo builtins de Node.
 - `scripts/test_agent_api.js` y `scripts/test_agent_api_batch.js`, en verde.
+- **El registro de ejecucion del conductor**, con una iniciativa de prueba montada en `APTS_test`
+  (dos historias, la espina previa dada por hecha) y un agente falso, y borrada al terminar. Una
+  tarea por unidad y reutilizada entre vueltas mientras el motor apunte a la misma historia —sin
+  duplicados—; los tres finales por su camino real: `done` cuando el motor pasa a otra unidad y al
+  completarse el ciclo, `stalled` cuando el agente falla, y suelta en `review` cuando el conductor
+  para por estancamiento tras una entrega buena. Cada tarea con sus registros: un intento por linea
+  y el motivo de la parada.
+- **El `code_ref` se escribe**, comprobado dentro de `test_code_review_gate.js`: el submit terminal
+  con `code_ref` deja el hash en la historia.
 - **Los reintentos de red del conductor**, por los dos caminos y en seco (`--dry-run`, que resuelve
   la decision sin lanzar agente). Contra un puerto muerto: tres reintentos, tres lineas
   `reintento_red` en el diario con las esperas 2000/6000/18000 ms, y parada por red con codigo 2 a

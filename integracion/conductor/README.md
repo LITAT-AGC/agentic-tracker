@@ -115,6 +115,46 @@ al cerrar el ciclo, así que sin esa llamada el trabajo termina de verdad pero
 medias un proyecto que ya está hecho. Con la recomendación en `done` no queda nada que
 reclamar: esa llamada sólo persiste el recorrido.
 
+## Registro de la ejecución en APTS
+
+El conductor abre **una tarea por unidad** (`register_task`) y la va moviendo con lo único
+que se puede medir desde fuera de la sesión del agente: modelo, intento, duración y código
+de salida. `--no-task-log` lo apaga.
+
+Existe porque el conductor es lo único que ve la ejecución entera. El agente vive dentro
+de su sesión y el motor sólo guarda lo que el método *produjo*, así que media hora de
+trabajo cabía en APTS como un `UPDATE` de estado, y el detalle sólo estaba en el diario
+JSONL de la máquina que lanzó el bucle.
+
+Los estados dicen lo que pasó, y no más:
+
+| estado | qué significa |
+|---|---|
+| `in_progress` | el agente está corriendo (`register_task` ya la devuelve así) |
+| `review` | el proceso del agente terminó bien; el motor todavía no ha confirmado el cierre |
+| `done` | el motor dejó de apuntar a esa unidad, o el ciclo entero terminó |
+| `stalled` | el conductor paró sin que el agente entregara |
+
+`review` no se convierte en `done` por si acaso: quien puede decir que una unidad cerró es
+el motor, y lo dice en la vuelta siguiente al pasar a otra. Un `done` de cortesía haría del
+registro un sitio donde todo sale bien siempre.
+
+**La tarea no se liga al backlog item**, y no es un olvido. `update_task_status` propaga al
+item ligado —una tarea en `done` pone la historia en `done`—, así que ligarla abriría una
+puerta trasera justo al lado de la compuerta de revisión: cerrar la tarea cerraría la
+unidad sin pasar por el `code_review`. El identificador de la unidad viaja en el título y
+en el `context`.
+
+Dos detalles del camino, por si aparecen en el diario:
+
+- Todo el registro es **best-effort**. Si una de estas llamadas falla, se anota
+  `tarea_fallo` y el bucle sigue: el registro de una ejecución no puede ser el motivo de
+  que la ejecución pare.
+- Una unidad puede tardar más que la ventana de frescura de APTS (15 minutos) y el
+  conductor **no puede latir** mientras el agente corre, porque `spawnSync` bloquea el
+  proceso entero. Así que la vigilancia de fondo puede haber marcado la tarea `stalled`
+  antes de que se cierre; el conductor la reanima y reintenta la transición una vez.
+
 ## Reintentos de red
 
 Cada llamada MCP reintenta **3 veces** con espera creciente —2 s, 6 s, 18 s— antes de
@@ -373,6 +413,7 @@ contiene secretos.
 El evento `arranque` lleva la política resuelta (`modelos`, `politica_fuente`,
 `politica_ignorado`, `env_file`); cada evento `agente` lleva `intento`,
 `intentos_totales` y el `modelo` con el que corrió; un reintento que no llegó a
-gastarse deja un `reintento_innecesario` con lo que el motor respondió en su lugar; y cada
+gastarse deja un `reintento_innecesario` con lo que el motor respondió en su lugar; cada
 reintento de red deja un `reintento_red` con la herramienta, el intento, la espera y el
-motivo.
+motivo; y la tarea de cada unidad deja un `tarea` al abrirse y otro al cerrarse —o un
+`tarea_fallo` si APTS no aceptó la llamada, que no detiene el bucle.

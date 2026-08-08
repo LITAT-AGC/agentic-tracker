@@ -889,8 +889,15 @@ const aptsSubmitStep = (db, { project_url, agent_name, output }) =>
         // Iterable (dev-story): actualiza la story reclamada + registra code_ref.
         if (cursor.story_id) {
           const to = out.status || decl.value || 'done';
-          await trx('backlog_items').where({ id: cursor.story_id }).update({ status: to, updated_at: trx.fn.now() });
-          captured.push({ kind: 'status', story_id: cursor.story_id, to, code_ref: out.code_ref || null });
+          const cambio = { status: to, updated_at: trx.fn.now() };
+          // El hash viajaba en `captured[]` y no se escribia en ningun sitio: se pedia,
+          // se transportaba y se tiraba, y APTS no podia decir que commit cerro que
+          // unidad. Se guarda solo si viene: un submit sin hash no debe borrar el que
+          // una entrega anterior ya dejo.
+          const ref = typeof out.code_ref === 'string' && out.code_ref.trim() ? out.code_ref.trim() : null;
+          if (ref) cambio.code_ref = ref;
+          await trx('backlog_items').where({ id: cursor.story_id }).update(cambio);
+          captured.push({ kind: 'status', story_id: cursor.story_id, to, code_ref: ref });
         }
       } else if (decl.kind === 'code_ref') {
         captured.push({ kind: 'code_ref', ref: out.code_ref || null });

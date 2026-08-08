@@ -1224,6 +1224,10 @@ const mapBacklogItemRecord = (item, { view = DEFAULT_RESPONSE_VIEW } = {}) => {
       source_kind: item.source_kind || null,
       source_ref: item.source_ref || null,
       active_task_id: item.active_task_id || null,
+      // Viaja tambien en compact —que es la vista por defecto de los agentes— porque
+      // "que commit cerro esta historia" es una linea, no un texto largo, y es
+      // exactamente lo que se pregunta al mirar una unidad ya cerrada.
+      code_ref: item.code_ref || null,
       created_at: item.created_at,
       updated_at: item.updated_at,
       deleted_at: item.deleted_at ?? null,
@@ -2320,7 +2324,9 @@ const integrationArtifacts = {
     // red. Cambia el comportamiento observable de un cliente que ya lo tuviera bajado, y
     // por eso sube la versión: sin el bump, quien cacheara por version se quedaría con un
     // conductor que se para al primer parpadeo.
-    artifactVersion: '1.1.0',
+    // 1.2.0: abre una tarea por unidad en APTS (`--no-task-log` la apaga). Escribe donde
+    // antes no escribía, así que un cliente tiene que poder enterarse.
+    artifactVersion: '1.2.0',
     kind: 'loop_conductor',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -2336,7 +2342,8 @@ const integrationArtifacts = {
     fileName: 'apts-loop-README.md',
     contentType: 'text/markdown; charset=utf-8',
     // 1.1.0: documenta los reintentos de red y las plantillas de prompt de `prompts/`.
-    artifactVersion: '1.1.0',
+    // 1.2.0: documenta el registro de la ejecución en APTS y `--no-task-log`.
+    artifactVersion: '1.2.0',
     kind: 'loop_conductor_manual',
     recommended: false,
     usagePriority: 'optional_entrypoint',

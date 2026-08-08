@@ -84,8 +84,11 @@ const ok = (cond, etiqueta, detalle) => {
     const clases = (conRevision.captured || []).map((c) => c.kind).sort().join(',');
     ok(clases === 'artifact,status', 'capturo las dos declaraciones', `captured=${clases}`);
 
-    const trasCierre = await trx('backlog_items').where({ id: story.id }).first('status');
+    const trasCierre = await trx('backlog_items').where({ id: story.id }).first('status', 'code_ref');
     ok(trasCierre.status === 'done', 'la story quedo done', `status=${trasCierre.status}`);
+    // El hash viajaba en `captured[]` y no se escribia en ningun sitio: se pedia, se
+    // transportaba y se tiraba.
+    ok(trasCierre.code_ref === 'deadbeef', 'y con el commit que la cerro escrito', `code_ref=${trasCierre.code_ref}`);
 
     const doc = await trx('semantic_documents')
       .where({ initiative_id: ini.id, doc_type: 'code_review' }).first('scope_key', 'content');

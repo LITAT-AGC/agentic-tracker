@@ -104,6 +104,9 @@ Frenos:
                           consumen vueltas: una vuelta es una story, con sus intentos.
   --max-stalls N          vueltas seguidas sin que cambie nada antes de parar (por defecto 2)
   --dry-run               resuelve e informa la primera decisión sin lanzar nada
+  --no-task-log           APTS_LOOP_NO_TASK_LOG=1
+                          no abrir una tarea por unidad en APTS. Por defecto SÍ se abre:
+                          es el único rastro de la ejecución que no vive en este disco.
 
 Avisos al parar:
   --telegram-chat-id ID   APTS_LOOP_TELEGRAM_CHAT_ID   a quién avisar
@@ -487,6 +490,96 @@ const registrar = (cfg, evento) => {
   }
 };
 
+// ---- registro de la ejecución en APTS ----
+//
+// El conductor es lo único que ve la ejecución entera: el agente vive dentro de su sesión
+// y el motor sólo guarda lo que el método PRODUJO, así que media hora de trabajo cabía en
+// APTS como un `UPDATE` de estado. Esto abre una tarea por unidad y la va moviendo con lo
+// único que se puede medir desde fuera: modelo, intento, duración y código de salida.
+//
+// La tarea NO se liga al backlog item, y no es un olvido: `update_task_status` propaga al
+// item ligado —una tarea en `done` pone la historia en `done`—, así que ligarla abriría
+// una puerta trasera justo al lado de la compuerta de revisión: cerrar la tarea cerraría
+// la unidad sin pasar por el `code_review`. El id de la unidad viaja en el título y en los
+// mensajes, que es cuanto hace falta para leerla.
+//
+// Todo el camino es best-effort: el registro de una ejecución no puede ser el motivo de
+// que la ejecución pare.
+let tareaActual = null; // { id, story_id, ok } — la cierra `parar`, venga de donde venga
+
+const conTarea = async (cfg, descripcion, accion) => {
+  try {
+    return await accion();
+  } catch (error) {
+    log(`aviso: no se pudo ${descripcion} (${error.message})`);
+    registrar(cfg, { evento: 'tarea_fallo', que: descripcion, detalle: error.message });
+    return null;
+  }
+};
+
+const abrirTarea = (cfg, storyId, iteracion) => {
+  if (cfg.sinTarea) return null;
+  return conTarea(cfg, 'abrir la tarea de ejecución', async () => {
+    // `register_task` la devuelve ya en `in_progress`, así que no hay una transición
+    // inicial que hacer. Sin `backlog_item_id` tampoco hay reanudación: cada pasada del
+    // conductor sobre una unidad es una ejecución distinta, y mezclarlas escondería
+    // justamente lo que esto viene a enseñar.
+    const r = await llamarMcp(cfg, 'register_task', {
+      title: `bmad-dev-story ${storyId}`,
+      context: JSON.stringify({ conductor: NOMBRE, story_id: storyId, iteracion }),
+    });
+    const id = (r && r.task_id) || null;
+    if (id) {
+      tareaActual = { id, story_id: storyId, ok: false };
+      registrar(cfg, { evento: 'tarea', accion: 'abierta', task_id: id, story_id: storyId, iteracion });
+    }
+    return id;
+  });
+};
+
+const anotarTarea = (cfg, mensaje) => {
+  if (!tareaActual) return null;
+  const id = tareaActual.id;
+  return conTarea(cfg, 'anotar el progreso en la tarea', () => llamarMcp(cfg, 'log_agent_progress', {
+    task_id: id, message: mensaje,
+  }));
+};
+
+// Una unidad puede tardar más que la ventana de frescura de APTS —quince minutos— y el
+// conductor no puede latir mientras el agente corre: `spawnSync` bloquea el proceso
+// entero. Así que la vigilancia de fondo puede haber marcado la tarea `stalled` antes de
+// que lleguemos a cerrarla, y desde ahí la transición que pedimos ya no es legal. Se
+// reanima y se reintenta una vez. No es hacer trampa: vista desde APTS, la tarea
+// efectivamente parecía muerta.
+const moverTarea = (cfg, estado) => {
+  if (!tareaActual) return null;
+  const id = tareaActual.id;
+  if (estado === 'review') tareaActual.ok = true;
+  return conTarea(cfg, `mover la tarea a '${estado}'`, async () => {
+    try {
+      return await llamarMcp(cfg, 'update_task_status', { task_id: id, status: estado });
+    } catch (error) {
+      if (estado === 'stalled') throw error;
+      await llamarMcp(cfg, 'update_task_status', { task_id: id, status: 'in_progress' });
+      if (estado === 'done') await llamarMcp(cfg, 'update_task_status', { task_id: id, status: 'review' });
+      return llamarMcp(cfg, 'update_task_status', { task_id: id, status: estado });
+    }
+  });
+};
+
+// `estado: null` anota y suelta la tarea sin moverla. Es el caso del que ya está en
+// `review`: el agente entregó y el motor todavía no lo ha confirmado, y eso es
+// exactamente lo que `review` significa. Cerrarla como `done` por si acaso convertiría
+// el registro en un sitio donde las cosas siempre salen bien.
+const cerrarTarea = async (cfg, estado, mensaje) => {
+  if (!tareaActual) return;
+  const { id, story_id: storyId } = tareaActual;
+  if (mensaje) await anotarTarea(cfg, mensaje);
+  if (estado) await moverTarea(cfg, estado);
+  registrar(cfg, { evento: 'tarea', accion: estado || 'soltada', task_id: id, story_id: storyId });
+  tareaActual = null;
+};
+
 // ---- aviso por Telegram ----
 //
 // `--on-stop` ya permite un curl, así que esto sólo se gana el sitio por lo que el curl
@@ -574,6 +667,14 @@ const notificarTelegram = async (cfg, datos) => {
 const parar = async (cfg, { motivo, detalle, codigo, fase, storyId, iteracion }) => {
   log(`PARADA (${motivo}): ${detalle}`);
   registrar(cfg, { evento: 'parada', motivo, detalle, fase, story_id: storyId, iteracion, exit_code: codigo });
+
+  // La tarea de la unidad se cierra AQUÍ y no en cada sitio que para: hay siete motivos
+  // de parada y sólo uno de ellos es que el trabajo terminó. `done` sólo cuando el ciclo
+  // entero acabó, que es la única parada en la que el motor ya confirmó el cierre; si el
+  // agente había entregado y nadie lo confirmó todavía, se queda en `review`, que es lo
+  // que pasó; y si ni eso, `stalled`, que también es lo que pasó: alguien la retomará.
+  const estadoFinal = motivo === 'done' ? 'done' : ((tareaActual && tareaActual.ok) ? null : 'stalled');
+  await cerrarTarea(cfg, estadoFinal, `el conductor paró (${motivo}): ${detalle}`);
 
   // Primero el aviso y después el hook: el hook es un proceso del operador que puede
   // colgarse, y el aviso es justo lo que no debe quedarse esperándolo.
@@ -670,6 +771,10 @@ const construirConfig = (args) => {
     maxIterations: entero(args['max-iterations'], 50),
     maxStalls: entero(args['max-stalls'], 2),
     dryRun: Boolean(args['dry-run']),
+    // Escape para quien no quiera que el conductor escriba tareas en su proyecto. Va en
+    // negativo —el registro está puesto por defecto— porque una ejecución sin rastro es
+    // el problema que esto vino a arreglar, no una preferencia neutral.
+    sinTarea: Boolean(args['no-task-log']) || String(process.env.APTS_LOOP_NO_TASK_LOG || '').trim() === '1',
     workflows: new Set(String(args.workflows || 'bmad-dev-story').split(',').map((s) => s.trim()).filter(Boolean)),
   };
 
@@ -887,6 +992,14 @@ const main = async () => {
     let ultimo = null;
     let seguir = false; // el motor dejó de apuntar a esta story: sigue el bucle, no reintentes
 
+    // Una tarea por unidad. Si quedaba abierta la de la vuelta anterior y el motor ya
+    // apunta a otra unidad, aquella se cerró: el motor es quien lo dice, no el código de
+    // salida del agente, así que se marca `done` con la autoridad correcta.
+    if (tareaActual && tareaActual.story_id !== storyId) {
+      await cerrarTarea(cfg, 'done', `el motor pasó a ${storyId}: esta unidad quedó cerrada`);
+    }
+    if (!tareaActual) await abrirTarea(cfg, storyId, iteracion);
+
     for (let intento = 1; intento <= cfg.escalera.length; intento += 1) {
       const modelo = cfg.escalera[intento - 1];
       const plantilla = intento === 1 ? plantillaPrompt : plantillaPrompt + SUFIJO_REINTENTO;
@@ -913,6 +1026,9 @@ const main = async () => {
         ms: ultimo.ms,
         error: ultimo.error,
       });
+      await anotarTarea(cfg, `intento ${intento}/${cfg.escalera.length}`
+        + `${modelo ? ` con ${modelo}` : ''}: salida ${ultimo.codigo}`
+        + ` en ${Math.round(ultimo.ms / 1000)} s${ultimo.error ? ` — ${ultimo.error}` : ''}`);
 
       if (ultimo.codigo === 0) break;
       if (intento === cfg.escalera.length) break; // agotados: se decide justo debajo
@@ -950,6 +1066,11 @@ const main = async () => {
         iteracion,
       });
     }
+    // `review` y no `done`: el proceso del agente terminó bien, que no es lo mismo que
+    // la unidad esté cerrada. Quien puede decir eso es el motor, y lo dice en la vuelta
+    // siguiente al dejar de apuntar a esta historia.
+    await moverTarea(cfg, 'review');
+
     const gastados = intentos.length > 1 ? ` tras ${intentos.length} intentos` : '';
     log(`vuelta ${iteracion} completada en ${Math.round(ultimo.ms / 1000)}s${gastados}`);
   }
