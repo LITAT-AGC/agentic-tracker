@@ -117,9 +117,15 @@ reclamar: esa llamada sólo persiste el recorrido.
 
 ## Registro de la ejecución en APTS
 
-El conductor abre **una tarea por unidad** (`register_task`) y la va moviendo con lo único
-que se puede medir desde fuera de la sesión del agente: modelo, intento, duración y código
-de salida. `--no-task-log` lo apaga.
+El conductor abre **una tarea por unidad** (`register_task`), titulada con el nombre de la
+historia —cuesta una llamada de más y es la diferencia entre una lista legible y una
+columna de UUIDs—, y la va moviendo con lo único que se puede medir desde fuera de la
+sesión del agente: modelo, intento, duración y código de salida. `--no-task-log` lo apaga.
+
+Esa tarea viaja al agente en el prompt (`{task_id}`) para que use ésa y no registre otra.
+Sin eso salen dos filas por historia, y la segunda es peor que redundante: la que registra
+el agente va **ligada** al backlog item, y una tarea ligada arrastra al item al cambiar de
+estado.
 
 Existe porque el conductor es lo único que ve la ejecución entera. El agente vive dentro
 de su sesión y el motor sólo guarda lo que el método *produjo*, así que media hora de
@@ -194,9 +200,15 @@ responder por él.
 La de por defecto está en el propio `apts-loop.js` (`PROMPT_POR_DEFECTO`) y no reexplica
 el ciclo: apunta a `method_conduction` del manifiesto, que es la fuente autoritativa.
 `--prompt-file RUTA` la reemplaza entera. Los marcadores que se sustituyen son
-`{story_id}`, `{agent_name}`, `{project_url}`, `{role}`, `{iteration}`, `{attempt}` y
-`{max_attempts}`; lo que no case con ninguno se queda literal, así que un
+`{story_id}`, `{agent_name}`, `{project_url}`, `{role}`, `{iteration}`, `{attempt}`,
+`{max_attempts}` y `{task_id}`; lo que no case con ninguno se queda literal, así que un
 `{"goto":"step:5"}` dentro del texto sobrevive intacto.
+
+`{task_id}` es la tarea que el conductor abrió para esa unidad, o `(ninguna)` si no pudo.
+Una plantilla propia **debería** pasársela al agente diciéndole que use ésa y no registre
+otra: la que registra un agente por su cuenta va ligada al backlog item, y
+`update_task_status` propaga al item ligado, así que cerrarla pondría la historia en
+`done` sin pasar por el paso terminal. La del conductor no se liga.
 
 En `prompts/` viven las variantes versionadas:
 

@@ -142,6 +142,13 @@ unidad: no la cambies ni la inventes en los payloads.
 
 Unidad asignada: story {story_id} (proyecto {project_url}).
 
+Tarea de ejecución en APTS: {task_id}. Si eso trae un identificador, ésa es tu tarea: úsala
+para \`log_agent_progress\`, \`heartbeat\` y \`report_blocker\`, y NO registres otra. La abrió
+el conductor y NO está ligada al backlog item, a propósito: \`update_task_status\` arrastra al
+item ligado, así que cerrar una tarea ligada pondría la historia en \`done\` sin pasar por lo
+que el paso terminal exige. Manda \`heartbeat\` de vez en cuando —a los quince minutos sin
+señal APTS la da por \`stalled\`—. Si dice \`(ninguna)\`, registrá la tuya como siempre.
+
 Antes de nada, lee \`method_conduction\` del manifiesto público (GET /api/public/integrar)
 y sigue \`dev_story_completion_rule\` al pie. Es autoritativo; si algo de este prompt lo
 contradice, gana el manifiesto.
@@ -517,6 +524,18 @@ const conTarea = async (cfg, descripcion, accion) => {
   }
 };
 
+// El título es el de la historia, no su UUID. Cuesta una llamada de más por unidad —que
+// no gasta tokens, esto es código— y es la diferencia entre una lista de tareas legible y
+// una columna de identificadores que no dice nada de lo que se estuvo haciendo.
+const tituloDeLaUnidad = async (cfg, storyId) => {
+  try {
+    const r = await llamarMcp(cfg, 'get_backlog_item', { backlog_item_id: storyId });
+    const item = (r && (r.item || r.backlog_item || r)) || {};
+    if (typeof item.title === 'string' && item.title.trim()) return item.title.trim();
+  } catch (_) { /* el título es un lujo; el id siempre está */ }
+  return `dev-story ${String(storyId).slice(0, 8)}`;
+};
+
 const abrirTarea = (cfg, storyId, iteracion) => {
   if (cfg.sinTarea) return null;
   return conTarea(cfg, 'abrir la tarea de ejecución', async () => {
@@ -525,7 +544,7 @@ const abrirTarea = (cfg, storyId, iteracion) => {
     // conductor sobre una unidad es una ejecución distinta, y mezclarlas escondería
     // justamente lo que esto viene a enseñar.
     const r = await llamarMcp(cfg, 'register_task', {
-      title: `bmad-dev-story ${storyId}`,
+      title: await tituloDeLaUnidad(cfg, storyId),
       context: JSON.stringify({ conductor: NOMBRE, story_id: storyId, iteracion }),
     });
     const id = (r && r.task_id) || null;
@@ -1011,6 +1030,14 @@ const main = async () => {
         iteration: iteracion,
         attempt: intento,
         max_attempts: cfg.escalera.length,
+        // La tarea ya está abierta: se le pasa al agente para que use ÉSA y no registre
+        // la suya. Dos filas por unidad no es un detalle cosmético — la que registra el
+        // agente va ligada al backlog item, y `update_task_status` propaga al item
+        // ligado, así que cerrarla pondría la historia en `done` sin pasar por la
+        // compuerta de revisión. La del conductor no se liga, y por eso es la buena.
+        // `(ninguna)` cuando no se pudo abrir: el prompt lo contempla y el agente
+        // registra la suya, que es mejor que quedarse sin rastro.
+        task_id: (tareaActual && tareaActual.id) || '(ninguna)',
       });
 
       ultimo = lanzarAgente(cfg, { story_id: storyId, iteration: iteracion, intento, modelo, prompt });

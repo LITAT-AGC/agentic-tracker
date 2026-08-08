@@ -5,6 +5,13 @@ unidad: no la cambies ni la inventes en los payloads.
 
 Unidad asignada: story {story_id} (proyecto {project_url}).
 
+Tarea de ejecución en APTS: {task_id}. Si eso trae un identificador, ésa es tu tarea: úsala
+para `log_agent_progress`, `heartbeat` y `report_blocker`, y NO registres otra. La abrió el
+conductor y NO está ligada al backlog item, a propósito: `update_task_status` arrastra al
+item ligado, así que cerrar una tarea ligada pondría la historia en `done` sin pasar por la
+compuerta de revisión. Manda `heartbeat` de vez en cuando —a los quince minutos sin señal
+APTS la da por `stalled`—. Si dice `(ninguna)`, registrá la tuya como siempre.
+
 Antes de nada, lee `method_conduction` del manifiesto público (GET /api/public/integrar)
 y sigue `dev_story_completion_rule` al pie. Es autoritativo; si algo de este prompt lo
 contradice, gana el manifiesto.

@@ -12,7 +12,7 @@ llego hasta aqui: eso esta en el historial de git.
 | Registro | Una URL y cuatro cabeceras; el manifiesto publica el bloque por runtime |
 | Manifiesto | `GET /api/public/integrar`, `schema_version` 1.1.0, 8.565 unidades |
 | Runtimes soportados | Dos: Claude Code y opencode |
-| Artefactos publicados | 8; los dos del conductor en `artifact_version` 1.2.0, `skill_markdown`, `agent_guidelines` y `adapter_generator` en 1.1.0, `surface_spec` en 1.0.2, `skills_json` en 1.0.1, `loop_prompt_code_review` en 1.0.0 |
+| Artefactos publicados | 8; los dos del conductor en `artifact_version` 1.3.0, `skill_markdown`, `agent_guidelines`, `adapter_generator` y `loop_prompt_code_review` en 1.1.0, `surface_spec` en 1.0.2, `skills_json` en 1.0.1 |
 | Descargas necesarias para **llamar** a las operaciones | Ninguna |
 | Descargas necesarias para **conducir** | El spec y el generador (agentes y comandos); el conductor y su README si se quiere el bucle desatendido, y su plantilla de revision si se quiere ademas la compuerta dentro de la sesion del agente |
 
@@ -98,8 +98,14 @@ commit cerro que historia. Ahora es columna de `backlog_items` (migracion 019) y
 vista `compact`, que es la que leen los agentes por defecto. Se guarda solo si viene: un submit sin
 hash no borra el que una entrega anterior dejo.
 
-El segundo, el registro del conductor: abre **una tarea por unidad** y la mueve con lo unico medible
-desde fuera —modelo, intento, duracion y codigo de salida—, con `--no-task-log` para apagarlo.
+El segundo, el registro del conductor: abre **una tarea por unidad**, titulada con el nombre de la
+historia, y la mueve con lo unico medible desde fuera —modelo, intento, duracion y codigo de
+salida—, con `--no-task-log` para apagarlo. Esa tarea viaja al agente en el prompt (`{task_id}`)
+para que use esa y no registre otra, y ahi hay algo mas que evitar una fila duplicada: **la tarea
+que un agente registra por su cuenta va ligada al backlog item**, y `update_task_status` propaga al
+item ligado, asi que cerrarla pondria la historia en `done` sin pasar por la compuerta. Se vio en
+produccion el 2026-08-08 —la tarea `Dev story 344da12c` estaba ligada a su historia— antes de que
+mordiera. La del conductor no se liga, y por eso es la que tiene que usarse.
 `review` significa que el agente entrego y el motor no lo ha confirmado, y no se asciende a `done`
 por cortesia: quien puede decir que una unidad cerro es el motor, y lo dice en la vuelta siguiente al
 pasar a otra. **La tarea no se liga al backlog item**, y no es un olvido: `update_task_status`

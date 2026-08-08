@@ -2326,7 +2326,10 @@ const integrationArtifacts = {
     // conductor que se para al primer parpadeo.
     // 1.2.0: abre una tarea por unidad en APTS (`--no-task-log` la apaga). Escribe donde
     // antes no escribía, así que un cliente tiene que poder enterarse.
-    artifactVersion: '1.2.0',
+    // 1.3.0: esa tarea se titula con el nombre de la historia y viaja al agente como
+    // `{task_id}` para que no registre otra. No es cosmética: la que registra el agente
+    // va ligada al backlog item y cerrarla arrastra la historia a `done`.
+    artifactVersion: '1.3.0',
     kind: 'loop_conductor',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -2343,7 +2346,8 @@ const integrationArtifacts = {
     contentType: 'text/markdown; charset=utf-8',
     // 1.1.0: documenta los reintentos de red y las plantillas de prompt de `prompts/`.
     // 1.2.0: documenta el registro de la ejecución en APTS y `--no-task-log`.
-    artifactVersion: '1.2.0',
+    // 1.3.0: documenta `{task_id}` y por qué la tarea del conductor no se liga al item.
+    artifactVersion: '1.3.0',
     kind: 'loop_conductor_manual',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -2360,13 +2364,15 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'conductor', 'prompts', 'dev-story-revision-adversaria.md'),
     fileName: 'dev-story-revision-adversaria.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '1.0.0',
+    // 1.1.0: le dice al agente que use la tarea que el conductor ya abrió (`{task_id}`)
+    // en vez de registrar la suya, que iría ligada al backlog item.
+    artifactVersion: '1.1.0',
     kind: 'loop_conductor_prompt',
     recommended: false,
     usagePriority: 'optional_entrypoint',
     optional: true,
     dependsOnArtifactIds: ['loop_conductor'],
-    selection_rule: 'Prompt template for the loop conductor (--prompt-file), replacing its built-in default. It adds an adversarial review gate before the dev-story validation step: three layers in parallel subagents under distinct lenses (Blind Hunter sees only the diff, Edge Case Hunter the boundaries, Acceptance Auditor only the story and its acceptance criteria), a triage that counts a finding only with file:line plus a concrete failure scenario, and the method\'s own {"goto":"step:5"} branch when something is confirmed. Download it only if you run the conductor and want the gate in the agent session; the engine gate (the required_for_close code_review artifact on the terminal dev-story step) applies either way. Placeholders substituted by the conductor: {story_id}, {agent_name}, {project_url}, {role}, {iteration}, {attempt}, {max_attempts}.',
+    selection_rule: 'Prompt template for the loop conductor (--prompt-file), replacing its built-in default. It adds an adversarial review gate before the dev-story validation step: three layers in parallel subagents under distinct lenses (Blind Hunter sees only the diff, Edge Case Hunter the boundaries, Acceptance Auditor only the story and its acceptance criteria), a triage that counts a finding only with file:line plus a concrete failure scenario, and the method\'s own {"goto":"step:5"} branch when something is confirmed. Download it only if you run the conductor and want the gate in the agent session; the engine gate (the required_for_close code_review artifact on the terminal dev-story step) applies either way. Placeholders substituted by the conductor: {story_id}, {agent_name}, {project_url}, {role}, {iteration}, {attempt}, {max_attempts}, {task_id}.',
     description: 'Prompt template for the conductor that demands an adversarial review before a story closes.'
   }
 };
