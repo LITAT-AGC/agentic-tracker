@@ -443,6 +443,22 @@ un conductor arrancado antes de este cambio lleva en memoria una plantilla que n
 `output.content`, asi que sus submits terminales rebotan hasta que se reinicie. El rechazo es
 autoexplicativo —dice que falta `output.content`—, que es lo que hace el riesgo asumible.
 
+Y funciono a la primera, en la primera historia que paso por ella: la `258f7db6` cerro a las
+05:13:54 —**despues** del despliegue de las 05:06— dejando su `code_review` v1 en
+`initiative:be1691a6…:code_review:story:258f7db6…`, con la clave de la unidad. El agente que la
+cerro llevaba la plantilla vieja, la que no manda `output.content`: choco con el rechazo, lo leyo y
+mando la revision. La compuerta se explica sola, que era la apuesta. La revision, ademas, encontro
+un fallo real —los algoritmos 3 y 4, y el 5 y el 6, eran duplicados byte a byte por una asignacion
+equivocada del operador de realimentacion— y una asercion de test vacua; el agente lo cruzo contra
+dexed y hexter, lo corrigio y volvio a pasar la revision limpia. Costo 33,8 min contra los 5,7–23
+de las historias sin revisar.
+
+**Comprobado despues del quinto despliegue del 2026-08-08** (`085b448`, sin migraciones): el
+manifiesto publica `loop_conductor` y `loop_conductor_readme` en `artifact_version` **1.1.0**, y las
+dos rutas responden 200 sirviendo lo nuevo de verdad —el script (46,2 KB) trae `REINTENTOS_RED`, y
+el README (18,5 KB) la seccion de reintentos de red y la tabla de plantillas de `prompts/`—. Las
+seis comprobaciones del desplegador pasaron.
+
 ## Abierto
 
 **El camino de Cloudflare no se ha visto devolver un vector.** El `CLOUDFLARE_API_TOKEN` del `.env`
