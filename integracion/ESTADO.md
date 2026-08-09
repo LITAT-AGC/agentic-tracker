@@ -10,7 +10,8 @@ llego hasta aqui: eso esta en el historial de git.
 | Superficie de integracion | El endpoint MCP remoto, `POST /mcp` (Streamable HTTP, sin sesion) |
 | Operaciones | 22, derivadas de `apts_skills.json` |
 | Registro | Una URL y cuatro cabeceras; el manifiesto publica el bloque por runtime |
-| Manifiesto | `GET /api/public/integrar`, `schema_version` 1.1.1 |
+| Manifiesto | `GET /api/public/integrar`, `schema_version` 1.1.2 |
+| Guia para personas | `GET /api/public/integrar/guia`, HTML renderizado del manifiesto |
 | Runtimes soportados | Dos: Claude Code y opencode |
 | Artefactos publicados | 8; el conductor en `artifact_version` 1.6.0 y su README en 1.6.1, `skill_markdown`, `agent_guidelines` y `adapter_generator` en 1.1.0, `loop_prompt_code_review` en 1.1.1, `surface_spec` en 1.0.2, `skills_json` en 1.0.2 |
 | Descargas necesarias para **llamar** a las operaciones | Ninguna |
@@ -238,6 +239,32 @@ un puerto efimero y lanza el conductor de verdad contra el con un agente falso: 
 comprobaciones, y entre ellas la que mas importa es que el camino normal no cambio —un fallo
 de verdad sigue gastando la escalera entera y saliendo con 20—. Los dos artefactos del
 conductor suben a `artifact_version` **1.7.0**.
+
+**El punto de entrada publico ya tiene una puerta para personas.** `/api/public/integrar` esta
+escrito para agentes —JSON, en ingles, con la prosa en forma de reglas ejecutables— y era lo
+unico que habia: quien llegaba por primera vez y queria conectar su repositorio no tenia por
+donde entrar. El README del repo lo explica, pero exige clonar APTS, que es justo lo que un
+cliente no hace.
+
+`GET /api/public/integrar/guia` devuelve esa guia en HTML: los cuatro valores que hacen falta,
+los tres pasos —registrar el endpoint, generar los adaptadores, comprobar que responde—, como
+se conduce el metodo y como se lanza el bucle, mas la referencia de operaciones, artefactos y
+sintomas. Autocontenida: el CSS va embebido y no pide nada a otro host, porque tiene que verse
+igual sin red.
+
+No es un artefacto y no tiene `artifact_version`: **no guarda contenido propio**. Se renderiza
+en cada peticion desde el manifiesto y desde `apts_skills.json`, de modo que la URL del
+endpoint, las cabeceras, los bloques de registro por runtime, las 22 operaciones, los
+artefactos con su version y las cinco reglas de `method_conduction` salen de la misma fuente
+que consume el agente. Lo unico escrito a mano es lo que esas dos fuentes no pueden llevar: en
+que orden se hacen las cosas y por que. Una tercera copia de la superficie se separaria en
+silencio, que es exactamente lo que costo retirar las cuatro plantillas de agente.
+
+`schema_version` sube a **1.1.2** por `human_guide`, hermano de `entrypoint`: clave nueva que no
+quita ni cambia la forma de nada, el mismo caso que 1.1.1. Se anuncia porque si no, no hay
+forma de descubrirla. Cubierto por `backend/scripts/test_integration_guide.js`, que llama a la
+funcion de render con un manifiesto de mentira: 25 comprobaciones, y las primeras son de
+escapado, porque por la pagina pasa texto que no escribio la plantilla.
 
 **El sondeo del buzon ya no ahoga el log.** El conductor en marcha pregunta por ordenes cada diez
 segundos, y cada vuelta escribia una linea HTTP a nivel `info`: 8.640 al dia por conductor, todas

@@ -56,6 +56,7 @@ const {
   resolveEmbeddingProvider,
   DEFAULT_EMBEDDING_MODEL
 } = require('./scripts/lib/semantic_embeddings');
+const { renderIntegrationGuide } = require('./scripts/lib/integration_guide');
 const rootPackage = require('../package.json');
 const db = createKnex(knexConfig[process.env.NODE_ENV || 'development']);
 
@@ -2313,7 +2314,11 @@ const integrationRoot = path.join(__dirname, '..', 'integracion');
 // 1.1.1: `register_task_link_rule` dentro de `task_recovery_policy`. Es clave nueva
 //        —el mismo caso que `method_conduction` en 1.0.1— y no quita ni cambia la
 //        forma de nada, asi que es de parche.
-const integrationManifestSchemaVersion = '1.1.1';
+// 1.1.2: `human_guide`, la URL de la guia en HTML para personas. Misma regla que
+//        1.1.1: clave nueva que no quita ni cambia la forma de nada. Se anuncia en el
+//        manifiesto porque si no, no hay forma de descubrirla: el punto de entrada
+//        publico es este JSON, y una pagina que nadie sabe que existe no ayuda a nadie.
+const integrationManifestSchemaVersion = '1.1.2';
 const publicIntegrationBasePath = '/api/public/integrar';
 
 const integrationArtifacts = {
@@ -2957,6 +2962,10 @@ const buildIntegrationManifest = (req, methodConductionOverride = null) => {
       operator_prompt_template: 'Read this public manifest, understand that APTS is the tracking source of truth, register the remote MCP server by copying the block for this runtime from mcp_endpoint.registration_by_runtime, request APTS_API_KEY and the project identity values from the operator if missing, store them in a .env file at the client project root (or equivalent secret store), prepare a local append-only resilience journal, and if the current user request may describe a new bug, error, or regression from chat, first confirm whether the user wants it registered as a bug in APTS before creating or updating any tracked bug item.'
     },
     entrypoint: buildAbsoluteUrl(req, publicIntegrationBasePath),
+    // Hermano del entrypoint y no artefacto: no se descarga ni se versiona, se abre. Lo
+    // que sirve es una vista de ESTE mismo manifiesto, asi que no tiene version propia
+    // que pudiera contradecir a la de aqui.
+    human_guide: buildAbsoluteUrl(req, `${publicIntegrationBasePath}/guia`),
     api_base_url: buildAbsoluteUrl(req, '/api'),
     mcp_endpoint: buildMcpEndpoint(req),
     method_conduction: methodConduction,
@@ -3092,6 +3101,39 @@ app.get(publicIntegrationBasePath, async (req, res) => {
   }
 
   res.json(buildIntegrationManifest(req, override));
+});
+
+// La guia para personas. El manifiesto de al lado esta escrito para agentes —JSON, en
+// ingles, con la prosa en forma de reglas ejecutables—, y alguien que llega por primera
+// vez no tiene por donde entrar: el README lo explica, pero exige clonar APTS, que es
+// justo lo que un cliente no hace.
+//
+// Se RENDERIZA desde el manifiesto y desde el contrato en cada peticion, no se guarda
+// escrita: una tercera copia de la superficie se separaria en silencio, que es el fallo
+// que ya costo las cuatro plantillas de agente. Por eso tampoco es un artefacto con
+// `artifact_version`: no hay contenido propio que versionar.
+app.get(`${publicIntegrationBasePath}/guia`, async (req, res) => {
+  try {
+    const contrato = JSON.parse(
+      await fs.readFile(integrationArtifacts.skills_json.filePath, 'utf8'),
+    );
+    const html = renderIntegrationGuide({
+      manifest: buildIntegrationManifest(req),
+      operations: Array.isArray(contrato.skills) ? contrato.skills : [],
+    });
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    return res.send(html);
+  } catch (error) {
+    return sendApiError(res, createHttpError(500, 'Unable to render integration guide', {
+      code: 'INTEGRATION_GUIDE_RENDER_FAILED',
+      expose: true,
+      cause: error,
+    }), {
+      fallbackMessage: 'Unable to render integration guide',
+      logMessage: 'Integration guide render failed',
+    });
+  }
 });
 
 app.get(`${publicIntegrationBasePath}/skills.json`, async (req, res) => sendIntegrationArtifact(req, res, 'skills_json'));

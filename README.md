@@ -520,9 +520,14 @@ npx playwright test
 
 Esta es la parte importante si quieres que otros repositorios reporten actividad a este servicio.
 
+> **Si prefieres leerlo en el navegador:** el propio servicio publica esta misma guia en HTML,
+> renderizada desde el manifiesto en vivo, en `GET /api/public/integrar/guia`. Es el sitio al que
+> mandar a alguien que quiere integrarse y no va a clonar este repositorio.
+
 ### Paso 1: registrar el MCP remoto en el proyecto integrador
 
-1. Lee el manifiesto publico: `GET /api/public/integrar` (sin token).
+1. Lee el manifiesto publico: `GET /api/public/integrar` (sin token). Su campo `human_guide`
+   apunta a la version en HTML.
 2. Copia el bloque de tu runtime desde `mcp_endpoint.registration_by_runtime` al archivo de configuracion correspondiente (`.mcp.json` para Claude Code, `opencode.json` para opencode). La URL del endpoint ya viene embebida en el bloque.
 3. Define en el `.env` del proyecto cliente (o en tu gestor de secretos) los valores que ese bloque referencia:
 
