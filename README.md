@@ -2,6 +2,22 @@
 
 APTS es un servicio de seguimiento de proyectos orientado a agentes de IA. En lugar de depender solo del contexto del chat o de comentarios dispersos en el codigo, APTS centraliza backlog, tareas de ejecucion, estados, heartbeats, bloqueos y logs tecnicos detras de un endpoint MCP remoto (con una API REST equivalente por debajo), con un dashboard web para supervision humana.
 
+Y hace una cosa mas, que es la que lo separa de un tablero: lleva dentro un **motor del
+metodo BMAD**. El servidor decide en que fase esta una iniciativa, que paso toca, que rol
+lo tiene que ejecutar y que artefacto hace falta para cerrarlo. El cliente pregunta y
+obedece.
+
+Por donde empezar, segun a que vengas:
+
+| Quiero… | Ir a |
+| --- | --- |
+| entender que hace y con que esta hecho | [Arquitectura](#arquitectura) |
+| entender el metodo y como esta implementado | [El metodo BMAD y como esta implementado](#el-metodo-bmad-y-como-esta-implementado) |
+| levantar el servicio en mi maquina | [Instalacion local](#instalacion-local) |
+| conectar OTRO repositorio a APTS | [Como integrar otros proyectos con APTS](#como-integrar-otros-proyectos-con-apts) |
+| dejar corriendo la implementacion sola | [El bucle de implementacion](#paso-3-el-bucle-de-implementacion-opcional) |
+| saber que hay hoy en produccion | `integracion/ESTADO.md` |
+
 ## Que incluye
 
 - Backend en Node.js + Express + Knex.
@@ -53,7 +69,7 @@ El repositorio incluye material de integracion en `integracion/paquete-apts/`: e
 
 Como este repositorio es publico, esos archivos se consumen directamente desde `integracion/paquete-apts/`.
 
-Ademas, el backend publica un punto de entrada publico para agentes en `/api/public/integrar`. Ese endpoint devuelve un manifiesto JSON con el bloque de registro del MCP remoto por runtime, el bucle de conduccion del metodo como dato (`method_conduction`), los artefactos opcionales (contrato de skills, guia operativa, plantillas de agentes, spec de superficie y generador de adaptadores) y un bloque `bootstrap` que explica el proposito de APTS, la migracion desde tracking local y como solicitar y alojar `APTS_API_KEY`. No requiere token.
+Ademas, el backend publica un punto de entrada publico para agentes en `/api/public/integrar`. Ese endpoint devuelve un manifiesto JSON con el bloque de registro del MCP remoto por runtime, el bucle de conduccion del metodo como dato (`method_conduction`), los artefactos opcionales (contrato de skills, guia operativa, guia de empaquetado, spec de superficie, generador de adaptadores, y el conductor del bucle con su manual y su plantilla de prompt) y un bloque `bootstrap` que explica el proposito de APTS, la migracion desde tracking local y como solicitar y alojar `APTS_API_KEY`. No requiere token.
 
 Politica de mantenimiento del manifiesto: cada cambio funcional, estructural o semantico en `/api/public/integrar` debe subir `schema_version`, y cada artefacto cuyo contenido cambie debe subir su `artifact_version`.
 
@@ -127,6 +143,188 @@ APTS separa la planificacion del trabajo de su ejecucion:
 
 Un backlog item puede enlazarse con una `active_task_id` mientras esta en ejecucion.
 
+## El metodo BMAD y como esta implementado
+
+APTS no es solo un tablero: lleva dentro un **motor de metodo**. BMAD (v6.8.0) es un metodo
+de desarrollo asistido por agentes que parte el trabajo en fases, le pone un rol distinto a
+cada una y exige documentos concretos antes de dejar pasar a la siguiente. APTS no lo
+reimplementa ni lo interpreta: **importa el corpus de BMAD a la base y lo ejecuta**.
+
+La consecuencia practica, y es la regla que gobierna todo lo demas: **el metodo vive en el
+servidor**. Un cliente no elige la fase, ni el paso, ni el rol, ni cuando algo esta
+terminado. Pregunta `apts_next` y hace exactamente lo que se le contesta. Cuando el cliente
+aporta algo, es contenido —la prosa de un documento, el codigo de una story—, nunca
+estructura.
+
+### Las cuatro fases, y que cierra cada una
+
+El ciclo de vida es `analysis -> planning -> solutioning -> implementation -> done`. Cada
+fase tiene una **espina**: la lista ordenada de workflows que la gatean. `apts_next` la
+recorre en orden y activa el primero que no este completo; la fase avanza cuando no queda
+ninguno.
+
+| Fase | Workflows de la espina | Producen | Rol |
+| --- | --- | --- | --- |
+| `analysis` | `bmad-product-brief` | `brief` | `bmad-agent-analyst` (Mary) |
+| `planning` | `bmad-prd` | `prd` | `bmad-agent-pm` (John) |
+| `solutioning` | `bmad-create-architecture` -> `bmad-create-epics-and-stories` -> `bmad-check-implementation-readiness` | `architecture`, `epics` (y **crea los backlog items**), `readiness` | `bmad-agent-architect` (Winston) |
+| `implementation` | `bmad-sprint-planning` -> `bmad-create-story` -> `bmad-dev-story` | `sprint_plan`, `story_spec` (una por story), y por cada story `status: done` + `code_review` | `bmad-agent-dev` (Amelia) |
+
+"Completo" no es una opinion: es que **exista el artefacto que el workflow declara
+producir**. Esa correspondencia workflow → output vive en un solo sitio,
+`backend/scripts/lib/method_outputs.js`, y de ahi se derivan tanto los `outputs[]` que el
+paso terminal le pide al agente como el predicado de completitud que gatea la fase. No
+pueden contradecirse porque son la misma fuente.
+
+El corpus trae muchos mas workflows por fase —`bmad-market-research`, `bmad-ux`,
+`bmad-retrospective`, `bmad-code-review`…— pero solo los marcados `routing.required`
+forman la espina. El resto existe y es invocable, y no gatea nada.
+
+Dos consecuencias que conviene saber de antemano:
+
+- **Una spec del cliente no salta ninguna fase.** `create_initiative` la guarda con
+  `doc_type: 'spec'` precisamente para que no cierre nada: es la ENTRADA del analyst y del
+  PM, no un sustituto de sus artefactos. Arrancar en una fase adelantada se rechaza con
+  `PHASE_NOT_REACHABLE` salvo que los artefactos de las fases salteadas ya existan en el
+  proyecto.
+- **La fase de implementacion no termina hasta que TODAS las stories estan `done`.**
+  `bmad-dev-story` es *iterable*: no se completa por producir un documento, sino cuando no
+  le queda ninguna unidad pendiente.
+
+### Los tres bucles anidados
+
+Es lo que mas cuesta ver desde fuera, porque en la salida del conductor los tres se
+parecen. Van de fuera hacia dentro y **los tres son secuenciales**; el unico paralelismo de
+todo el sistema esta en el nivel mas interno.
+
+**1. El bucle de la iniciativa.** Fase por fase, y dentro de cada fase workflow por
+workflow, siguiendo la espina. Lo conduce quien llame a `apts_next`: una persona, el agente
+`APTS Method Orchestrator`, o el conductor del bucle en la fase de implementacion.
+
+**2. El bucle de las unidades.** En `bmad-dev-story`, cada story es una **unidad de
+trabajo** que se reclama, se trabaja y se cierra por separado. El motor reparte la
+siguiente por `priority, sort_order` —el plan del backlog— y no por identificador. Para el
+conductor, una vuelta = una story = un proceso de agente con contexto limpio. Nunca hay dos
+a la vez.
+
+**3. Los pasos del workflow, y el salto hacia atras.** Una story no es un paso: es el
+workflow `bmad-dev-story` entero, que tiene **diez pasos** y los recorre el agente dentro de
+su unica sesion.
+
+```
+1  Find next ready story and load it
+2  Load project context and story information
+3  Detect review continuation and extract review context
+4  Mark story in-progress
+5  Implement task following red-green-refactor cycle      <--+
+6  Author comprehensive tests                                |
+7  Run validations and tests                                 | goto:step:5
+8  Validate and mark task complete ONLY when fully done   ---+
+9  Story completion and mark for review
+10 Completion communication and user support
+```
+
+El paso 8 es la compuerta. Si la validacion encuentra algo, el agente **no parchea y
+sigue**: declara la rama que el propio metodo define, `{"goto": "step:5"}`, y vuelve al paso
+5 a implementar. Cada ida y vuelta es una **ronda**. El conductor no ve nada de esto: para
+el, la vuelta sigue en curso.
+
+Y dentro del paso 8 hay un cuarto nivel, que es el unico paralelo: la revision adversaria
+lanza **tres subagentes a la vez**, cada uno con una lente distinta y ciego a los otros
+—Blind Hunter (solo el diff, sin story ni criterios), Edge Case Hunter (limites, vacios,
+nulos, rutas de error) y Acceptance Auditor (la story y sus criterios contra el codigo
+real)—. Un hallazgo solo cuenta si trae `archivo:linea` y un escenario de fallo concreto.
+
+#### El tope de saltos
+
+Los saltos **hacia atras** estan topados en 3 por unidad (`METHOD_MAX_STEP_REVISITS`). Solo
+se cobran los retrogrados: todo ciclo contiene al menos una arista hacia atras, asi que
+acotarlas acota el grafo entero y los saltos hacia adelante no gastan presupuesto.
+
+Existe porque ese bucle es invisible para cualquier freno del cliente: pasa dentro de una
+sesion de agente, entre dos `apts_submit_step`, por debajo del muestreo de cualquier
+vigilancia externa. Sin tope, un agente que no consigue arreglar algo puede quedarse
+8->5->8->5 hasta agotar su contexto sin producir nada. Por eso el contador vive en el
+servidor, en `project_state.cursor.visits`.
+
+Cuatro pasadas por el paso 8 gastan tres saltos. La quinta se degrada a `HALT`, y entonces
+el agente debe reportar bloqueo: cerrar la story a la fuerza, o corregir en silencio para
+esquivar el tope, esta explicitamente prohibido.
+
+El presupuesto **se limpia al soltar el claim**, no solo al cerrar el workflow. Ese es el
+camino de desatasco cuando el tope se agota con rondas productivas:
+
+```bash
+# 1. devolver la unidad (limpia cursor.visits) — ruta de panel, con sesion
+curl -X POST https://APTS/api/method/pointers/<agent_name>/release \
+  -H 'Content-Type: application/json' -b cookie.txt \
+  -d '{"project_url":"https://github.com/org/repo","instruction":"por que se suelta"}'
+
+# 2. devolver la story al reparto
+#    update_backlog_item { backlog_item_id, status: "ready_for_dev" }
+```
+
+### La compuerta de revision
+
+El paso terminal de `bmad-dev-story` declara **dos** outputs y los dos viajan en el mismo
+`apts_submit_step`:
+
+```json
+{ "status": "done", "code_ref": "<hash del commit>",
+  "title": "<titulo de la revision>", "content": "<la revision adversaria entera>" }
+```
+
+`code_review` esta marcado `required_for_close`: un submit terminal sin `output.content` se
+rechaza con `ok: false` y **la story no cierra**. Eso es lo que la hace compuerta y no
+adorno. Se comprueba antes de capturar y sin excepcion para `HALT`, porque la captura corre
+antes que el control y un `HALT` declarado sobre el paso terminal cerraria la story igual.
+
+El artefacto se guarda con el alcance de la **unidad** (`scope: 'story'`), no de la
+iniciativa: si no, habria una sola fila de revision para todas las stories.
+
+### Los roles
+
+El corpus define seis roles. Cada uno se registra con `set_agent_role` ligando un
+`agent_name` estable a su `entity_key`:
+
+| `entity_key` | Persona | Donde actua |
+| --- | --- | --- |
+| `bmad-agent-analyst` | Mary | `analysis` |
+| `bmad-agent-pm` | John | `planning` |
+| `bmad-agent-architect` | Winston | `solutioning` |
+| `bmad-agent-dev` | Amelia | `implementation` |
+| `bmad-agent-ux-designer` | Sally | workflows opcionales de `planning` |
+| `bmad-agent-tech-writer` | Paige | workflows opcionales, cualquier fase |
+
+Un cliente solo-spec es **varios roles a la vez** y va conmutando: `apts_next` devuelve en
+`role` la entidad que el paso REQUIERE, no la de quien pregunta. Si `next` es `wait` y el
+`role` no coincide con la identidad que llamo, hay que volver a llamar como ese rol —el
+`agent_name` que viaja en los argumentos gana a la cabecera del registro, y ese es el
+mecanismo sobre el que cabalga la conmutacion—. Sin roster no hay nada que hacer: un
+`entity_id` sin resolver deja a `apts_next` esperando para siempre.
+
+### Donde vive cada pieza
+
+| Pieza | Archivo |
+| --- | --- |
+| Corpus de BMAD importado | `backend/importer/corpus/*.json` |
+| Siembra (upsert por clave natural, conserva UUID) | `npm run seed:method` |
+| Motor: espina, reparto, saltos, completitud | `backend/scripts/lib/method_resolver.js` |
+| Alta de iniciativa, roster y guardia de fase de partida | `backend/scripts/lib/method_bootstrap.js` |
+| Fuente unica de "que produce cada workflow" | `backend/scripts/lib/method_outputs.js` |
+| Estado por agente: fase, cursor, `visits` | tabla `project_state` |
+| Definiciones y pasos sembrados | tablas `workflow_definitions`, `workflow_steps` |
+| Artefactos producidos | tabla `semantic_documents` |
+| Reglas de conduccion, publicadas como dato | `method_conduction` en `GET /api/public/integrar` |
+
+`method_conduction` es la fuente autoritativa para un cliente: trae `bootstrap_rule`,
+`identity_switching_rule`, `drive_loop`, `generative_step_rule` y
+`dev_story_completion_rule`. Los agentes generados apuntan a el en vez de repetirlo, para
+que no haya una segunda copia que se desincronice.
+
+**Fuera de alcance, declarado:** editar `workflow_steps` desde el panel. Las instrucciones
+paso a paso del metodo se cambian sembrando el corpus.
+
 ## Agentes recomendados
 
 El generador emite cuatro agentes de integracion para cada runtime soportado, desde `integracion/paquete-apts/runtime-adapters/spec/apts-surface.json`:
@@ -136,7 +334,9 @@ El generador emite cuatro agentes de integracion para cada runtime soportado, de
 - `Backlog Item Executor Dev Test Commit` (`backlog-item-executor-dev-test-commit`): implementa un solo item del backlog, registra progreso en APTS, ejecuta validaciones relevantes del repositorio y solo committea si pasan.
 - `APTS Method Orchestrator` (`apts-method-orchestrator`): arranca una iniciativa BMAD desde una spec de cliente y conduce el ciclo analisis → planificacion → solucion → implementacion → done.
 
-Las cuatro plantillas son artefactos publicados del manifiesto y **las escribe el generador** (`integracion/paquete-apts/scripts/generate-adapters.js`) desde `runtime-adapters/spec/apts-surface.json`: no se editan a mano; el arranque del backend aborta si divergen del spec.
+Los cuatro agentes **los escribe el generador** (`integracion/paquete-apts/scripts/generate-adapters.js`) desde `runtime-adapters/spec/apts-surface.json`, junto con los cinco comandos, el registro MCP, los permisos y el archivo de instrucciones: no se editan a mano, se edita el spec y se regenera.
+
+Ya no se publican como artefactos sueltos del manifiesto. Hasta el 2026-08-08 existian cuatro `agent_template` descargables, que eran una segunda copia del mismo texto y se habian separado del spec sin que nadie lo notara; se retiraron con el runtime de VS Code, que era el unico que los necesitaba. Ahora el spec tiene **un solo consumidor**, el generador, y lo que emite se comprueba regenerando y comparando. El auto-chequeo que vigilaba esas copias desaparecio con ellas: queda uno, el del contrato contra `apts_skills.json`, que aborta el arranque con `exit 3` si se han separado.
 
 ## Requisitos
 
@@ -343,9 +543,88 @@ Saltarse este paso deja el proyecto sin orquestador de metodo y sin ningun coman
 
 Si quieres los assets sin clonar el repo, todos se sirven como artefactos del manifiesto publico (`/api/public/integrar`).
 
-### Paso 2b (opcional): el bucle de implementacion
+### Paso 3: el bucle de implementacion (opcional)
 
-Con la iniciativa ya en `implementation`, `integracion/conductor/apts-loop.js` mastica las stories solo: un proceso de agente por story con contexto limpio, hasta que el motor dice `done` o salta un freno. Lee antes su README (`integracion/conductor/README.md`), que tambien se publica como artefacto: `--agent-cmd` es obligatorio y su forma depende del runtime. No conduce las fases generativas, que son interactivas.
+Con la iniciativa ya en `implementation` y las stories creadas, `apts-loop.js` mastica el
+backlog solo: pregunta al motor que toca, lanza **un proceso de agente por story con
+contexto limpio**, espera, y vuelve a preguntar. Para cuando el motor dice `done` o salta un
+freno. No conduce las fases generativas —analysis, planning, solutioning—, que son
+interactivas y paran por otros motivos; si el motor recomienda algo fuera de alcance, para y
+lo dice.
+
+El script es autocontenido (CommonJS, solo builtins de Node), asi que basta con bajar ese
+archivo. Va con su manual a proposito: `--agent-cmd` es obligatorio y su forma depende del
+runtime, de modo que el script sin el README no se puede usar.
+
+```bash
+curl -O https://APTS/api/public/integrar/conductor/apts-loop.js
+curl -O https://APTS/api/public/integrar/conductor/README.md
+```
+
+Empieza siempre con `--dry-run`, que resuelve la primera decision e informa que lanzaria sin
+ejecutar nada:
+
+```bash
+node apts-loop.js --agent-name mi-dev --dry-run \
+  --agent-cmd 'claude -p "$(cat {prompt_file})" --model {model} --permission-mode acceptEdits'
+```
+
+Y despues, la corrida real:
+
+```bash
+node apts-loop.js \
+  --agent-name mi-dev \
+  --agent-cmd 'claude -p "$(cat {prompt_file})" --model {model} --permission-mode acceptEdits' \
+  --model-escalation 'claude-sonnet-5,claude-opus-5' \
+  --max-iterations 20
+```
+
+**En Windows** el `$(cat ...)` no existe —`shell: true` resuelve a `cmd.exe`—, asi que la
+forma equivalente es `type {prompt_file} | claude -p --model {model}`. Para opencode:
+`opencode run -m {model} -f {prompt_file} "Implementa la unidad descrita en el archivo
+adjunto"`, que ni siquiera mete el prompt en la linea de shell.
+
+Lo que hay que saber antes de lanzarlo:
+
+- **`--agent-name` debe ser la identidad registrada como rol dev en el roster**
+  (`set_agent_role`) y tiene que ser la misma entre vueltas: es el puntero que sostiene el
+  claim de la story. Si no lo es, el motor devuelve `wait` nombrando el rol que falta y el
+  conductor para con codigo 11.
+- **La identidad cae al entorno** (`APTS_MCP_URL`, `APTS_API_KEY`, `APTS_PROJECT_URL`,
+  `APTS_AGENT_NAME`, `APTS_AGENT_EMAIL`) y el entorno cae a un `.env` (`--dotenv`, por
+  defecto el del directorio actual). El agente hereda ese entorno, asi que de ahi saca su
+  propia configuracion MCP sin repetirla en el comando.
+- **El conductor no reclama stories**: `apts_status` es de solo lectura. El claim lo hace el
+  agente al arrancar, que es quien va a sostenerlo.
+- **No guarda estado propio** —lo tiene el motor—, asi que matarlo y relanzarlo es seguro y
+  retoma donde estaba.
+- La plantilla de prompt por defecto viene dentro; `--prompt-file` permite otra. La que
+  exige la revision adversaria en tres subagentes paralelos se publica como artefacto
+  (`conductor/prompts/dev-story-revision-adversaria.md`). La compuerta del motor aplica se
+  use o no.
+
+Frenos y codigos de salida, resumidos (el detalle esta en el README del conductor):
+
+| Freno | Por defecto | Que detecta |
+| --- | --- | --- |
+| `--max-iterations` | 50 | tope duro contra un bucle desbocado |
+| `--max-stalls` | 2 | vueltas seguidas sin que cambie nada del estado del metodo |
+| guarda de alcance | `bmad-dev-story` | el motor pide un paso que este conductor no conduce |
+| escalera de modelo | 1 intento | el proceso del agente termino distinto de 0 |
+
+`0` done · `1` configuracion · `2` red · `10` blocked · `11` wait · `12` fuera de alcance ·
+`13` estancado · `14` tope de iteraciones · `15` detenido desde el panel · `20` el agente
+fallo · `21` la CLI del agente agoto su limite de uso · `22` el `--agent-cmd` no existe ·
+`23` la CLI del agente no tiene credenciales.
+
+Del 21 al 23 el que fallo no es el agente sino su entorno, y por eso no se gasta la escalera
+de modelos: un limite de uso es de la CUENTA y no del modelo, asi que reintentar con otro no
+puede salir distinto.
+
+Ademas late cada cinco minutos mientras el agente trabaja, copia su diario a `agent_logs`, y
+sondea un buzon de ordenes cada diez segundos para que el panel pueda pausarlo, reanudarlo o
+detenerlo. Sin `--project-url` ni `--agent-cmd` no falla: se queda esperando ordenes
+(`--daemon`).
 
 Importante: si APTS cambia endpoints, payloads o manejo de errores, el ajuste debe reflejarse primero en `integracion/paquete-apts/apts_skills.json`. El auto-chequeo del arranque aborta si la superficie remota se separa del contrato.
 
@@ -427,7 +706,7 @@ Errores frecuentes:
 
 Es un problema de configuracion que se resuelve con el operador; no hay superficie alternativa recomendada. Los endpoints REST existen y mapean 1:1 con las operaciones (ver la tabla de **Skills disponibles**), pero no construyas wrappers paralelos por runtime: si falta una capacidad, se agrega primero a `apts_skills.json` y se regeneran los adaptadores.
 
-### Paso 3: instalar el prompt en el proyecto integrador
+### Paso 4: instalar el prompt en el proyecto integrador
 
 Ademas de las skills, el agente necesita una instruccion de trabajo consistente. La forma mas simple es agregar un archivo `AGENTS.md` en la raiz del proyecto integrador; los dos runtimes soportados lo leen, y en Claude Code el `CLAUDE.md` generado no hace mas que importarlo.
 
@@ -455,7 +734,7 @@ Reglas obligatorias:
    y con actividad reciente.
 ```
 
-### Paso 4: estructura recomendada para un proyecto cliente
+### Paso 5: estructura recomendada para un proyecto cliente
 
 ```text
 mi-proyecto/
@@ -476,7 +755,7 @@ Si copiaste el directorio de tu runtime y los agentes no aparecen:
 3. `apts_skills.json` solo define las operaciones; no instala agentes.
 4. Regenera con `node integracion/paquete-apts/scripts/generate-adapters.js` si editaste el spec: los adaptadores no se editan a mano.
 
-### Paso 5: validacion de la integracion
+### Paso 6: validacion de la integracion
 
 1. Levanta APTS localmente o usa una instancia compartida.
 2. Desde el proyecto cliente, ejecuta `register_task`.
