@@ -46,6 +46,13 @@ const path = require('node:path');
 
 const NOMBRE = 'apts-loop';
 
+// Arriba del todo porque lo necesita ya la tabla de condiciones del entorno, unas líneas
+// más abajo: es un ayudante puro y no depende de nada.
+const entero = (valor, porDefecto) => {
+  const n = Number.parseInt(valor, 10);
+  return Number.isFinite(n) && n >= 0 ? n : porDefecto;
+};
+
 // Códigos de salida distintos por motivo, para que quien envuelva este proceso pueda
 // distinguir "terminó el trabajo" de "hay que mirar algo" sin parsear la salida.
 const SALIDA = {
@@ -61,6 +68,98 @@ const SALIDA = {
   // y por eso no comparte código con `agente_fallo` ni con `estancado`.
   detenido: 15,
   agente_fallo: 20,
+  // Los tres de abajo también son el agente terminando mal, pero NO por la story: su
+  // CLI se quedó sin crédito, el comando no existe, o sus credenciales no valen.
+  // Tienen código propio porque lo que hay que hacer con cada uno es distinto —esperar
+  // al reset, corregir --agent-cmd, renovar la sesión— y con el 20 los tres se leían
+  // como «el agente falló», que manda a buscar el problema en el sitio equivocado.
+  limite_de_uso: 21,
+  agente_no_ejecutable: 22,
+  agente_sin_credenciales: 23,
+};
+
+// ---- condiciones del ENTORNO del agente ----
+//
+// Un intento fallido puede serlo por la story —para eso está la escalera de modelos— o
+// porque el agente no llegó a trabajar. Los tres de aquí abajo son del segundo tipo y
+// comparten lo único que importa: reintentar no puede salir distinto. El límite de uso
+// es de la CUENTA y no del modelo, así que escalar de sonnet a opus gasta el segundo
+// intento en cero segundos; y un `--agent-cmd` mal escrito falla igual las tres veces.
+//
+// Se reconocen leyendo la SALIDA del agente y no su código, porque las tres terminan en
+// 1 igual que un bug. De ahí que el conductor ya no use `stdio: 'inherit'` a secas.
+//
+// Sólo se consulta cuando el intento YA falló, y sólo contra los últimos bytes. Ante la
+// duda el patrón NO dispara, porque los dos errores no cuestan lo mismo: confundir esto
+// con `agente_fallo` gasta un reintento, y confundir un fallo de la story con esto aborta
+// una corrida que podía seguir.
+//
+// De ahí el segundo cerrojo, `maxMs`: el binario que no existe y las credenciales que no
+// valen matan al proceso en segundos, así que un intento que estuvo veinte minutos
+// trabajando no falló por eso, diga lo que diga su última línea —un agente puede estar
+// implementando el manejo de un ENOENT, o imprimiendo el error de una prueba—. El límite
+// de uso no lleva cerrojo a propósito: llega justo cuando el agente lleva rato trabajando,
+// que es exactamente el caso que se vio.
+const COLA_MAX_BYTES = 4096;
+// Ajustable por entorno y sin bandera, como el latido y el sondeo, y por el mismo motivo:
+// nadie lo toca en una corrida normal, pero una prueba no puede tardar un minuto en
+// comprobar que el cerrojo cierra.
+const ARRANQUE_MAX_MS = entero(process.env.APTS_LOOP_STARTUP_MAX_MS, 60000);
+
+const CONDICIONES_ENTORNO = [
+  {
+    motivo: 'limite_de_uso',
+    codigo: SALIDA.limite_de_uso,
+    // Claude Code: «You've hit your session limit · resets 11:20pm (America/Buenos_Aires)».
+    patron: /hit your (?:session|usage|weekly) limit|usage limit reached|out of (?:credits|usage)/i,
+    // La hora de reset la imprime la propia CLI y es lo único accionable del mensaje:
+    // sin ella, «se acabó el crédito» deja a quien mire sin saber cuándo relanzar.
+    leer: (cola) => {
+      const m = cola.match(/resets?(?:\s+at)?\s+([^\n\r·]{1,60})/i);
+      const reset = m ? m[1].trim() : null;
+      return {
+        reset,
+        detalle: `la CLI del agente agotó su límite de uso${reset ? `; se restablece ${reset}` : ''}`
+          + '. No es un fallo de la story: reintentar con otro modelo no cambia nada,'
+          + ' porque el límite es de la cuenta.',
+      };
+    },
+  },
+  {
+    motivo: 'agente_no_ejecutable',
+    codigo: SALIDA.agente_no_ejecutable,
+    maxMs: ARRANQUE_MAX_MS,
+    // Las dos frases exactas de cmd.exe y de sh/bash cuando el binario no está. Fuera
+    // quedó «No such file or directory», que dice lo mismo pero lo escribe cualquier
+    // programa que abre un fichero que no existe.
+    patron: /command not found|is not recognized as an internal or external command/i,
+    leer: () => ({
+      detalle: 'el comando de --agent-cmd no se pudo ejecutar: el binario no está en el PATH'
+        + ' de este proceso. Es configuración, no un fallo del agente.',
+    }),
+  },
+  {
+    motivo: 'agente_sin_credenciales',
+    codigo: SALIDA.agente_sin_credenciales,
+    maxMs: ARRANQUE_MAX_MS,
+    patron: /invalid api key|credit balance is too low|please run .{0,20}login/i,
+    leer: () => ({
+      detalle: 'la CLI del agente rechazó sus credenciales. Renovar la sesión de esa CLI;'
+        + ' no tiene que ver con las credenciales APTS del conductor.',
+    }),
+  },
+];
+
+// Devuelve la primera condición que reconozca este intento, o null. `ms` es cuánto duró:
+// las condiciones con `maxMs` sólo valen si el proceso murió pronto (ver arriba).
+const reconocerCondicion = (cola, ms) => {
+  const texto = String(cola || '');
+  for (const c of CONDICIONES_ENTORNO) {
+    if (c.maxMs != null && !(ms < c.maxMs)) continue;
+    if (!c.patron.test(texto)) continue;
+    return { motivo: c.motivo, codigo: c.codigo, ...c.leer(texto) };
+  }
+  return null;
 };
 
 const AYUDA = `
@@ -144,7 +243,11 @@ murió el intento anterior, así que escalar de modelo apunta a la parte que res
 no vuelve a pagar los pasos que ya cerraron.
 
 Códigos de salida: 0 done · 1 configuración · 2 red · 10 blocked · 11 wait ·
-12 fuera de alcance · 13 estancado · 14 tope de iteraciones · 20 el agente falló.
+12 fuera de alcance · 13 estancado · 14 tope de iteraciones · 15 detenido ·
+20 el agente falló · 21 la CLI del agente agotó su límite de uso ·
+22 el comando de --agent-cmd no existe · 23 la CLI del agente no tiene credenciales.
+Del 21 al 23 no es la story: el agente no llegó a trabajar, así que no se gasta la
+escalera de modelos —el límite es de la CUENTA, no del modelo— y se para al primer intento.
 `;
 
 // El prompt no reexplica el ciclo: apunta al manifiesto, que es la fuente autoritativa
@@ -241,11 +344,6 @@ const parsearArgs = (argv) => {
     i += 1;
   }
   return out;
-};
-
-const entero = (valor, porDefecto) => {
-  const n = Number.parseInt(valor, 10);
-  return Number.isFinite(n) && n >= 0 ? n : porDefecto;
 };
 
 // Sustitución sólo para el COMANDO del agente, y sólo con valores que no traen saltos
@@ -693,6 +791,7 @@ const MARCA = {
   done: '✅', blocked: '⛔', wait: '⏸', fuera_de_alcance: '🚧',
   estancado: '🔁', tope_iteraciones: '⏱', agente_fallo: '❌', desconocido: '❓',
   red: '📡',
+  limite_de_uso: '🪫', agente_no_ejecutable: '🔧', agente_sin_credenciales: '🔑',
 };
 
 const dormir = (ms) => new Promise((res) => setTimeout(res, ms));
@@ -715,6 +814,9 @@ const notificarTelegram = async (cfg, datos) => {
   if (datos.fase) lineas.push(`fase: ${datos.fase}`);
   if (datos.storyId) lineas.push(`story: ${datos.storyId}`);
   if (datos.iteracion != null) lineas.push(`vuelta: ${datos.iteracion}`);
+  for (const [clave, valor] of Object.entries(datos.extra || {})) {
+    if (valor != null && valor !== '') lineas.push(`${clave}: ${valor}`);
+  }
   lineas.push(`salida: ${datos.codigo}`);
   const texto = lineas.join('\n').slice(0, TELEGRAM_MAX_CHARS);
 
@@ -762,9 +864,12 @@ const notificarTelegram = async (cfg, datos) => {
 
 // ---- parada ----
 
-const parar = async (cfg, { motivo, detalle, codigo, fase, storyId, iteracion }) => {
+// `extra` son los campos que sólo tienen sentido para UN motivo —hoy la hora de reset
+// del límite de uso—. Van al diario tal cual y al aviso como una línea más, en vez de
+// sepultados dentro del texto de `detalle`, que es prosa y no se puede consultar.
+const parar = async (cfg, { motivo, detalle, codigo, fase, storyId, iteracion, extra }) => {
   log(`PARADA (${motivo}): ${detalle}`);
-  registrar(cfg, { evento: 'parada', motivo, detalle, fase, story_id: storyId, iteracion, exit_code: codigo });
+  registrar(cfg, { evento: 'parada', motivo, detalle, fase, story_id: storyId, iteracion, exit_code: codigo, ...(extra || {}) });
 
   // La tarea de la unidad se cierra AQUÍ y no en cada sitio que para: hay siete motivos
   // de parada y sólo uno de ellos es que el trabajo terminó. `done` sólo cuando el ciclo
@@ -776,7 +881,7 @@ const parar = async (cfg, { motivo, detalle, codigo, fase, storyId, iteracion })
 
   // Primero el aviso y después el hook: el hook es un proceso del operador que puede
   // colgarse, y el aviso es justo lo que no debe quedarse esperándolo.
-  await notificarTelegram(cfg, { motivo, detalle, codigo, fase, storyId, iteracion });
+  await notificarTelegram(cfg, { motivo, detalle, codigo, fase, storyId, iteracion, extra });
 
   if (cfg.onStop) {
     // El motivo viaja por ENTORNO, no sustituido en la línea de comandos: `detalle`
@@ -981,15 +1086,33 @@ const lanzarAgente = (cfg, contexto) => {
   const inicio = Date.now();
 
   // `spawn` y no `spawnSync`: bloquear el proceso entero mientras el agente trabaja era lo
-  // que impedía latir y lo que hacía que "detener" no pudiera detener nada. `stdio:
-  // 'inherit'` se conserva —la salida del agente se sigue viendo en vivo— y `detached` en
+  // que impedía latir y lo que hacía que "detener" no pudiera detener nada. `detached` en
   // POSIX es lo que da grupo de procesos propio para poder matar el árbol.
+  //
+  // La salida ya no se hereda entera: `stdio: 'inherit'` dejaba al conductor sin ver una
+  // sola palabra de lo que el agente escribía, y por eso una CLI sin crédito y un bug de
+  // la story eran el mismo código 1. Ahora se hace de eco —cada trozo se reescribe tal
+  // cual, así que en consola se ve exactamente lo mismo que antes— y se guarda la cola.
+  // La entrada SÍ se hereda: el prompt viaja por archivo, pero `type X | claude` necesita
+  // que el hijo tenga stdin.
   return new Promise((resolve) => {
     const hijo = spawn(comando, {
       shell: true,
-      stdio: 'inherit',
+      stdio: ['inherit', 'pipe', 'pipe'],
       detached: process.platform !== 'win32',
     });
+
+    // Sólo la cola, y acotada: la salida de una story larga son megabytes y no hay
+    // ninguna razón para tenerla entera en memoria. Lo que se escribe al terminal es el
+    // Buffer original, así que el eco es byte a byte; el troceo en UTF-8 sólo puede
+    // estropear un carácter del buffer de búsqueda, que se compara contra patrones ASCII.
+    let cola = '';
+    const eco = (destino) => (trozo) => {
+      destino.write(trozo);
+      cola = (cola + trozo.toString('utf8')).slice(-COLA_MAX_BYTES);
+    };
+    hijo.stdout.on('data', eco(process.stdout));
+    hijo.stderr.on('data', eco(process.stderr));
     procesoAgente = hijo;
     const parar = vigilarAgente(cfg);
 
@@ -1004,7 +1127,10 @@ const lanzarAgente = (cfg, contexto) => {
         // Si falló, el prompt se conserva: es lo primero que hace falta para diagnosticar.
         log(`el prompt de esta vuelta queda en ${ficheroPrompt}`);
       }
-      resolve({ codigo, ms, error });
+      // La cola viaja con el resultado: quien decide si esto fue un fallo del agente o
+      // de su entorno es el bucle, no esta función. Se emite en 'close' y no en 'exit'
+      // justo por esto: `close` espera a que los flujos se hayan vaciado.
+      resolve({ codigo, ms, error, cola });
     };
 
     // Un proceso muerto por señal vuelve con `code` null: se normaliza a un código no cero
@@ -1311,6 +1437,12 @@ const conducir = async (cfg, plantillaPrompt) => {
         + `${modelo ? ` con ${modelo}` : ''}: salida ${ultimo.codigo}`
         + ` en ${Math.round(ultimo.ms / 1000)} s${ultimo.error ? ` — ${ultimo.error}` : ''}`);
 
+      // ¿Falló el agente, o falló su entorno? Se resuelve aquí y se usa más abajo,
+      // después de la orden de parada: lo que pida una persona desde el panel gana
+      // sobre cualquier diagnóstico automático.
+      const condicion = ultimo.codigo === 0 ? null : reconocerCondicion(ultimo.cola, ultimo.ms);
+      const quedaban = cfg.escalera.length - intento;
+
       // Una historia cortada a mitad de paso se comporta igual que un agente que muere:
       // el claim es idempotente y el motor vuelve a servir el mismo paso mientras el
       // puntero siga corriendo. Así que aquí no hay nada que deshacer, sólo que parar.
@@ -1330,6 +1462,24 @@ const conducir = async (cfg, plantillaPrompt) => {
       }
 
       if (ultimo.codigo === 0) break;
+
+      // Reintentar no puede salir distinto: se para con el motivo verdadero. Va antes
+      // del corte por escalera agotada para que también gane en el ÚLTIMO intento: si
+      // no, el límite de uso volvería a contarse como `agente_fallo` al final.
+      if (condicion) {
+        await parar(cfg, {
+          motivo: condicion.motivo,
+          detalle: condicion.detalle + (quedaban > 0
+            ? ` Quedaban ${quedaban} intento${quedaban > 1 ? 's' : ''} de la escalera y no se gastan.`
+            : ''),
+          codigo: condicion.codigo,
+          fase,
+          storyId,
+          iteracion,
+          extra: condicion.reset ? { reset: condicion.reset } : undefined,
+        });
+      }
+
       if (intento === cfg.escalera.length) break; // agotados: se decide justo debajo
 
       // Antes de gastar otro intento —y otro modelo, que puede ser más caro— se le

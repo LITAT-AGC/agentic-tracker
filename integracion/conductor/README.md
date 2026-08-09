@@ -325,10 +325,56 @@ operador que puede colgarse.
 | 14 | tope de iteraciones |
 | 15 | detenido — alguien lo paró desde el panel |
 | 20 | el agente terminó con error en todos sus intentos |
+| 21 | la CLI del agente agotó su límite de uso |
+| 22 | el comando de `--agent-cmd` no se pudo ejecutar |
+| 23 | la CLI del agente rechazó sus credenciales |
 
 No hay código nuevo para "falló incluso después de escalar": el motivo es el mismo y el
 detalle lleva la historia — `el agente falló en los 3 intentos (1: sonnet → código 1;
 2: sonnet → código 1; 3: opus → código 1)`, en consola, en el diario y en el aviso.
+
+Del **21 al 23** sí lo hay, y el siguiente apartado explica por qué.
+
+## Cuando el que falla es el entorno y no la story
+
+Un intento fallido puede serlo por la story —para eso está la escalera de modelos— o
+porque el agente **no llegó a trabajar**. Los tres casos de abajo son del segundo tipo y
+comparten lo único que decide qué hacer: reintentar no puede salir distinto.
+
+| motivo | código | qué lo delata |
+|---|---|---|
+| `limite_de_uso` | 21 | «hit your session/usage limit», «usage limit reached» |
+| `agente_no_ejecutable` | 22 | «command not found», «is not recognized as an internal or external command» |
+| `agente_sin_credenciales` | 23 | «invalid api key», «credit balance is too low», «please run … login» |
+
+El que lo motivó fue el primero. El límite de uso es de la **cuenta**, no del modelo, así
+que una escalera `sonnet → opus` gastaba su segundo intento en cero segundos y dejaba
+escrito `agente_fallo`, que manda a buscar el problema en la story. Pasó dos veces en dos
+días sobre una corrida real. Ahora se para al primer intento, con motivo y código propios,
+y **la hora de reset que imprime la CLI viaja al diario** (campo `reset` del evento
+`parada`), a la consola y al aviso de Telegram: es lo único accionable del mensaje.
+
+Se reconocen leyendo la **salida** del agente y no su código, porque los tres terminan en 1
+igual que un bug cualquiera. Por eso el conductor ya no hereda la salida a secas: hace de
+eco —cada trozo se reescribe tal cual, así que en consola se ve lo mismo— y se queda con
+los últimos 4 KB para poder leerlos si el intento falla. El efecto secundario a saber es
+que la salida del agente deja de ser un terminal desde su punto de vista, de modo que una
+CLI que coloree o dibuje barras de progreso escribirá texto plano.
+
+Dos cerrojos contra el falso positivo, porque los dos errores no cuestan lo mismo:
+confundir esto con `agente_fallo` gasta un reintento, y confundir un fallo de la story con
+esto aborta una corrida que podía seguir.
+
+- Sólo se mira cuando el intento **ya falló**, y sólo contra la cola de la salida.
+- El 22 y el 23 exigen además que el proceso haya muerto **pronto** (60 s; se ajusta con
+  `APTS_LOOP_STARTUP_MAX_MS`). Un binario que no existe mata al proceso en segundos, así
+  que un intento que estuvo veinte minutos trabajando no falló por eso, diga lo que diga su
+  última línea: puede estar implementando el manejo de un ENOENT, o imprimiendo el error de
+  una prueba. El 21 **no** lleva ese cerrojo, a propósito: el límite llega justo cuando el
+  agente lleva rato trabajando, que es exactamente el caso que se vio.
+
+Una orden de parada del panel gana sobre todo esto: lo que pide una persona no lo discute
+un diagnóstico automático.
 
 ## Granularidad y modelo
 

@@ -204,6 +204,41 @@ artefacto por el que se puso. Lo que sostiene la entrega es la otra mitad: la de
 bumpear puede dejar al borde sirviendo los bytes viejos cuatro horas—, y que la promesa de
 `no-cache` no se puede dar por buena leyendo el codigo del origen: hay que medirla desde fuera.
 
+**El conductor ya distingue que el agente falle de que no llegue a trabajar.** Un intento
+fallido puede serlo por la story —para eso esta la escalera de modelos— o porque su CLI no
+arranco. El limite de uso es el caso que lo motivo, y es del segundo tipo: es de la CUENTA
+y no del modelo, asi que una escalera `sonnet -> opus` gastaba el segundo intento en cero
+segundos y dejaba escrito `agente_fallo`, que manda a buscar el problema en la story. Paro
+dos corridas de fm-synth en dos dias —el 2026-08-08 a las 10:24 y el 09 de madrugada— y las
+dos veces el diario dijo que habia fallado el agente cuando la CLI habia impreso la causa
+exacta y hasta la hora a la que se restablecia.
+
+Ahora hay tres condiciones del entorno con motivo y codigo propios —`limite_de_uso` (21),
+`agente_no_ejecutable` (22) y `agente_sin_credenciales` (23)—, se para al primer intento sin
+gastar el resto de la escalera, y la hora de reset viaja como campo `reset` del evento
+`parada`: al diario, a la consola y al aviso de Telegram. Es lo unico accionable del mensaje
+y estaba tirandose.
+
+Se reconocen por la SALIDA del agente y no por su codigo, porque las tres terminan en 1
+igual que un bug. Eso obligo a dejar de heredar la salida (`stdio: 'inherit'`): ahora el
+conductor hace de eco —reescribe cada trozo tal cual, asi que en consola se ve lo mismo— y
+se queda con los ultimos 4 KB. El efecto secundario, documentado: desde el punto de vista
+del agente su salida ya no es un terminal, de modo que una CLI que coloree escribira texto
+plano.
+
+Dos cerrojos contra el falso positivo, porque los dos errores no cuestan igual —confundir
+esto con `agente_fallo` gasta un reintento; confundir un fallo de la story con esto aborta
+una corrida que podia seguir—: solo se mira cuando el intento ya fallo y solo contra la cola,
+y el 22 y el 23 exigen ademas que el proceso muriera pronto (60 s, `APTS_LOOP_STARTUP_MAX_MS`),
+porque un binario que no existe no tarda veinte minutos en no existir. El 21 no lleva ese
+cerrojo a proposito: el limite llega justo cuando el agente lleva rato trabajando.
+
+Cubierto por `backend/scripts/test_conductor_agent_env.js`, que levanta un APTS de mentira en
+un puerto efimero y lanza el conductor de verdad contra el con un agente falso: 19
+comprobaciones, y entre ellas la que mas importa es que el camino normal no cambio —un fallo
+de verdad sigue gastando la escalera entera y saliendo con 20—. Los dos artefactos del
+conductor suben a `artifact_version` **1.7.0**.
+
 **El sondeo del buzon ya no ahoga el log.** El conductor en marcha pregunta por ordenes cada diez
 segundos, y cada vuelta escribia una linea HTTP a nivel `info`: 8.640 al dia por conductor, todas
 diciendo lo mismo. Mirar el log durante una implementacion no enseñaba nada del trabajo real —en

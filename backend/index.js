@@ -2416,7 +2416,14 @@ const integrationArtifacts = {
     // guardián preguntaba por el hijo directo, que es el shell y lo primero que muere.
     // Ahora se espera dentro del corte y se pregunta por el GRUPO. Un cliente con la
     // 1.5.0 en Linux o macOS cree que detuvo al agente y lo deja vivo escribiendo en APTS.
-    artifactVersion: '1.6.0',
+    // 1.7.0: distingue que el agente falle POR la story de que no llegue a trabajar. El
+    // limite de uso de su CLI es de la CUENTA y no del modelo, asi que la escalera
+    // sonnet->opus gastaba el segundo intento en cero segundos y lo dejaba escrito como
+    // `agente_fallo`; ahora para al primer intento con codigo propio (21, 22 y 23) y se
+    // lleva la hora de reset al diario. Para poder verlo dejo de heredar la salida del
+    // agente y hace de eco. Quien se quede con la 1.6.0 sigue quemando la escalera en
+    // segundos y leyendo un motivo que manda a buscar el fallo en la story.
+    artifactVersion: '1.7.0',
     kind: 'loop_conductor',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -2442,8 +2449,12 @@ const integrationArtifacts = {
     // al hijo directo.
     // 1.6.1: el panel pasa a tener tres botones y no cuatro —`stop` era `pause` con otro
     // nombre—, y el manual lo dice, incluido que el script sigue entendiendo `stop` para
-    // hablar con un APTS anterior. Sólo cambia el texto: el conductor se queda en 1.6.0.
-    artifactVersion: '1.6.1',
+    // hablar con un APTS anterior. Solo cambia el texto: el conductor se queda en 1.6.0.
+    // 1.7.0: documenta las condiciones del entorno del agente —los codigos 21, 22 y 23,
+    // que las delata, los dos cerrojos contra el falso positivo y el campo `reset`— y que
+    // la salida del agente pasa a ser eco y no herencia, con lo que eso implica para una
+    // CLI que coloree.
+    artifactVersion: '1.7.0',
     kind: 'loop_conductor_manual',
     recommended: false,
     usagePriority: 'optional_entrypoint',
