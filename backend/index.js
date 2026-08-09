@@ -2184,6 +2184,69 @@ const listBacklogItems = async (
   return items.map((item) => mapBacklogItemRecord(item, { view }));
 };
 
+// El estado del proyecto se DERIVA del backlog en cada lectura; no hay columna que
+// mantener al dia. `projects.status` existia como flag escrito a mano y tenia un solo
+// escritor (`report_blocker`, que marcaba el proyecto ENTERO por una unidad) y un solo
+// limpiador (`/api/tasks/:id/resolve`, o sea una persona pulsando un boton): nada lo
+// apagaba al cerrar la story, ni al pasar la unidad a `done`, ni al avanzar de fase. Un
+// proyecto quedaba en rojo para siempre. Un limpiador nuevo no arreglaba eso, solo movia
+// el problema: habria que recalcular desde cada sitio que mueve un `backlog_item` —submit
+// del motor, `update_backlog_item`, `report_blocker`, vigilancia de latidos, resolve— y el
+// que se olvide reintroduce el mismo defecto. Derivado no hay nada que desincronizar.
+//
+// La señal de bloqueo es `backlog_items.status = 'blocked'` y NO `tasks.status = 'stalled'`,
+// que es la otra candidata obvia: `stalled` tampoco tiene limpiador —lo escriben
+// `report_blocker` y la vigilancia de latidos, y solo el boton lo deshace—, asi que usarlo
+// reproduciria este mismo bug un nivel mas abajo. El estado del backlog si se limpia por
+// caminos normales: el motor mueve la unidad, `update_backlog_item` la repone.
+//
+// La columna sigue en la tabla y con su enum: se deja de escribir y de leer, y el valor
+// derivado es el que viaja al panel. Los cuatro valores son los que ya existian.
+const PROJECT_TERMINAL_BACKLOG_STATUSES = ['done', 'archived'];
+const DERIVED_PROJECT_STATUS_WITHOUT_BACKLOG = 'pending';
+
+const deriveProjectStatuses = async (projectUrls, { connection = db } = {}) => {
+  const derived = new Map();
+  const urls = [...new Set(projectUrls.filter(Boolean))];
+  if (!urls.length) {
+    return derived;
+  }
+
+  const rows = await connection('backlog_items')
+    .whereIn('project_url', urls)
+    .whereNull('deleted_at')
+    .groupBy('project_url')
+    .select('project_url')
+    .select(connection.raw('COUNT(*)::int AS total'))
+    .select(connection.raw("COUNT(*) FILTER (WHERE status = 'blocked')::int AS blocked"))
+    .select(connection.raw(
+      'COUNT(*) FILTER (WHERE status NOT IN (?, ?))::int AS abiertas',
+      PROJECT_TERMINAL_BACKLOG_STATUSES
+    ));
+
+  for (const row of rows) {
+    // El orden importa: `blocked` no es terminal, asi que tambien cuenta como abierta.
+    if (row.blocked > 0) derived.set(row.project_url, 'blocked');
+    else if (row.abiertas > 0) derived.set(row.project_url, 'active');
+    else if (row.total > 0) derived.set(row.project_url, 'completed');
+  }
+
+  // Un proyecto sin ninguna unidad viva no aparece en el groupBy: no ha empezado.
+  for (const url of urls) {
+    if (!derived.has(url)) derived.set(url, DERIVED_PROJECT_STATUS_WITHOUT_BACKLOG);
+  }
+
+  return derived;
+};
+
+const withDerivedProjectStatus = async (projects, { connection = db } = {}) => {
+  const derived = await deriveProjectStatuses(projects.map((project) => project.url), { connection });
+  return projects.map((project) => ({
+    ...project,
+    status: derived.get(project.url) || DERIVED_PROJECT_STATUS_WITHOUT_BACKLOG
+  }));
+};
+
 const listProjectsSummary = async ({ connection = db } = {}) => {
   const [projects, backlogNeedsDetails] = await Promise.all([
     connection('projects').select('*').orderBy('updated_at', 'desc'),
@@ -2199,7 +2262,9 @@ const listProjectsSummary = async ({ connection = db } = {}) => {
     backlogNeedsDetails.map((row) => [row.project_url, Number.parseInt(row.needs_details_count, 10) || 0])
   );
 
-  return projects.map((project) => {
+  const conEstado = await withDerivedProjectStatus(projects, { connection });
+
+  return conEstado.map((project) => {
     const needsDetailsCount = needsDetailsByProject.get(project.url) || 0;
 
     return {
@@ -3591,7 +3656,12 @@ const reportBlockerInternal = async (payload, { connection = db, deferredWebhook
     .where({ id: taskId })
     .update({ status: 'stalled', updated_at: connection.fn.now() });
 
-  await connection('projects').where({ url }).update({ status: 'blocked' });
+  // Ya no se marca el proyecto: el estado que ve el panel se deriva del backlog
+  // (`deriveProjectStatuses`). Marcar aqui era escribir un flag que nadie apagaba —el
+  // radio era el proyecto ENTERO por una sola unidad, y la unica salida era una persona
+  // pulsando «Resolver»—; la unidad que si esta bloqueada se marca abajo, y de ella sale
+  // el rojo del panel mientras siga bloqueada y no un segundo mas.
+  //
   // La unidad que el agente nombra, y la que su tarea posea. Son dos caminos y no uno
   // porque una tarea puede no poseer ninguna —la del conductor no lo hace— y hasta ahora
   // eso dejaba el bloqueo sin apuntar a nada: se marcaba el proyecto entero, que no
@@ -5712,7 +5782,7 @@ app.get('/api/dashboard/overview', requireAuth, async (req, res) => {
     ]);
 
     res.json({
-      projects,
+      projects: await withDerivedProjectStatus(projects),
       tasks,
       feed,
       openrouter_usage: openRouterUsage
@@ -5740,8 +5810,9 @@ app.get('/api/dashboard/projects', requireAuth, async (req, res) => {
 app.get('/api/dashboard/projects/:url', requireAuth, async (req, res) => {
   try {
     const url = normalizeUrl(decodeURIComponent(req.params.url));
-    const project = await db('projects').where({ url }).first();
-    if (!project) return res.status(404).json({ error: 'Project not found' });
+    const projectRow = await db('projects').where({ url }).first();
+    if (!projectRow) return res.status(404).json({ error: 'Project not found' });
+    const [project] = await withDerivedProjectStatus([projectRow]);
 
     const tasks = await db('tasks').where({ project_url: url }).orderBy('updated_at', 'desc');
     const includeDeleted = parseBooleanFlag(req.query.include_deleted);
@@ -6533,6 +6604,18 @@ app.post('/api/tasks/:id/resolve', requireAuth, async (req, res) => {
     const task = await db('tasks').where({ id: taskId }).first();
     if (!task) return res.status(404).json({ error: 'Task not found' });
 
+    // Resolver es una operacion de DESATASCO, y sobre una tarea que no esta atascada no
+    // hay nada que resolver: devolverla a `todo` le destruye el estado. El panel ofrecia
+    // el boton en TODAS las tareas de un proyecto marcado (`isProjectBlocked`), sanas
+    // incluidas, asi que este caso era alcanzable con un clic. Mismo trato que el
+    // precedente de al lado, `/api/method/pointers/:agent/release`, que responde 409 a un
+    // puntero que no sostiene nada en vez de un 200 que no hizo nada.
+    if (task.status !== 'stalled') {
+      return res.status(409).json({
+        error: `Task is not stalled (status: ${task.status}); there is no blocker to resolve`
+      });
+    }
+
     // Append the instruction to the context
     const newContext = task.context ? `${task.context}\n\n[Human Unblock]: ${instruction}` : `[Human Unblock]: ${instruction}`;
 
@@ -6541,11 +6624,18 @@ app.post('/api/tasks/:id/resolve', requireAuth, async (req, res) => {
       context: newContext
     });
 
+    // Solo se repone lo que sigue vivo. Una tarea puede seguir `stalled` mucho despues de
+    // que su unidad cerrara por otro camino —el conductor la dejo atras, el motor la paso
+    // a `done`—, y sin este filtro resolverla devolvia una story TERMINADA a `ready` y la
+    // reintroducia en el reparto. Es un dato real de produccion, no una hipotesis: la
+    // tarea `b3204ca6` de fm-synth seguia poseyendo «Las 32 topologias», ya cerrada.
+    // Desatascar una tarea no puede reabrir trabajo hecho.
     await db('backlog_items')
       .where({ active_task_id: taskId })
+      .whereNotIn('status', PROJECT_TERMINAL_BACKLOG_STATUSES)
       .update({ status: 'ready', updated_at: db.fn.now() });
 
-    await db('projects').where({ url: task.project_url }).update({ status: 'active' });
+    // `projects.status` ya no se escribe aqui: se deriva del backlog al leerlo.
 
     await db('agent_logs').insert({
       task_id: task.id,

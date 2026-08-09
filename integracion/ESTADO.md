@@ -165,8 +165,51 @@ del plan. Dos, que el caso real es que una persona mire un atasco y decida; el p
 Lo que **no** se ha hecho, porque es decision de producto y no defecto: dar a `blocked` salida del
 reparto —`TERMINAL_STATUSES` sigue siendo `done` y `archived`, asi que una unidad bloqueada se
 sigue repartiendo—, que exigiria antes separar los dos significados que hoy comparte ese estado (la
-vigilancia de latidos diciendo «perdi contacto» y el agente diciendo «esto no se puede todavia»); y
-que `projects.status` siga siendo un flag pegajoso cuya unica salida es `/api/tasks/:id/resolve`.
+vigilancia de latidos diciendo «perdi contacto» y el agente diciendo «esto no se puede todavia»).
+
+**El estado del proyecto ya no es un flag: se deriva del backlog en cada lectura.**
+`projects.status` tenia un escritor —`report_blocker`, que marcaba el proyecto ENTERO por una sola
+unidad— y un limpiador —`/api/tasks/:id/resolve`, o sea una persona pulsando un boton—. Nada lo
+apagaba solo: ni cerrar la story, ni pasar la unidad a `done`, ni avanzar de fase. fm-synth se
+quedo en rojo desde el 2026-08-08 y cerro diez stories con el flag puesto, sin una sola tarea ni
+unidad bloqueada. Un limpiador nuevo no lo habria arreglado, solo movido: habria que recalcular
+desde cada sitio que mueve un `backlog_item` —submit del motor, `update_backlog_item`,
+`report_blocker`, vigilancia de latidos, resolve— y el que se olvide reintroduce el mismo defecto.
+
+Ahora se calcula al servirlo, en `deriveProjectStatuses`, con los cuatro valores que el enum ya
+tenia: `blocked` si queda alguna unidad viva en `blocked`, `active` si queda alguna no terminal,
+`completed` si las hay y todas son `done`/`archived`, y `pending` si no hay ninguna. La columna
+sigue en la tabla y ya no se escribe ni se lee. Cambio de radio: derivarlo tambien apago dos
+mentiras de al lado —un proyecto que nunca se bloqueo nunca habia estado `active`, porque el
+default es `pending` y solo el boton escribia `active`, asi que la columna mostraba `pending` en
+proyectos que llevaban meses trabajando— y arreglo el contador del panel, que contaba como activo
+«todo lo que no esta bloqueado».
+
+La señal es `backlog_items.status = 'blocked'` y **no** `tasks.status = 'stalled'`, que es la otra
+candidata obvia. `stalled` tampoco tiene limpiador —lo escriben `report_blocker` y la vigilancia de
+latidos, y solo el boton lo deshace—, asi que usarlo reproduciria este mismo defecto un nivel mas
+abajo: fm-synth arrastra seis tareas `stalled` que son residuo de paradas del conductor y daria un
+proyecto bloqueado para siempre. El estado del backlog si se limpia por caminos normales. Queda
+pendiente, y es el mismo defecto en otra columna: `tasks.status = 'stalled'` sigue siendo pegajoso
+y sigue inflando el contador de agentes estancados.
+
+**Y desatascar una tarea ya no puede reabrir trabajo terminado.** El boton «Resolver» del panel
+salia por el estado del PROYECTO ademas del de la tarea (`task.status === 'stalled' ||
+isProjectBlocked(...)`), o sea en todas las tareas de un proyecto marcado, sanas incluidas; y el
+handler reponia a `ready` la unidad que la tarea poseyera, sin mirar en que estado estaba. En
+fm-synth eso habria devuelto al reparto «Las 32 topologias», ya `done`, porque su tarea seguia
+poseyendola. Son dos fallos distintos y llevan dos guardas distintas:
+
+- la ruta responde **409** si la tarea no esta `stalled` —resolver es una operacion de desatasco y
+  sobre una tarea sana devolverla a `todo` le destruye el estado; mismo trato que el precedente de
+  al lado, `/api/method/pointers/:agent/release`, ante un puntero que no sostiene nada—;
+- y la reposicion de la unidad se acota a las **no terminales**, que es la guarda que muerde en el
+  caso real: la tarea se desatasca igual y la story cerrada no vuelve.
+
+La guarda vive en el servidor y no en el panel porque el panel no puede ponerla: `/api/dashboard/overview`
+sirve las tareas sin ningun dato del backlog, asi que no sabe que unidad posee cada una. Del lado
+del cliente solo se retira la disyuncion, que dejaba el radio del boton en el proyecto en vez de en
+la tarea.
 
 **El motor reparte las stories por el plan y no por el identificador.** `claimDevStory` ordenaba las
 candidatas del epic por `created_at, id`, y las stories de un epic las escribe el motor en un solo
@@ -455,8 +498,8 @@ corpus pertenece a otra biblioteca, en vez de pisarla en silencio.
 
 ## Verificado
 
-Contra `APTS_test` (puerto 47301; la ultima ronda —la del coste de los embeddings— en 47399, porque
-47301 ya estaba ocupado), con el estado de partida `initiatives:2`, `epics:2`, `backlog_items:361`,
+Contra `APTS_test` (puerto 47301; la ronda del coste de los embeddings en 47399 y la del estado
+derivado del proyecto en 47421, porque 47301 ya estaba ocupado), con el estado de partida `initiatives:2`, `epics:2`, `backlog_items:361`,
 `tasks:263` restaurado al terminar.
 
 - Un cliente que **no descarga nada** conduce el ciclo BMAD completo a `phase=done`: 7 workflows
@@ -587,6 +630,20 @@ Contra `APTS_test` (puerto 47301; la ultima ronda —la del coste de los embeddi
   el que si sostiene queda con el cursor vacio y en `idle` diciendo cual solto, con el rastro firmado
   `Human Supervisor` sin `task_id` y con el motivo dentro. La unidad soltada no cambia de estado:
   vuelve al reparto tal cual.
+- **El estado derivado del proyecto y las dos guardas del resolve**, con
+  `backend/scripts/test_project_blocked_derivation.js` (nuevo; necesita el servidor levantado
+  porque las tres lecturas y el resolve viven en rutas de panel; crea su proyecto y lo borra).
+  Veintidos comprobaciones. La columna se deja a proposito diciendo una cosa mientras el panel dice
+  otra, asi que si algo la leyera se veria: sin backlog sale `pending`, con unidades abiertas
+  `active`, con una bloqueada `blocked`, y con todo terminal `completed`. La que importa es que
+  **cerrada la unidad el proyecto deja de estar bloqueado SOLO** —y con su tarea todavia `stalled`,
+  que es lo que separa la señal buena de la mala—. Las tres rutas de panel devuelven el mismo
+  valor, y ni `report_blocker` ni el resolve escriben ya la columna. Del resolve: 409 sobre una
+  tarea que no esta `stalled`, sin devolverla a `todo` por el camino; sobre la tarea `stalled` que
+  posee una unidad ya `done` —el estado copiado de fm-synth— responde 200, la tarea queda en `todo`
+  y **la unidad sigue `done`**; y sobre una unidad viva si repone a `ready`, que es el caso para el
+  que la ruta existe. Comprobado ademas que la prueba no es vacua: con el codigo anterior caen
+  siete, y una de ellas es el daño literal —la unidad terminada volviendo a `ready`—.
 - **El orden de reparto**, con `backend/scripts/test_dev_story_claim_order.js` (nuevo; transaccion
   revertida, sin servidor). Montado con los UUID en contra —la primera del plan es la que el criterio
   viejo dejaba para el final—: reparte primero la de `sort_order` mas bajo y no la que ganaba por

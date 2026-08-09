@@ -19,8 +19,11 @@ export const useDashboardStore = defineStore('dashboard', () => {
   const isLoading = ref(false)
   const error = ref(null)
 
+  // `status` lo deriva el servidor del backlog, asi que 'active' significa de verdad que
+  // el proyecto tiene trabajo abierto. Antes esto contaba "todo lo que no esta bloqueado",
+  // que metia en el mismo saco lo terminado y lo que no ha empezado.
   const activeProjectsCount = computed(() => {
-    return projects.value.filter(p => p.status !== 'blocked').length
+    return projects.value.filter(p => p.status === 'active').length
   })
 
   const blockedProjectsCount = computed(() => {

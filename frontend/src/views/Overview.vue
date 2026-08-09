@@ -105,7 +105,7 @@
                   </div>
 
                   <Button
-                    v-if="task.status === 'stalled' || isProjectBlocked(task.project_url)"
+                    v-if="task.status === 'stalled'"
                     @click="openResolveModal(task)"
                     label="Resolver"
                     severity="danger"
@@ -311,11 +311,10 @@ const taskSeverity = (status) => {
 }
 
 // Helpers
-const isProjectBlocked = (url) => {
-  const project = dashboard.projects.find(p => p.url === url)
-  return project && project.status === 'blocked'
-}
-
+// El boton «Resolver» sale solo por el estado de la TAREA. Salia tambien por el del
+// proyecto, y ese era su radio equivocado: ofrecia desatascar tareas sanas solo por estar
+// en un proyecto marcado. Quien protege del caso que hacia daño —resolver una tarea cuya
+// unidad ya cerro— es el servidor, no esto: el panel no recibe que unidad posee cada tarea.
 const parseTechDetails = (details) => {
   if (!details) return null
   if (typeof details === 'object') return details
