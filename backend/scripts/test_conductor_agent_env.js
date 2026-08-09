@@ -38,6 +38,9 @@ const ok = (cond, etiqueta, detalle) => {
 // se esta probando no es eso. Cuenta las llamadas para poder afirmar que el reintento
 // pregunto al motor (o que no llego a preguntar).
 const llamadas = [];
+// Cuando vale un texto, `apts_status` contesta con un error de operacion cuyo `error` es
+// un OBJETO, que es exactamente lo que devuelve APTS. Sirve para la comprobacion 8.
+let errorObjeto = null;
 const crearApts = () => http.createServer((req, res) => {
   let cuerpo = '';
   req.on('data', (d) => { cuerpo += d; });
@@ -54,6 +57,23 @@ const crearApts = () => http.createServer((req, res) => {
     try { peticion = JSON.parse(cuerpo || '{}'); } catch (_) { /* da igual */ }
     const herramienta = (peticion.params && peticion.params.name) || '';
     llamadas.push(herramienta);
+
+    if (errorObjeto && herramienta === 'apts_status') {
+      return responder({
+        jsonrpc: '2.0',
+        id: peticion.id,
+        result: {
+          isError: true,
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              ok: false,
+              error: { name: 'AptsClientError', message: errorObjeto, code: 'BAD_REQUEST', statusCode: 400 },
+            }),
+          }],
+        },
+      });
+    }
 
     const datos = herramienta === 'apts_status'
       ? {
@@ -221,6 +241,16 @@ const intentos = (r) => r.eventos.filter((e) => e.evento === 'agente');
     ok(r.codigoSalida !== 21 && r.codigoSalida !== 22 && r.codigoSalida !== 23,
       'ninguna condicion del entorno se activa con salida 0', `salio ${r.codigoSalida}`);
     ok(intentos(r).length === 1, 'un solo intento, como siempre');
+    console.log();
+
+    console.log('8) un error del servidor que viene como objeto se lee, no sale [object Object]');
+    errorObjeto = 'Task id must be a valid UUID';
+    r = await correr(puerto, { salida: 'da igual', codigo: 0 });
+    errorObjeto = null;
+    ok(r.visto.includes('Task id must be a valid UUID'),
+      'el mensaje de dentro del objeto llega al aviso');
+    ok(!r.visto.includes('[object Object]'),
+      'y no queda ni un [object Object] por el camino');
   } finally {
     servidor.close();
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) { /* da igual */ }

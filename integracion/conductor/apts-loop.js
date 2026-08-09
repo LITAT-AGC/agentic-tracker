@@ -508,6 +508,24 @@ const ESPERA_RED_MS = [2000, 6000, 18000];
 
 const errorRed = (mensaje, reintentable) => Object.assign(new ErrorRed(mensaje), { reintentable });
 
+// El error de una operación puede venir como texto o como OBJETO —APTS devuelve
+// `{ name, message, code, statusCode, details }`—, e interpolarlo a secas escribía
+// «[object Object]» justo en el aviso que había que leer. Se vio el 2026-08-09: un
+// `update_task_status` que falló durante una corrida de fm-synth dejó escrito
+// «no se pudo mover la tarea a 'review' (update_task_status: [object Object])»,
+// mientras el servidor había mandado «Task id must be a valid UUID» dentro del objeto.
+const textoDeError = (valor) => {
+  if (valor == null) return '';
+  if (typeof valor === 'string') return valor;
+  if (typeof valor === 'object') {
+    const propio = valor.message || valor.error || valor.detail;
+    if (typeof propio === 'string' && propio) return propio;
+    // Sin campo reconocible, el objeto entero es mejor que su nombre de tipo.
+    try { return JSON.stringify(valor).slice(0, 300); } catch (_) { return String(valor); }
+  }
+  return String(valor);
+};
+
 const intentarMcp = async (cfg, herramienta, argumentos) => {
   let respuesta;
   try {
@@ -550,7 +568,7 @@ const intentarMcp = async (cfg, herramienta, argumentos) => {
     : null;
   const datos = texto ? JSON.parse(texto) : null;
   if (sobre.result && sobre.result.isError) {
-    throw errorRed(`${herramienta}: ${(datos && (datos.error || datos.message)) || 'la operación devolvió error'}`, false);
+    throw errorRed(`${herramienta}: ${textoDeError(datos && (datos.error || datos.message)) || 'la operación devolvió error'}`, false);
   }
   return datos;
 };

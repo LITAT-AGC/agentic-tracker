@@ -2423,7 +2423,10 @@ const integrationArtifacts = {
     // lleva la hora de reset al diario. Para poder verlo dejo de heredar la salida del
     // agente y hace de eco. Quien se quede con la 1.6.0 sigue quemando la escalera en
     // segundos y leyendo un motivo que manda a buscar el fallo en la story.
-    artifactVersion: '1.7.0',
+    // 1.7.1: el error de una operacion puede venir como objeto y se interpolaba a secas,
+    // asi que el aviso decia «[object Object]» y tiraba el mensaje del servidor. Se vio en
+    // un update_task_status durante una corrida real.
+    artifactVersion: '1.7.1',
     kind: 'loop_conductor',
     recommended: false,
     usagePriority: 'optional_entrypoint',
