@@ -136,6 +136,25 @@ function writeFileTracked(written, absPath, content) {
 // ---- per-runtime emitters --------------------------------------------------
 
 function emitClaude(spec, root, written) {
+  // En Claude Code, `tools:` del frontmatter de un agente es lista blanca EXCLUSIVA, no un
+  // añadido al conjunto por defecto: lo que no se nombra se filtra, y eso incluye las
+  // herramientas MCP. Emitir la lista sin las `mcp__<server>__*` dejaba a los cuatro agentes
+  // sin la única superficie que sus propias instrucciones les exigen usar —contradicción
+  // dentro del mismo archivo generado, y ninguno podía ejecutar su misión.
+  //
+  // La lista `allow` de `.claude/settings.json` NO repone nada: es capa de permisos, otra
+  // distinta, y ambas tienen que coincidir. Ver una herramienta en `allow` no significa que
+  // el agente la tenga.
+  //
+  // Se enumeran en vez de omitir la clave: omitirla haría que cada agente heredase TODO el
+  // tool set y perderíamos el límite por agente que el spec declara (p. ej. `apts-bugfix-intake`
+  // es de solo lectura: sin `edit`). El prefijo sale de `spec.mcp.server`, el mismo nombre con
+  // el que este generador escribe `.mcp.json`, así que no puede desincronizarse; los nombres de
+  // operación salen del contrato. La superficie APTS entera va a los cuatro agentes, igual que
+  // en `allow`: quién puede hacer qué lo fija el cuerpo del agente, no un recorte por archivo
+  // que habría que mantener al día en cada cambio de contrato.
+  const mcpTools = operationNames().map((op) => `mcp__${spec.mcp.server}__${op}`);
+
   // MCP registry
   writeFileTracked(written, path.join(root, '.mcp.json'), jsonText({
     mcpServers: {
@@ -174,7 +193,7 @@ function emitClaude(spec, root, written) {
     const fm = [
       `name: ${quoteYaml(agent.name)}`,
       `description: ${quoteYaml(agent.description)}`,
-      `tools: ${mapTools(agent.tools, CLAUDE_TOOLS).join(', ')}`,
+      `tools: ${[...mapTools(agent.tools, CLAUDE_TOOLS), ...mcpTools].join(', ')}`,
     ];
     if (agent.userInvocable === false) fm.push('disable-model-invocation: false');
     writeFileTracked(written, path.join(root, '.claude', 'agents', `${agent.id}.md`),
@@ -218,6 +237,11 @@ function emitOpencode(spec, root, written) {
   ]));
 
   // Agents
+  //
+  // Aqui no hace falta el equivalente de las `mcp__*` de Claude: en opencode el mapa `tools:`
+  // es aditivo —lo que no se nombra queda en su valor por defecto, que para las herramientas
+  // MCP es habilitado—, asi que enumerar unas pocas no apaga el resto. La misma lista neutral
+  // del spec significa «habilita estas» en un runtime y «solo estas» en el otro.
   for (const agent of spec.agents) {
     const fm = [
       `description: ${quoteYaml(agent.description)}`,

@@ -2393,7 +2393,11 @@ const integrationArtifacts = {
     fileName: 'apts_skills.json',
     contentType: 'application/json; charset=utf-8',
     // 1.0.2: `owns_backlog_item` en `register_task`, que separa asociar de poseer.
-    artifactVersion: '1.0.2',
+    // 1.0.3: la descripcion de `report_blocker` deja de insinuar que la capa de integracion
+    //        puede suplir `task_id` —en remoto no lo suple nunca— y dice que hacer cuando el
+    //        bloqueo llega antes de tener tarea. No cambia ningun esquema: es la prosa que el
+    //        agente lee en `tools/list`, que es justo donde se creyo lo contrario.
+    artifactVersion: '1.0.3',
     kind: 'skills_contract',
     recommended: true,
     usagePriority: 'discovery',
@@ -2415,7 +2419,10 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'apts-agent-guidelines.md'),
     fileName: 'apts-agent-guidelines.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '1.1.0',
+    // 1.1.1: el paso 7 del camino feliz dice que `report_blocker` necesita el `task_id` del
+    //        paso 3, y que un bloqueo anterior no se puede registrar en APTS. Antes se leia
+    //        como si siempre hubiera forma de reportar.
+    artifactVersion: '1.1.1',
     kind: 'agent_guidelines',
     recommended: true,
     usagePriority: 'discovery',
@@ -2426,7 +2433,11 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'runtime-adapters', 'spec', 'apts-surface.json'),
     fileName: 'apts-surface.json',
     contentType: 'application/json; charset=utf-8',
-    artifactVersion: '1.0.2',
+    // 1.0.3: la regla 7 de la seccion gestionada dice que un bloqueo anterior a `register_task`
+    //        no es reportable, y que no se registre una tarea contra una unidad ajena para
+    //        conseguir el `task_id`. Cambia el texto que se materializa en el cliente, asi que
+    //        hay que regenerar para verlo.
+    artifactVersion: '1.0.3',
     kind: 'runtime_surface_spec',
     recommended: true,
     usagePriority: 'discovery',
@@ -2439,7 +2450,12 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'scripts', 'generate-adapters.js'),
     fileName: 'generate-adapters.js',
     contentType: 'application/javascript; charset=utf-8',
-    artifactVersion: '1.1.0',
+    // 1.2.0: los agentes de Claude Code salen con las herramientas `mcp__apts__*` en el
+    // frontmatter. Sin ellas salian sin la unica superficie que sus instrucciones les exigen
+    // usar —`tools:` es lista blanca exclusiva alli— y ninguno podia ejecutar su mision. Un
+    // cliente que cachee por version tiene que estrenar clave para bajar el generador nuevo:
+    // el que ya tenga el viejo no se entera de otra forma, y sus cuatro agentes siguen rotos.
+    artifactVersion: '1.2.0',
     kind: 'adapter_generator',
     recommended: true,
     usagePriority: 'primary',

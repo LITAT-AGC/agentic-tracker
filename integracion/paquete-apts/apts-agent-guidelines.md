@@ -50,7 +50,7 @@ Over the remote MCP endpoint, missing identity fields are auto-filled from the r
 4. Call `read_project_context` (prefer `view = compact`) before editing.
 5. Call `heartbeat` while the task is active.
 6. Call `log_agent_progress` on meaningful milestones.
-7. If blocked, call `report_blocker` and stop.
+7. If blocked, call `report_blocker` and stop. It needs the `task_id` of step 3, and nothing resolves that for you: a blocker that hits before step 3 cannot be recorded in APTS. Do not register a task against an unrelated backlog item to obtain an id — that marks a unit blocked that is not. Journal it locally and raise it with the operator.
 8. Finish with `update_task_status` to `review`, then `done` only after review and recent activity.
 
 ### Compact Response Mode

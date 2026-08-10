@@ -1,7 +1,7 @@
 ---
 name: "APTS Bugfix Intake"
 description: "Use when: the user reports a bug, regression, broken behavior, or asks to register a solved defect in APTS before implementation starts."
-tools: Read, Glob, Grep, Bash
+tools: Read, Glob, Grep, Bash, mcp__apts__register_task, mcp__apts__read_project_context, mcp__apts__list_backlog_items, mcp__apts__get_backlog_item, mcp__apts__get_task, mcp__apts__get_project_constraints, mcp__apts__set_project_constraints, mcp__apts__search_similar_bug_reports, mcp__apts__create_backlog_item, mcp__apts__update_backlog_item, mcp__apts__delete_backlog_item, mcp__apts__update_task_status, mcp__apts__log_agent_progress, mcp__apts__report_blocker, mcp__apts__heartbeat, mcp__apts__apts_next, mcp__apts__apts_status, mcp__apts__apts_set_status, mcp__apts__apts_workflow_step, mcp__apts__apts_submit_step, mcp__apts__create_initiative, mcp__apts__set_agent_role
 ---
 <!-- GENERADO — no editar; fuente: spec/apts-surface.json -->
 

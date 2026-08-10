@@ -1150,6 +1150,49 @@ sus preguntas. Solo corre con esa pestaña delante y la ventana visible, el boto
 sigue estando, y el refresco automatico no enciende el indicador de carga —quien esta mirando
 no pidio nada—.
 
+## Los agentes de Claude Code salian sin la superficie que se les exige usar
+
+Lo reporto un cliente, `fm-synth`, el 2026-08-09. `/apts-next` delegaba en el orquestador y el
+subagente arrancaba **sin una sola herramienta `mcp__apts__*`**: no podia llamar a
+`list_backlog_items`, ni a `register_task`, ni a nada. Como la superficie es MCP-only y la regla 1
+prohibe bootstrapear un cliente HTTP crudo, al agente no le quedaba camino admisible. Los cuatro
+archivos generados declaraban `tools: Task, Read, Glob, Grep, Edit, Write, Bash` mientras su propio
+cuerpo les exigia usar las herramientas de APTS como unica via: la contradiccion vivia **dentro del
+mismo archivo generado**, y ninguno de los cuatro podia ejecutar su mision.
+
+La causa es una divergencia entre los dos runtimes que el generador trataba igual. En Claude Code,
+`tools:` del frontmatter es lista blanca **exclusiva**: si la clave esta, lo que no se nombra se
+filtra, herramientas MCP incluidas. En opencode el mapa `tools:` es **aditivo** —lo que no se nombra
+se queda en su valor por defecto, y para las MCP ese valor es habilitado—, asi que el mismo campo
+neutral del spec significa «habilita estas» en un runtime y «solo estas» en el otro. Por eso
+opencode nunca lo sufrio y no se toca.
+
+No es red, ni credenciales, ni registro: desde la sesion principal del mismo cliente —que no pasa
+por el frontmatter de subagente— `list_backlog_items` devolvia `ok: true`. Y **la lista `allow` de
+`.claude/settings.json` no repone nada**: es capa de permisos, otra distinta, y ambas tienen que
+coincidir. Ver las 22 herramientas ahi listadas hace suponer, al operador y al que depura, que el
+agente las tiene.
+
+El arreglo enumera las `mcp__<server>__*` en la lista blanca en vez de omitir la clave `tools:`.
+Omitirla tambien desbloquea —el agente heredaria todo—, pero se llevaria por delante el limite por
+agente que el spec declara: `apts-bugfix-intake` es de solo lectura a proposito, sin `edit`, y
+heredarlo todo le daria `Edit` y `Write`. El prefijo sale de `spec.mcp.server`, el mismo nombre con
+el que este generador escribe `.mcp.json`, asi que no puede desincronizarse; los nombres de
+operacion salen del contrato, igual que la lista `allow`. Van las 22 a los cuatro agentes: quien
+puede hacer que lo fija el cuerpo del agente, no un recorte por archivo que habria que mantener al
+dia en cada cambio de contrato.
+
+El generador sube a **1.2.0**: un cliente que cachee por version no se entera de otra forma y sus
+cuatro agentes siguen rotos. Del arreglo solo, regenerar movia cuatro lineas de frontmatter y nada
+mas.
+
+Con el mismo viaje van las tres versiones de la prosa del bloqueo irreportable de mas abajo:
+`surface_spec` a **1.0.3** (regla 7 de la seccion gestionada), `skills_json` a **1.0.3** (la
+descripcion de `report_blocker`, que es lo que el agente lee en `tools/list`) y `agent_guidelines`
+a **1.1.1** (paso 7 del camino feliz). Ningun esquema cambia; el contrato sigue derivando 22
+herramientas y el chequeo pasa al importar. Correr el generador dos veces no mueve nada: sigue
+siendo idempotente.
+
 ## Abierto
 
 **El camino de Cloudflare no se ha visto devolver un vector.** El `CLOUDFLARE_API_TOKEN` del `.env`
@@ -1164,8 +1207,30 @@ documentacion. Si ese punto contestara con el sobre nativo de Workers AI, el lec
 **Editar `workflow_steps` sigue fuera de alcance**, declarado. Las instrucciones paso a paso
 del metodo se editan sembrando el corpus, no desde el panel.
 
-En el repositorio no queda nada mas. Produccion corre lo mismo que `origin/main`, con las 23
-migraciones aplicadas y el frontend recompilado el 2026-08-08.
+**Un bloqueo anterior al registro de tarea sigue sin poder registrarse en APTS**, y ahora se dice.
+`report_blocker` exige `task_id` —esta en `MCP_REQUIRED_IDENTITY_FIELDS` y el remoto no lo resuelve
+nunca—, pero el unico sitio de donde sale un `task_id` es `register_task`: si lo que esta roto
+impide llegar ahi, el bloqueo no cabe. La clase mas grave —superficie inalcanzable, entorno mal
+configurado, credenciales rotas— es justo la que no deja constar. Lo que se arreglo es la mentira,
+no el hueco: la descripcion decia «pass `task_id` […] unless your integration layer supplies it» y
+sugeria que la identidad podia suplirlo. Ahora dice que no lo suple nadie, que un bloqueo anterior
+no es reportable, y que **no** se registre una tarea contra una unidad ajena para conseguir un id
+—eso marca bloqueada una unidad que no lo esta, y es peor que no reportar—. Lo mismo en la regla 7
+de la seccion gestionada y en el paso 7 de las guidelines.
+
+Cerrar el hueco de verdad si es decision, y no esta tomada. Un bloqueo **a nivel proyecto** hoy no
+tiene donde vivir: `agent_logs` no tiene columna de proyecto —se ata al proyecto solo a traves de
+`tasks`— y el rojo del panel se **deriva** de `backlog_items.status`, que fue el arreglo de
+e94a4b5. Un `report_blocker` sin unidad ni tarea, para que se vea, pediria columna nueva, camino de
+lectura y sobre todo **quien lo apaga**: sin ciclo de vida se reintroduce el flag pegado que se
+acaba de quitar. La variante sin ese coste es aceptar `backlog_item_id` sin `task_id` —la unidad ya
+tiene ciclo de vida—, que sirve cuando hay unidad y no cuando lo roto es el tooling, que era el
+caso.
+
+En el repositorio queda **sin desplegar** todo lo anterior: `origin/main` y produccion todavia
+sirven el generador **1.1.0**, es decir los agentes rotos. Hasta que se despliegue, un cliente que
+instale hoy se lleva el defecto. Lo demas de produccion corre lo mismo que `origin/main`, con las
+23 migraciones aplicadas y el frontend recompilado el 2026-08-08.
 
 **El `.env` de PROD no necesita ninguna clave nueva.** Tiene diez y ninguna de las que llegaron
 despues es obligatoria: `EMBEDDING_DEFAULT_MODEL` no hace falta porque
