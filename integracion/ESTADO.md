@@ -1227,10 +1227,12 @@ acaba de quitar. La variante sin ese coste es aceptar `backlog_item_id` sin `tas
 tiene ciclo de vida—, que sirve cuando hay unidad y no cuando lo roto es el tooling, que era el
 caso.
 
-En el repositorio queda **sin desplegar** todo lo anterior: `origin/main` y produccion todavia
-sirven el generador **1.1.0**, es decir los agentes rotos. Hasta que se despliegue, un cliente que
-instale hoy se lleva el defecto. Lo demas de produccion corre lo mismo que `origin/main`, con las
-23 migraciones aplicadas y el frontend recompilado el 2026-08-08.
+Todo lo anterior esta **desplegado**: produccion corre `c867e97` desde el 2026-08-09, sin
+migraciones —siguen siendo 23— y con el frontend recompilado en el mismo viaje. El manifiesto
+publico ya anuncia `adapter_generator 1.2.0`, `surface_spec 1.0.3`, `skills_json 1.0.3` y
+`agent_guidelines 1.1.1`, y el generador que se descarga de PROD trae las `mcp__*`. Un cliente que
+ya tenga los agentes viejos no se entera solo: tiene que volver a bajar generador y spec y
+regenerar. Lo unico posterior a ese sha es documentacion.
 
 **El `.env` de PROD no necesita ninguna clave nueva.** Tiene diez y ninguna de las que llegaron
 despues es obligatoria: `EMBEDDING_DEFAULT_MODEL` no hace falta porque
