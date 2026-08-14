@@ -2437,7 +2437,12 @@ const integrationArtifacts = {
     //        no es reportable, y que no se registre una tarea contra una unidad ajena para
     //        conseguir el `task_id`. Cambia el texto que se materializa en el cliente, asi que
     //        hay que regenerar para verlo.
-    artifactVersion: '1.0.3',
+    // 1.1.0: nuevo campo `mcp.defaultUrl` (la url literal que necesita el registro de opencode)
+    //        y la seccion de credenciales dice quien lee el `.env` en cada runtime. Sube la
+    //        minor y no el parche porque el spec crece un campo del que depende el generador
+    //        1.3.0: emparejar un spec 1.0.x con ese generador aborta con `defaultUrl is not a
+    //        valid URL`, que es justo lo que se quiere en vez de emitir una url vacia.
+    artifactVersion: '1.1.0',
     kind: 'runtime_surface_spec',
     recommended: true,
     usagePriority: 'discovery',
@@ -2455,7 +2460,18 @@ const integrationArtifacts = {
     // usar —`tools:` es lista blanca exclusiva alli— y ninguno podia ejecutar su mision. Un
     // cliente que cachee por version tiene que estrenar clave para bajar el generador nuevo:
     // el que ya tenga el viejo no se entera de otra forma, y sus cuatro agentes siguen rotos.
-    artifactVersion: '1.2.0',
+    // 1.3.0: el adaptador de opencode era ininstalable, y las tres causas eran del generador.
+    // (a) `opencode.json` salia con la clave `_generated`: opencode valida contra su esquema y
+    //     rechaza claves desconocidas, asi que descartaba la configuracion ENTERA y el servidor
+    //     MCP no llegaba a intentarse. Ahora el banner va como comentario JSONC.
+    // (b) la url salia como `{env:APTS_MCP_URL}`: esa interpolacion se resuelve contra el
+    //     entorno del proceso al cargar la configuracion, y sin la variable queda cadena vacia,
+    //     que no parsea («Invalid MCP URL»). Ahora va la url literal del spec.
+    // (c) las instrucciones prometian «define las variables en un .env» y opencode no lee
+    //     ninguno. Ahora se emite `.opencode/plugin/apts-env.js`, que lo carga en el arranque.
+    // Medido el 2026-08-14 en un cliente real (opencode 1.14.33, Windows) y comprobado de punta
+    // a punta contra opencode 1.18.18. Depende del spec 1.1.0 por `mcp.defaultUrl`.
+    artifactVersion: '1.3.0',
     kind: 'adapter_generator',
     recommended: true,
     usagePriority: 'primary',
@@ -2618,7 +2634,7 @@ const buildMcpRuntimeRegistrations = (url) => ({
   },
   opencode: {
     config_file: 'opencode.json',
-    value_substitution: 'Environment variables expand as {env:VAR} inside the config file.',
+    value_substitution: 'Environment variables expand as {env:VAR} inside the config file. It is a plain text substitution against the PROCESS environment, done while the config is read: a variable that is not set becomes an empty string. Keep the url literal (an empty url makes opencode drop the server with "Invalid MCP URL" before anything else) and note that opencode does not read a .env file on its own — either export the variables before starting it, or install the .opencode/plugin/apts-env.js plugin that the adapter generator emits, which loads the project .env into this registration at startup.',
     config: {
       $schema: 'https://opencode.ai/config.json',
       mcp: {
@@ -2966,7 +2982,8 @@ const buildIntegrationManifest = (req, methodConductionOverride = null) => {
               'opencode.json (MCP registration and permissions)',
               'AGENTS.md (APTS managed section)',
               '.opencode/agent/*.md (4 agents)',
-              '.opencode/command/*.md (5 commands: apts-next, apts-method, apts-bug, apts-status, apts-resume)'
+              '.opencode/command/*.md (5 commands: apts-next, apts-method, apts-bug, apts-status, apts-resume)',
+              '.opencode/plugin/apts-env.js (loads the project .env into the MCP registration — opencode does not read .env on its own, so without this file the identity headers arrive empty)'
             ]
           }
         ],

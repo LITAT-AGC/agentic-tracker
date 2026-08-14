@@ -1,0 +1,1 @@
+- poder editar los agentes y las reglas. Por proyecto

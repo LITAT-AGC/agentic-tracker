@@ -1,10 +1,10 @@
+// GENERADO — no editar; fuente: spec/apts-surface.json
 {
-  "_generated": "GENERADO — no editar; fuente: spec/apts-surface.json",
   "$schema": "https://opencode.ai/config.json",
   "mcp": {
     "apts": {
       "type": "remote",
-      "url": "{env:APTS_MCP_URL}",
+      "url": "https://apts.informaticos.ar/mcp",
       "enabled": true,
       "headers": {
         "Authorization": "Bearer {env:APTS_API_KEY}",

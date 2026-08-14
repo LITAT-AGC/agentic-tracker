@@ -13,7 +13,7 @@ llego hasta aqui: eso esta en el historial de git.
 | Manifiesto | `GET /api/public/integrar`, `schema_version` 1.1.2 |
 | Guia para personas | `GET /api/public/integrar/guia`, HTML renderizado del manifiesto |
 | Runtimes soportados | Dos: Claude Code y opencode |
-| Artefactos publicados | 8; el conductor en `artifact_version` 1.6.0 y su README en 1.6.1, `skill_markdown`, `agent_guidelines` y `adapter_generator` en 1.1.0, `loop_prompt_code_review` en 1.1.1, `surface_spec` en 1.0.2, `skills_json` en 1.0.2 |
+| Artefactos publicados | 8; el conductor en `artifact_version` 1.6.0 y su README en 1.6.1, `adapter_generator` en 1.3.0, `loop_prompt_code_review` y `agent_guidelines` en 1.1.1, `skill_markdown` y `surface_spec` en 1.1.0, `skills_json` en 1.0.3 |
 | Descargas necesarias para **llamar** a las operaciones | Ninguna |
 | Descargas necesarias para **conducir** | El spec y el generador (agentes y comandos); el conductor y su README si se quiere el bucle desatendido, y su plantilla de revision si se quiere ademas la compuerta dentro de la sesion del agente |
 
@@ -47,7 +47,8 @@ Ahora la condicion no nombra ningun runtime —"mientras falten los adaptadores 
 hay un mapping por runtime cuyo destino es el directorio entero en vez de un agente por linea, y los
 cuatro agentes se listan aparte con su papel. Copiar `runtime-adapters/claude/` o
 `runtime-adapters/opencode/` a la raiz del cliente trae de una vez el registro MCP, el archivo de
-instrucciones, los permisos, los cuatro agentes y los cinco comandos.
+instrucciones, los permisos, los cuatro agentes y los cinco comandos —y, en opencode, el plugin que
+carga el `.env`—.
 
 **El conductor del bucle ya se publica.** `integracion/conductor/apts-loop.js` existia desde el
 2026-08-06 y no aparecia en ninguna parte del manifiesto: ni como artefacto ni nombrado en una
@@ -1165,7 +1166,7 @@ La causa es una divergencia entre los dos runtimes que el generador trataba igua
 filtra, herramientas MCP incluidas. En opencode el mapa `tools:` es **aditivo** —lo que no se nombra
 se queda en su valor por defecto, y para las MCP ese valor es habilitado—, asi que el mismo campo
 neutral del spec significa «habilita estas» en un runtime y «solo estas» en el otro. Por eso
-opencode nunca lo sufrio y no se toca.
+opencode nunca sufrio **esto** —tenia lo suyo, en la seccion siguiente— y su frontmatter no se toca.
 
 No es red, ni credenciales, ni registro: desde la sesion principal del mismo cliente —que no pasa
 por el frontmatter de subagente— `list_backlog_items` devolvia `ok: true`. Y **la lista `allow` de
@@ -1192,6 +1193,57 @@ descripcion de `report_blocker`, que es lo que el agente lee en `tools/list`) y 
 a **1.1.1** (paso 7 del camino feliz). Ningun esquema cambia; el contrato sigue derivando 22
 herramientas y el chequeo pasa al importar. Correr el generador dos veces no mueve nada: sigue
 siendo idempotente.
+
+## El adaptador de opencode era ininstalable, y las tres causas eran del generador
+
+Lo reporto un cliente el 2026-08-14 (opencode 1.14.33, Windows). Las tres fallan en cadena, cada
+una tapando a la siguiente, y ninguna es de opencode: son tres suposiciones del generador sobre
+como funciona ese runtime.
+
+**Una clave de adorno invalidaba el archivo entero.** El generador escribia el banner «GENERADO —
+no editar» como clave `_generated` porque JSON no tiene comentarios. opencode valida su
+configuracion contra un esquema **estricto** y rechaza claves desconocidas: `Unrecognized key:
+_generated`, y con eso descarta el `opencode.json` **completo**. El servidor MCP no llegaba a
+intentarse. La anotacion es inocua en `.mcp.json` y en `.claude/settings.json` —Claude Code no
+valida asi— y por eso el generador la escribia igual en los tres sitios. Ahora opencode recibe el
+banner como comentario: su configuracion se parsea como **JSONC**, asi que cabe.
+
+**La url interpolada no es equivalente a la url literal.** La url salia como
+`{env:APTS_MCP_URL}`. En opencode esa sintaxis no es una expansion del campo sino una sustitucion
+de **texto** sobre el archivo entero, hecha al leer la configuracion, y una variable que no este en
+el entorno del proceso se convierte en **cadena vacia**. En una cabecera eso da una llamada sin
+credencial, que es un error legible de APTS; en la url da `""`, que no parsea, y opencode marca el
+servidor `failed` con `Invalid MCP URL` antes de intentar nada. Ahora va la url literal, del campo
+nuevo `mcp.defaultUrl` del spec, y `APTS_MCP_URL` queda como escape para apuntar a otro despliegue.
+El manifiesto ya publicaba la url literal en su bloque de registro: el generador era el unico sitio
+donde estaba interpolada.
+
+**Y las instrucciones prometian un `.env` que nadie leia.** La seccion gestionada dice «define las
+variables en un `.env` en la raiz del proyecto». opencode no lee ninguno: `{env:VAR}` mira el
+entorno del **proceso**, y punto. El operador tenia que exportarlas a mano antes de abrir la
+herramienta o no habia integracion, y la promesa del archivo generado era falsa. Ahora el adaptador
+trae un quinto artefacto, `.opencode/plugin/apts-env.js`, que lee ese `.env` y reescribe la url y
+las cuatro cabeceras del servidor MCP ya en memoria. No es un truco: opencode inicializa los
+plugins **antes que nada mas** precisamente porque pueden mutar la configuracion, y el gancho
+`config` recibe el objeto vivo que despues lee el registro MCP. Se descubre solo en
+`.opencode/{plugin,plugins}/*.{ts,js}`, asi que no hay nada que declarar ni que instalar.
+
+Tres decisiones del plugin que no son obvias. Va en `.js` y sin tipos: en `.ts` acabaria dentro del
+`tsconfig` del proyecto cliente y su comprobacion de tipos fallaria por unos parametros que no
+puede tipar. El entorno del proceso **gana** al `.env`, como cualquier dotenv. Y una variable sin
+valor **borra** su cabecera en vez de mandarla vacia, para que APTS conteste nombrando el campo que
+falta en vez de tomar la cadena vacia por identidad.
+
+Comprobado de punta a punta contra opencode 1.18.18 con un servidor MCP de mentira que anota las
+cabeceras: `opencode mcp list` dice `✓ apts connected`, la url es la del `.env` y las cuatro
+cabeceras llegan con sus valores —incluidos el prefijo `export `, las comillas y el `# comentario`
+al final de linea—. Con un `.env` sin credenciales, conecta igual y no llega ninguna de las cuatro.
+
+El generador sube a **1.3.0** y el spec a **1.1.0**: un cliente que cachee por version no se entera
+de otra forma, y el spec crece el campo `defaultUrl` del que depende el generador nuevo —emparejar
+un spec viejo con el aborta nombrandolo, que es justo lo que se quiere en vez de emitir una url
+vacia—. La guia en HTML ya no dice que ningun runtime lee el `.env`: dice la excepcion y de que
+paso depende. Correr el generador dos veces sigue sin mover nada.
 
 ## Abierto
 

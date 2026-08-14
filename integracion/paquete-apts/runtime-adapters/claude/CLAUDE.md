@@ -32,6 +32,8 @@ APTS_AGENT_NAME=your-agent-name
 APTS_AGENT_EMAIL=your-agent@example.com
 ```
 
+Who reads that `.env` depends on the runtime, and no runtime reads it by magic: in **opencode** the generated adapter ships a plugin (`.opencode/plugin/apts-env.js`) that loads it at startup and injects the values into the MCP registration, so a `.env` at the project root is enough; in **Claude Code** and any other runtime the variables must already be in the process environment when the tool starts. A process-environment value always wins over the `.env` file.
+
 If a secret manager is used instead of `.env`, it must expose the same variable names. The operator wires these into the MCP server registration once; you never read them yourself.
 
 ### Identity

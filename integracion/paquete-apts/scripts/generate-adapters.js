@@ -61,6 +61,11 @@ function validateSpec(spec) {
   for (const key of ['mcp', 'instructions', 'agents', 'commands', 'permissions', 'hooks']) {
     if (!(key in spec)) fail(`Spec is missing required key "${key}"`);
   }
+  // La url literal del registro de opencode: si no parsea, opencode descarta el servidor con
+  // «Invalid MCP URL» y el cliente se queda sin superficie. Se comprueba aqui y no alli.
+  if (!URL.canParse(spec.mcp.defaultUrl || '')) {
+    fail(`spec.mcp.defaultUrl is not a valid URL: ${JSON.stringify(spec.mcp.defaultUrl)}`);
+  }
   const agentIds = new Set(spec.agents.map((a) => a.id));
   for (const agent of spec.agents) {
     for (const sub of agent.subagents || []) {
@@ -110,6 +115,16 @@ function mcpHeaders(spec, envRef) {
 // JSON with the banner as the first key (JSON has no comments).
 function jsonText(payload) {
   return `${JSON.stringify({ _generated: BANNER, ...payload }, null, 2)}\n`;
+}
+
+// Igual, pero para un archivo que se valida contra un esquema ESTRICTO: la clave `_generated`
+// no es una anotacion inocua alli, es una clave desconocida que invalida el archivo ENTERO.
+// opencode rechaza `opencode.json` con «Unrecognized key: _generated» y descarta la
+// configuracion completa, asi que el servidor MCP no llegaba ni a intentarse. opencode parsea
+// su configuracion como JSONC, de modo que el banner cabe como comentario y no como dato.
+// Medido el 2026-08-14 en un cliente real (opencode 1.14.33, Windows).
+function jsoncText(payload) {
+  return `// ${BANNER}\n${JSON.stringify(payload, null, 2)}\n`;
 }
 
 function quoteYaml(value) {
@@ -216,18 +231,29 @@ function emitOpencode(spec, root, written) {
     if (perm.capability === 'execute') bash[perm.pattern] = perm.action;
   }
   bash['*'] = 'ask';
-  writeFileTracked(written, path.join(root, 'opencode.json'), jsonText({
+  // La url va LITERAL, las cabeceras siguen interpoladas. No es una asimetria gratuita: en
+  // opencode `{env:VAR}` es una sustitucion de TEXTO sobre el archivo entero, hecha al cargar
+  // la configuracion, y una variable ausente se sustituye por cadena vacia. En una cabecera eso
+  // da una llamada sin credencial —error de APTS, legible—; en la url da `""`, que no parsea, y
+  // opencode marca el servidor como `failed` con «Invalid MCP URL» antes de intentar nada. Con
+  // la url literal el registro vale sin configurar nada previo, y quien apunte a otro despliegue
+  // define `APTS_MCP_URL`: el plugin de abajo la sobreescribe en memoria.
+  writeFileTracked(written, path.join(root, 'opencode.json'), jsoncText({
     $schema: 'https://opencode.ai/config.json',
     mcp: {
       [spec.mcp.server]: {
         type: 'remote',
-        url: `{env:${spec.mcp.urlEnv}}`,
+        url: spec.mcp.defaultUrl,
         enabled: true,
         headers: mcpHeaders(spec, (env) => `{env:${env}}`),
       },
     },
     permission: { edit: 'allow', bash },
   }));
+
+  // El plugin que hace cierto el «crea un .env y listo» de las instrucciones.
+  writeFileTracked(written, path.join(root, '.opencode', 'plugin', 'apts-env.js'),
+    opencodeEnvPlugin(spec));
 
   // Instructions: opencode reads AGENTS.md directly.
   writeFileTracked(written, path.join(root, 'AGENTS.md'), markdownText(null, [
@@ -262,6 +288,116 @@ function emitOpencode(spec, root, written) {
   }
 }
 
+// El plugin de opencode que carga el `.env` del proyecto.
+//
+// El agujero que tapa: `{env:VAR}` en opencode es una sustitucion de TEXTO sobre el archivo de
+// configuracion contra el entorno del PROCESO, hecha al cargar la configuracion y por tanto antes
+// de que exista ningun plugin; una variable ausente se sustituye por cadena vacia. Las
+// instrucciones que este mismo generador materializa prometen «define las variables en un .env en
+// la raiz del proyecto», y sin esto la promesa era falsa en opencode: el operador tenia que
+// exportarlas a mano en el entorno antes de abrir la herramienta o el servidor MCP no conectaba.
+//
+// Por que un plugin y no otra cosa: opencode inicializa los plugins ANTES que nada mas
+// precisamente porque pueden mutar la configuracion, y el gancho `config` recibe el objeto vivo
+// que despues lee el registro MCP. Se descubre solo en `.opencode/{plugin,plugins}/*.{ts,js}`, asi
+// que no hay que declararlo en `opencode.json` ni instalar dependencias.
+//
+// Se emite en `.js` y sin tipos a proposito: en `.ts` acabaria dentro del `tsconfig` del proyecto
+// cliente y su comprobacion de tipos fallaria por unos parametros que no puede tipar.
+function opencodeEnvPlugin(spec) {
+  const headers = spec.mcp.headers.map((h) => ({ name: h.name, env: h.env, scheme: h.scheme || null }));
+  const lines = [
+    `// ${BANNER}`,
+    '//',
+    '// opencode no lee `.env`. Su interpolacion `{env:VAR}` sustituye texto en la configuracion',
+    '// contra el entorno del PROCESO, antes de que exista ningun plugin, y una variable ausente se',
+    '// convierte en cadena vacia: cabecera vacia (401 de APTS) o, si le toca a la url, servidor',
+    '// marcado `failed` con «Invalid MCP URL».',
+    '//',
+    '// Este plugin lee el `.env` del proyecto y reescribe la url y las cabeceras del servidor MCP',
+    '// ya en memoria. opencode inicializa los plugins antes que nada mas justamente porque pueden',
+    '// mutar la configuracion, asi que esto ocurre antes de que el registro MCP se conecte.',
+    '//',
+    '// Precedencia: el entorno del proceso gana al `.env`, como cualquier dotenv.',
+    '',
+    "import fs from 'node:fs';",
+    "import path from 'node:path';",
+    '',
+    `const SERVER = ${JSON.stringify(spec.mcp.server)};`,
+    `const URL_ENV = ${JSON.stringify(spec.mcp.urlEnv)};`,
+    `const HEADERS = ${JSON.stringify(headers, null, 2)};`,
+    '',
+    '// `.env` minimalista: un `CLAVE=valor` por linea, `export ` opcional, comillas opcionales y',
+    '// `#` de comentario. No expande variables dentro del valor: una clave no deberia depender de',
+    '// eso, y expandir a medias confunde mas que no expandir.',
+    'function parseEnv(text) {',
+    '  const out = {};',
+    '  for (const raw of text.split(/\\r?\\n/)) {',
+    '    const line = raw.trim();',
+    "    if (!line || line.startsWith('#')) continue;",
+    "    const eq = line.indexOf('=');",
+    '    if (eq === -1) continue;',
+    '    let key = line.slice(0, eq).trim();',
+    "    if (key.startsWith('export ')) key = key.slice(7).trim();",
+    '    if (!key) continue;',
+    '    let value = line.slice(eq + 1).trim();',
+    '    const quote = value[0];',
+    '    if (value.length > 1 && (quote === \'"\' || quote === "\'") && value.endsWith(quote)) {',
+    '      value = value.slice(1, -1);',
+    '    } else {',
+    "      const comment = value.indexOf(' #');",
+    '      if (comment !== -1) value = value.slice(0, comment).trim();',
+    '    }',
+    '    out[key] = value;',
+    '  }',
+    '  return out;',
+    '}',
+    '',
+    'function readEnvFiles(dirs) {',
+    '  const merged = {};',
+    '  for (const dir of dirs) {',
+    '    if (!dir) continue;',
+    '    let text;',
+    "    try { text = fs.readFileSync(path.join(dir, '.env'), 'utf8'); } catch { continue; }",
+    '    Object.assign(merged, parseEnv(text));',
+    '  }',
+    '  return merged;',
+    '}',
+    '',
+    '// Unica exportacion, y funcion: opencode recorre TODAS las exportaciones del modulo y falla',
+    '// entero si alguna no lo es.',
+    'export const AptsEnv = async ({ directory, worktree }) => {',
+    '  // El `.env` suele estar en la raiz del repositorio (`worktree`), pero se admite tambien el',
+    '  // directorio de trabajo (`directory`) y ese, por ser el mas cercano, gana.',
+    '  const fromFile = readEnvFiles([...new Set([worktree, directory])]);',
+    "  const read = (name) => process.env[name] || fromFile[name] || '';",
+    '',
+    '  return {',
+    '    config: async (config) => {',
+    '      const server = config && config.mcp && config.mcp[SERVER];',
+    "      if (!server || server.type !== 'remote') return;",
+    '',
+    '      // Solo si viene definida: la url literal del archivo generado ya es valida, y esto es',
+    '      // el escape para apuntar a otro despliegue.',
+    '      const url = read(URL_ENV);',
+    '      if (url) server.url = url;',
+    '',
+    '      const headers = { ...(server.headers || {}) };',
+    '      for (const header of HEADERS) {',
+    '        const value = read(header.env);',
+    '        // Sin valor se BORRA la cabecera en vez de mandarla vacia: asi APTS contesta nombrando',
+    '        // el campo que falta en vez de tomar la cadena vacia por identidad.',
+    '        if (!value) { delete headers[header.name]; continue; }',
+    "        headers[header.name] = header.scheme ? header.scheme + ' ' + value : value;",
+    '      }',
+    '      server.headers = headers;',
+    '    },',
+    '  };',
+    '};',
+  ];
+  return `${lines.join('\n')}\n`;
+}
+
 // ---- shared body builders --------------------------------------------------
 
 function agentBody(agent) {
@@ -276,8 +412,9 @@ function commandBody(spec, command) {
   return lines;
 }
 
-// opencode hooks live in .opencode/plugin/*.ts (WS opcional tardío); Claude hooks live in
-// settings.json. Both are empty for now; kept as explicit no-ops so the shape is stable.
+// opencode hooks live in .opencode/plugin/*.js (junto al plugin del .env que ya se emite);
+// Claude hooks live in settings.json. Both are empty for now; kept as explicit no-ops so the
+// shape is stable.
 function hooksToClaude(hooks) {
   void hooks;
   return {};

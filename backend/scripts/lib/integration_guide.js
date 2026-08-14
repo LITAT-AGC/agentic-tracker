@@ -213,9 +213,13 @@ ${bloque([
     'APTS_AGENT_EMAIL="mi-agente@example.com"',
   ].join('\n'), '.env')}
 <div class="aviso">
-  <p>Ningun runtime carga el <code>.env</code> por su cuenta: las variables tienen que estar
-  en el <strong>entorno del proceso</strong> cuando arranca la herramienta. Si tu agente no ve
-  el servidor MCP, esta es la causa nueve de cada diez veces.</p>
+  <p><strong>Ningun runtime carga el <code>.env</code> por su cuenta.</strong> Las variables
+  tienen que estar en el <strong>entorno del proceso</strong> cuando arranca la herramienta. Si
+  tu agente no ve el servidor MCP, esta es la causa nueve de cada diez veces.</p>
+  <p>La excepcion es <strong>opencode</strong>, y solo si haces el paso 2: el adaptador generado
+  trae un plugin (<code>.opencode/plugin/apts-env.js</code>) que lee ese <code>.env</code> al
+  arrancar y mete los valores en el registro MCP. Con el, un <code>.env</code> en la raiz basta.
+  El entorno del proceso, si define la misma variable, sigue ganando.</p>
 </div>
 </li>
 
