@@ -1279,12 +1279,17 @@ acaba de quitar. La variante sin ese coste es aceptar `backlog_item_id` sin `tas
 tiene ciclo de vida—, que sirve cuando hay unidad y no cuando lo roto es el tooling, que era el
 caso.
 
-Todo lo anterior esta **desplegado**: produccion corre `c867e97` desde el 2026-08-09, sin
+Todo lo anterior esta **desplegado**: produccion corre `1da2d92` desde el 2026-08-14, sin
 migraciones —siguen siendo 23— y con el frontend recompilado en el mismo viaje. El manifiesto
-publico ya anuncia `adapter_generator 1.2.0`, `surface_spec 1.0.3`, `skills_json 1.0.3` y
-`agent_guidelines 1.1.1`, y el generador que se descarga de PROD trae las `mcp__*`. Un cliente que
-ya tenga los agentes viejos no se entera solo: tiene que volver a bajar generador y spec y
-regenerar. Lo unico posterior a ese sha es documentacion.
+publico anuncia `adapter_generator 1.3.0`, `surface_spec 1.1.0`, `skills_json 1.0.3` y
+`agent_guidelines 1.1.1`; el generador que se descarga de PROD trae las `mcp__*` y emite el
+adaptador de opencode instalable, y el spec trae `mcp.defaultUrl`. Un cliente que ya tenga los
+adaptadores viejos no se entera solo: tiene que volver a bajar generador y spec y regenerar.
+
+Las seis comprobaciones del desplegador pasaron y el aviso de `/mcp` **no salio** —nginx ya lo
+proxya—. El frontend desplegado es el nuevo: el `index.html` que sirve nginx pide
+`assets/index-DtQKkcdH.js`, que esta en el dist recien compilado. El backend volvio `online` con
+**un** reinicio (30 acumulados contra 29), asi que ninguno de los auto-chequeos de arranque abortó.
 
 **El `.env` de PROD no necesita ninguna clave nueva.** Tiene diez y ninguna de las que llegaron
 despues es obligatoria: `EMBEDDING_DEFAULT_MODEL` no hace falta porque
