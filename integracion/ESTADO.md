@@ -215,6 +215,13 @@ entregar el evento `recorte` que anuncia ese tope, o sea que el mecanismo puesto
 truncado no fuera silencioso lo volvia silencioso. Son dos estados y no uno: dejar de ACEPTAR
 eventos y dejar de MANDARLOS.
 
+En PROD desde el 2026-08-15 (`3dcb797`), comprobado contra `apts.informaticos.ar`: el
+manifiesto sirve los dos artefactos del conductor en 1.8.0 y 1.9.0 con las lineas
+`stream-json` dentro de `registration_by_runtime`, la descarga de `apts-loop.js?v=1.8.0`
+coincide byte a byte con el repositorio —normalizando CRLF a LF, que es lo que checkoutea el
+servidor—, `POST /api/conductor/session` responde 401 en vez de 404, y la tabla esta creada
+con su FK en cascada y su UNIQUE. Con migracion, asi que hubo copia previa.
+
 **La revision adversaria ya es una compuerta, y de la unidad.** `bmad-code-review` esta sembrado en
 la biblioteca (`bmad:v6.8.0`, fase `implementation`, dueño `bmad-agent-dev`) y describe exactamente
 lo que hacia falta —tres capas paralelas: Blind Hunter, Edge Case Hunter, Acceptance Auditor— pero
