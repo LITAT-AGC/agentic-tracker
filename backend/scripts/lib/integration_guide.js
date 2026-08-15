@@ -8,7 +8,7 @@
 // La regla que gobierna este archivo: **la guia no repite datos, los renderiza**. Todo lo
 // que se puede sacar del manifiesto o del contrato se saca de ahi —la URL del endpoint,
 // las cabeceras, los bloques de registro por runtime, los artefactos con su version, las
-// 22 operaciones, las reglas de conduccion— y lo unico que se escribe aqui es lo que esas
+// 23 operaciones, las reglas de conduccion— y lo unico que se escribe aqui es lo que esas
 // dos fuentes no pueden llevar: el orden en que se hacen las cosas y por que. Una tercera
 // copia de la superficie se desincronizaria en silencio, que es el fallo que este
 // repositorio ya ha pagado dos veces.

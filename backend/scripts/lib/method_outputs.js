@@ -29,9 +29,20 @@ const WORKFLOW_OUTPUTS = {
   // (server-authoritative), crea los backlog_items ligados al epic/initiative desde
   // el contenido que genera el agente (out.stories). `extra` = descriptores
   // adicionales del paso terminal que NO gatean completitud (sólo los captura submit).
+  //
+  // `required_for_close` porque este `extra` es la razón de ser del workflow, y sin
+  // la marca era un adorno: la completitud del workflow es `artifact-exists` del doc
+  // 'epics', así que un submit con el documento y sin `out.stories` cerraba la
+  // planificación con la épica VACÍA. Y una épica vacía no tiene vuelta atrás: la
+  // fase 'implementation' no cierra nunca —`all-children-status` con cero hijos es
+  // false a propósito— y `claimDevStory` no reparte nada porque no hay hijos, así que
+  // el ciclo responde `wait` para siempre. Se vio en un cliente real el 2026-08-14
+  // (proyecto "tickets"): 21 items en el backlog, `backlog: {total: 0}` para el motor.
+  // La compuerta se comprueba contra el estado —rechaza sólo si la épica se quedaría
+  // sin hijos—, no contra la forma del payload.
   'bmad-create-epics-and-stories': {
     output: { kind: 'artifact', doc_type: 'epics' },
-    extra: [{ kind: 'backlog_items' }],
+    extra: [{ kind: 'backlog_items', required_for_close: true }],
   },
   // F4-T1: docs de proceso/validación (doc_types agregados en migración 015).
   'bmad-check-implementation-readiness': { output: { kind: 'artifact', doc_type: 'readiness' } },
@@ -59,8 +70,7 @@ const WORKFLOW_OUTPUTS = {
   // que cierra la unidad.
   //
   // `required_for_close`: sin ese artefacto el submit terminal se rechaza. Es lo que
-  // separa una compuerta de un adorno; los `extra` normales (backlog_items) sólo se
-  // capturan si vienen.
+  // separa una compuerta de un adorno; un `extra` sin la marca sólo se captura si viene.
   'bmad-dev-story': {
     output: { kind: 'status', value: 'done' },
     extra: [{

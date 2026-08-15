@@ -8,12 +8,12 @@ llego hasta aqui: eso esta en el historial de git.
 | | |
 |---|---|
 | Superficie de integracion | El endpoint MCP remoto, `POST /mcp` (Streamable HTTP, sin sesion) |
-| Operaciones | 22, derivadas de `apts_skills.json` |
+| Operaciones | 23, derivadas de `apts_skills.json` |
 | Registro | Una URL y cuatro cabeceras; el manifiesto publica el bloque por runtime |
 | Manifiesto | `GET /api/public/integrar`, `schema_version` 1.1.2 |
 | Guia para personas | `GET /api/public/integrar/guia`, HTML renderizado del manifiesto |
 | Runtimes soportados | Dos: Claude Code y opencode |
-| Artefactos publicados | 8; el conductor en `artifact_version` 1.6.0 y su README en 1.6.1, `adapter_generator` en 1.3.0, `loop_prompt_code_review` y `agent_guidelines` en 1.1.1, `skill_markdown` y `surface_spec` en 1.1.0, `skills_json` en 1.0.3 |
+| Artefactos publicados | 8; el conductor en `artifact_version` 1.7.1 y su README en 1.7.0, `adapter_generator` en 1.3.0, `loop_prompt_code_review`, `agent_guidelines` y `surface_spec` en 1.1.1, `skill_markdown` y `skills_json` en 1.1.0 |
 | Descargas necesarias para **llamar** a las operaciones | Ninguna |
 | Descargas necesarias para **conducir** | El spec y el generador (agentes y comandos); el conductor y su README si se quiere el bucle desatendido, y su plantilla de revision si se quiere ademas la compuerta dentro de la sesion del agente |
 
@@ -86,6 +86,47 @@ ARCHITECTURE", "FIRST STEP"), no un procedimiento conducible; el procedimiento r
 files del upstream, que el importador no trajo. `dev_story_completion_rule` del manifiesto ya dice
 que el paso terminal declara DOS outputs y que los dos viajan en el mismo submit. `schema_version`
 no cambia: no hay clave nueva.
+
+**La epica ya no se puede quedar vacia, y si lo esta, se dice y se repara.** Un cliente real lo
+encontro el 2026-08-14 (proyecto "tickets"): 21 items en el backlog, `backlog: {total: 0}` para el
+motor, y el ciclo respondiendo `wait: sin unidades de trabajo libres` una vuelta tras otra. Tres
+defectos encadenados, y ninguno de los tres era el que parecia.
+
+El primero es la causa. La completitud de `bmad-create-epics-and-stories` es `artifact-exists` del
+doc `epics`, y las historias eran un `extra` sin marca —"se captura si viene y se ignora si no"—:
+un submit con el documento y sin `out.stories` cerraba la planificacion con la epica vacia. El
+segundo es que ese estado no tiene salida: `implementation` no cierra nunca porque
+`all-children-status` con cero hijos es false a proposito, y `claimDevStory` no reparte de un
+conjunto vacio. El tercero es que ese callejon se anunciaba con el MISMO `wait` que el compas de
+espera legitimo —todas las historias reclamadas por otro agente—, asi que ni el agente ni el
+conductor podian distinguir esperar de estar plantado.
+
+Ahora el `extra` es `required_for_close`, como la revision adversaria. La compuerta se comprueba
+contra el ESTADO y no contra la forma del payload: rechaza solo si, tras el submit, la epica seguiria
+sin un solo hijo, de modo que un re-submit legitimo no rebota. Y `apts_next` distingue las dos
+causas: epica sin hijos es `blocked` —no `wait`—, y el `why` cuenta cuantos items sueltos hay en el
+backlog del proyecto y nombra la herramienta que los adopta.
+
+Esa herramienta es la operacion 23, `adopt_backlog_items`, y existe porque no habia ninguna. Las dos
+vias de alta del backlog estaban fracturadas: `create_backlog_item` no acepta jerarquia —su esquema
+no tiene `epic_id` ni `initiative_id`— y el motor solo liga las historias que crea el en el submit.
+Un proyecto podia entonces tener el backlog lleno y la epica vacia, y salir de ahi exigia un `UPDATE`
+a mano en la base. La operacion adopta en la epica de la iniciativa activa los items que no estan en
+ninguna; sin `backlog_item_ids` barre todos los huerfanos (los bugs fuera, salvo `include_bugs`), y
+con la lista manda el ORDEN de la lista, porque el `sort_order` no se hereda: los huerfanos comparten
+prioridad y orden por defecto, y adoptarlos tal cual dejaria el reparto en el desempate por UUID, que
+es el fallo que ya se pago en produccion el 2026-08-08.
+
+Y la captura tambien adopta: si una historia de `out.stories` coincide por titulo con un item suelto
+del proyecto, se liga ese en vez de crear otro. La deduplicacion miraba solo `initiative_id = esta
+iniciativa`, y los huerfanos lo tienen nulo, asi que re-generar el plan clonaba el backlog entero y
+dejaba dos copias de cada historia: una visible para el motor y otra no.
+
+El wiring per-step se deriva de `WORKFLOW_OUTPUTS` al sembrar, y las librerias ya sembradas no
+vuelven a pasar por el seed, asi que el descriptor nuevo lo escribe la migracion 024 —hardcodeado,
+como la 018—. `schema_version` no cambia: no hay clave nueva en el manifiesto, solo prosa nueva en
+`method_conduction` (el `generative_step_rule` ya avisaba de este fallo; ahora ademas el motor lo
+impide, y el `drive_loop` dice que un `blocked` que nombra su reparacion se repara y se sigue).
 
 **La ejecucion ya deja rastro, y el commit ya no se tira.** Lo noto el operador el 2026-08-08 mirando
 lo poco que APTS guardaba de una ejecucion de 34 minutos: 7 tareas y 6 registros, todos de sesiones
@@ -298,7 +339,7 @@ igual sin red.
 
 No es un artefacto y no tiene `artifact_version`: **no guarda contenido propio**. Se renderiza
 en cada peticion desde el manifiesto y desde `apts_skills.json`, de modo que la URL del
-endpoint, las cabeceras, los bloques de registro por runtime, las 22 operaciones, los
+endpoint, las cabeceras, los bloques de registro por runtime, las 23 operaciones, los
 artefactos con su version y las cinco reglas de `method_conduction` salen de la misma fuente
 que consume el agente. Lo unico escrito a mano es lo que esas dos fuentes no pueden llevar: en
 que orden se hacen las cosas y por que. Una tercera copia de la superficie se separaria en
@@ -461,7 +502,7 @@ consulta, que es su unico trabajo y no un efecto lateral.
 `apts-client.js`. `mcp_stdio_runtime.mjs` conserva el nombre por el protocolo que habla, no por un
 transporte: es el nucleo MCP, `dispatch()` devuelve la respuesta y no escribe en ningun sitio, y
 quien llama le pasa el ejecutor. `contract_check.mjs` ejecutado directamente vuelve a funcionar y
-lista las 22 operaciones.
+lista las 23 operaciones.
 
 **Un campo que no existe se rechaza, no se ignora.** `limit` era el nombre que cualquiera le pone al
 tope de la busqueda semantica de bugs; el campo es `top_k`. Como el esquema no es estricto, `limit`
@@ -505,7 +546,23 @@ derivado del proyecto en 47421, porque 47301 ya estaba ocupado), con el estado d
 
 - Un cliente que **no descarga nada** conduce el ciclo BMAD completo a `phase=done`: 7 workflows
   generativos, 2 unidades `dev-story` de 10 pasos, 5 cambios de rol, 3 elicitaciones, 52 submits.
-- `initialize` y `tools/list` responden con 22 operaciones.
+- `initialize` y `tools/list` responden con 23 operaciones.
+- **La epica vacia, por sus cuatro caminos** (`scripts/test_empty_epic_guard.js`, en la base de
+  prueba y dentro de una transaccion que se revierte). El submit del documento de epicas sin
+  `out.stories` se rechaza nombrando `output.stories` y no deja nada detras —sin documento escrito y
+  con la fase quieta en `planning`—; con historias, adopta por titulo los dos huerfanos que ya
+  existian, crea solo la tercera, y la epica queda con tres hijos de `sort_order` distinto (el bug
+  que nadie nombro se queda fuera). Una iniciativa en `implementation` con la epica vacia da
+  `blocked` —no `wait`— contando los items sueltos y nombrando `adopt_backlog_items`; la adopcion
+  respeta el orden de la lista de ids, es idempotente al repetirla, informa en `skipped` lo que ya
+  estaba ligado, y despues de ella el motor entrega `run_step` sobre la primera del plan adoptado.
+- **`adopt_backlog_items` por MCP**, contra el servidor de prueba: `tools/list` la trae con su
+  esquema, la llamada sin iniciativa activa da 400 `INVALID_ARGUMENT` diciendo que se corra
+  `create_initiative` primero, un id mal formado da 400 nombrandolo, y el camino feliz —alta de
+  iniciativa, dos `create_backlog_item` sueltos, adopcion— devuelve los dos items ligados a la epica
+  del alta, en `ready_for_dev` y con `sort_order` 1 y 2.
+- **El sembrado y la migracion 024 coinciden**: tras `npm run seed:method:test`, el paso terminal de
+  `bmad-create-epics-and-stories` conserva `backlog_items` con `required_for_close`.
 - **`set_project_constraints`, por las dos superficies.** Escritura parcial: deja `test_command` y
   `typecheck_command` y el resto en `null`; una segunda llamada agrega `lint_command` y `language`
   sin borrar los dos primeros; `language: null` borra ese y solo ese. Las comillas que envuelven un

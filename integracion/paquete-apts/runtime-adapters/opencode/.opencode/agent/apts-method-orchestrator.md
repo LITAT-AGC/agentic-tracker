@@ -37,6 +37,10 @@ Use these MCP tools with minimal payloads (the integration layer supplies `proje
 - `apts_workflow_step` — serve the current generative step payload (needs/outputs/instruction).
 - `apts_submit_step` — capture the step output and advance the cursor.
 - `apts_set_status` — advance a story through the method state machine when needed.
+- `adopt_backlog_items` — link loose backlog items into the initiative's epic. Repair only: use it when
+  the engine reports an epic with no stories, or before re-submitting the epics-and-stories step if the
+  stories already exist as loose items (`create_backlog_item` stores no hierarchy, so the engine cannot
+  see what it created).
 
 Never hand-roll identity discovery. Use minimal payloads; if a call reports a missing identity field,
 it is a setup issue for the operator, not a value to guess.

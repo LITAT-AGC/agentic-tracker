@@ -1074,6 +1074,29 @@
           "entity_key"
         ]
       }
+    },
+    {
+      "name": "adopt_backlog_items",
+      "description": "Adopt loose backlog items into the epic of the project's active BMAD initiative (server-authoritative method engine). Backlog items created with create_backlog_item carry no hierarchy - that schema has no epic_id or initiative_id - and the engine only links the stories it creates itself in the bmad-create-epics-and-stories submit. A project can therefore show items in list_backlog_items while apts_status reports backlog {total: 0} and apts_next reports that the epic has no stories: the engine cannot see them. This is the repair. With no backlog_item_ids it adopts every item of the project that is in no epic (bugs excluded unless include_bugs is true); with backlog_item_ids it adopts exactly those. Idempotent: an item already in an epic is reported in skipped and left untouched. Adopted items get the method entry status ('ready_for_dev') when they were still in a pre-method status (draft, needs_details, ready) and keep their status otherwise, and they get a fresh consecutive sort_order behind whatever the epic already had, because dev-story hands out work by (priority, sort_order) and orphan items usually share the defaults. Requires an active initiative with an epic (run create_initiative first). Returns { initiative_id, epic_id, adopted_count, adopted[], skipped[] }. Minimum payload via the official MCP server: none (the integration layer supplies project_url).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "project_url": {
+            "type": "string"
+          },
+          "backlog_item_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "include_bugs": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": []
+      }
     }
   ]
 }

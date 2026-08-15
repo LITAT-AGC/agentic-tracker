@@ -30,7 +30,7 @@ const {
   resolveEntityProfile,
   ENTITY_PROFILE_FIELDS
 } = require('./scripts/lib/method_resolver');
-const { createInitiative, setAgentRole } = require('./scripts/lib/method_bootstrap');
+const { createInitiative, setAgentRole, adoptBacklogItems } = require('./scripts/lib/method_bootstrap');
 // Deuda de que esto cierra: la llamada de embedding estaba implementada dos
 // veces —aquí y en la librería—, con el mismo `fetch`, las mismas cabeceras y el
 // mismo plazo copiados. Se conserva una sola: la de la librería.
@@ -2397,7 +2397,11 @@ const integrationArtifacts = {
     //        puede suplir `task_id` —en remoto no lo suple nunca— y dice que hacer cuando el
     //        bloqueo llega antes de tener tarea. No cambia ningun esquema: es la prosa que el
     //        agente lee en `tools/list`, que es justo donde se creyo lo contrario.
-    artifactVersion: '1.0.3',
+    // 1.1.0: `adopt_backlog_items`, la operacion 23. Es menor y no de parche porque AGREGA
+    //        una operacion: un cliente que leyera el contrato viejo encuentra ahora una
+    //        herramienta mas. Es la unica via publicada para tocar la jerarquia del backlog,
+    //        y sin ella un proyecto con la epica vacia solo salia con un UPDATE a mano.
+    artifactVersion: '1.1.0',
     kind: 'skills_contract',
     recommended: true,
     usagePriority: 'discovery',
@@ -2442,7 +2446,10 @@ const integrationArtifacts = {
     //        minor y no el parche porque el spec crece un campo del que depende el generador
     //        1.3.0: emparejar un spec 1.0.x con ese generador aborta con `defaultUrl is not a
     //        valid URL`, que es justo lo que se quiere en vez de emitir una url vacia.
-    artifactVersion: '1.1.0',
+    // 1.1.1: el orquestador de metodo conoce `adopt_backlog_items` y para que sirve. Es prosa
+    //        del prompt, no una forma nueva en el spec, asi que es de parche —pero hay que
+    //        regenerar para que llegue al cliente—.
+    artifactVersion: '1.1.1',
     kind: 'runtime_surface_spec',
     recommended: true,
     usagePriority: 'discovery',
@@ -2715,7 +2722,7 @@ const METHOD_CONDUCTION = {
     '- run_step with a generative target (target_id equals initiative_id; non-iterable step): drive it with generative_step_rule.',
     '- run_step with an iterable target (target_id is a story id; the dev-story step): implement the story, then close it with dev_story_completion_rule.',
     '- done: the lifecycle is complete. Stop and report success.',
-    '- blocked: stop and report the blocker (why, and role when present). Do not improvise around a blocker; surface it.'
+    '- blocked: stop and report the blocker (why, and role when present). Do not improvise around a blocker; surface it. The one exception is a blocker whose why names the contract operation that repairs it — an epic with no stories names adopt_backlog_items, which links the project\'s loose backlog items into the epic so the iterable step has work units: apply exactly that operation and call apts_next again. Anything the why does not name is still a blocker.'
   ].join('\n'),
   generative_step_rule: [
     'For a generative (non-iterable) step, acting as the required role:',
@@ -2723,7 +2730,7 @@ const METHOD_CONDUCTION = {
     '- If mode is await_input, the payload carries questions. Present them to the operator, collect answers, and resume by calling apts_workflow_step again with answers for that step. Elicitation is a pause, not a blocker.',
     '- If mode is wait, blocked or done, handle it as in drive_loop.',
     '2. Produce what the step declares in outputs[], grounded in instruction_chunk, template_slice and the needs[] slices. Do not fabricate content the step does not ask for. Most steps declare nothing (outputs[] empty): submit them with an empty output, they are procedure steps.',
-    '3. Submit with apts_submit_step. output is ONE flat object and the server takes from it whatever each declaration in outputs[] asks for, so a step MUST be answered for every entry it declares, not just the first one: { kind: "artifact", doc_type } consumes title and content; { kind: "backlog_items" } consumes stories[] ({ title, description?, acceptance_criteria? }); { kind: "status" } consumes status and code_ref; { kind: "code_ref" } consumes code_ref. A step declaring [{artifact:epics},{backlog_items}] needs { title, content, stories } in the same call — answering only the artifact silently creates no stories, and the lifecycle then reaches implementation with no work units and waits forever.',
+    '3. Submit with apts_submit_step. output is ONE flat object and the server takes from it whatever each declaration in outputs[] asks for, so a step MUST be answered for every entry it declares, not just the first one: { kind: "artifact", doc_type } consumes title and content; { kind: "backlog_items" } consumes stories[] ({ title, description?, acceptance_criteria? }); { kind: "status" } consumes status and code_ref; { kind: "code_ref" } consumes code_ref. A step declaring [{artifact:epics},{backlog_items}] needs { title, content, stories } in the same call: the backlog_items declaration is required_for_close, so a submit that would leave the epic with no stories at all is REJECTED with ok:false and closes nothing. That gate exists because the lifecycle cannot recover from an empty epic on its own — implementation never completes without children and the iterable step has nothing to hand out. If the stories already exist as loose backlog items (create_backlog_item stores no hierarchy), adopt them into the epic with adopt_backlog_items and submit again; the engine also adopts, instead of duplicating, any loose item whose title matches a story you send in stories[].',
     '4. apts_submit_step returns { ok, captured[], advanced_to, workflow_complete }. Check captured[] against what the step declared: it is the only confirmation that each output was really taken. If ok is false, read why and correct the call instead of retrying it unchanged — in particular, a step paused in await_input must be resumed via apts_workflow_step with answers before it can be submitted.',
     '5. If workflow_complete is false, keep serving and submitting the next step of the same workflow. When it is true, go back to drive_loop for the next workflow or phase.'
   ].join('\n'),
@@ -4052,6 +4059,44 @@ const parseCreateInitiativeInput = (body = {}) => {
   };
 };
 
+// Misma razón que arriba: la validación de adopt_backlog_items vive aquí para que la
+// hereden la ruta y la superficie remota. Los ids se comprueban acá porque un id mal
+// formado llegaría al `whereIn` como texto y en PostgreSQL revienta con un 500 de
+// tipo uuid en vez de decir cuál de la lista está mal.
+const parseAdoptBacklogItemsInput = (body = {}) => {
+  const projectUrl = typeof body?.project_url === 'string' ? body.project_url.trim() : '';
+  if (!projectUrl) {
+    throw createHttpError(400, 'project_url is required');
+  }
+
+  const rawIds = body?.backlog_item_ids;
+  let backlogItemIds;
+  if (rawIds !== undefined && rawIds !== null) {
+    if (!Array.isArray(rawIds)) {
+      throw createHttpError(400, 'backlog_item_ids must be an array of backlog item ids');
+    }
+    backlogItemIds = rawIds.map((id) => (typeof id === 'string' ? id.trim() : id));
+    const invalid = backlogItemIds.filter((id) => typeof id !== 'string' || !isUuid(id));
+    if (invalid.length) {
+      throw createHttpError(400, `backlog_item_ids must all be valid UUIDs; invalid: ${invalid.join(', ')}`);
+    }
+    if (!backlogItemIds.length) {
+      throw createHttpError(400, 'backlog_item_ids must not be empty; omit it to adopt every orphan item');
+    }
+  }
+
+  const includeBugs = body?.include_bugs;
+  if (includeBugs !== undefined && includeBugs !== null && typeof includeBugs !== 'boolean') {
+    throw createHttpError(400, 'include_bugs must be a boolean');
+  }
+
+  return {
+    project_url: projectUrl,
+    backlog_item_ids: backlogItemIds,
+    include_bugs: includeBugs === true
+  };
+};
+
 // El envoltorio `query:{…}` y el recorte de top_k vivían en la ruta; sin ellos la
 // respuesta remota no sería la misma.
 const searchSimilarBugReportsOperation = async (parsedBody) => {
@@ -4144,7 +4189,8 @@ const MCP_IDENTITY_FIELDS_BY_OPERATION = {
   apts_workflow_step: ['project_url', 'agent_name'],
   apts_submit_step: ['project_url', 'agent_name'],
   create_initiative: ['project_url'],
-  set_agent_role: ['project_url']
+  set_agent_role: ['project_url'],
+  adopt_backlog_items: ['project_url']
 };
 
 let mcpRuntimePromise = null;
@@ -4530,6 +4576,11 @@ const mcpLocalExecutor = {
       entity_key: requireMcpTrimmedString(payload?.entity_key, 'entity_key is required')
     }),
     { fallbackMessage: 'Failed to set agent role', logMessage: 'set_agent_role failed' }
+  ),
+
+  adoptBacklogItems: (payload) => runMcpOperation(
+    () => adoptBacklogItems(db, parseAdoptBacklogItemsInput(payload)),
+    { fallbackMessage: 'Failed to adopt backlog items', logMessage: 'adopt_backlog_items failed' }
   )
 };
 
@@ -5130,6 +5181,25 @@ app.post('/api/projects/agent-roles', apiLimiter, authenticateAgent, async (req,
       fallbackMessage: 'Failed to set agent role',
       logMessage: 'set_agent_role failed',
       logContext: { project_url: projectUrl, agent_name: agentName }
+    });
+  }
+});
+
+// adopt_backlog_items: adopta en la épica de la iniciativa activa los items del
+// backlog que no están en ninguna. Forward fino hacia method_bootstrap.js. Es la
+// reparación de la fractura entre las dos vías de alta: `create_backlog_item` no
+// acepta jerarquía y el motor sólo liga las historias que crea él, así que un
+// proyecto podía tener el backlog lleno y la épica vacía —y salir de ahí exigía un
+// UPDATE a mano en la base—.
+app.post('/api/projects/backlog/adopt', apiLimiter, authenticateAgent, async (req, res) => {
+  try {
+    const input = parseAdoptBacklogItemsInput(req.body);
+    return res.json(await adoptBacklogItems(db, input));
+  } catch (routeError) {
+    return sendApiError(res, routeError, {
+      fallbackMessage: 'Failed to adopt backlog items',
+      logMessage: 'adopt_backlog_items failed',
+      logContext: { project_url: req.body?.project_url }
     });
   }
 });

@@ -22,9 +22,12 @@
 // validación), sin Express (eso es la ruta fina en index.js).
 
 const crypto = require('crypto');
-// El motor es de allí: la espina de fase, el mapa de completitud y el roster. Este
-// módulo los consulta, no los reimplementa.
-const { loadRosterKeys, startPhaseGaps } = require('./method_resolver');
+// El motor es de allí: la espina de fase, el mapa de completitud, el roster y la
+// puerta de entrada de un item a la máquina de método. Este módulo los consulta, no
+// los reimplementa.
+const {
+  loadRosterKeys, startPhaseGaps, loadActiveInitiative, loadEpic, methodEntryStatus,
+} = require('./method_resolver');
 
 const DEFAULT_TRACK = 'method';
 const DEFAULT_SOURCE_REF = 'bmad:v6.8.0';
@@ -288,9 +291,139 @@ const setAgentRole = (db, {
     return { project_state_id: row.id, role: entity.key, created: true, updated: false };
   });
 
+// ---- adopt_backlog_items ----
+// Repara la fractura entre las dos vías de alta del backlog. `create_backlog_item`
+// no acepta jerarquía —su esquema no tiene epic_id ni initiative_id— y el motor sólo
+// liga historias al crearlas él en el submit de `bmad-create-epics-and-stories`. Un
+// proyecto puede acabar entonces con un backlog visible en `list_backlog_items` y
+// vacío para el motor: `apts_status` devolviendo `backlog: {total: 0}` con veinte
+// items dentro. Sin esta operación, salir de ahí exigía un UPDATE a mano en la base:
+// ninguna de las herramientas publicadas podía tocar la jerarquía.
+//
+// Adopta en la épica de la iniciativa activa los items del proyecto que no están en
+// ninguna. Idempotente: un item ya ligado se informa en `skipped` y no se toca.
+//
+// El orden NO se hereda. Los huérfanos suelen traer el `sort_order` por defecto y la
+// misma `priority`, y `claimDevStory` ordena por esas dos columnas: adoptarlos tal cual
+// dejaría el reparto en manos del desempate por UUID, que es el fallo que ya se pagó en
+// producción el 2026-08-08. Se les asigna `sort_order` correlativo detrás de lo que la
+// épica ya tenga: en el orden de `backlog_item_ids` cuando se pasan —así el llamante
+// dicta el plan— y si no, en el orden estable (priority, sort_order, created_at, id).
+const ADOPTABLE_ITEM_TYPES_DEFAULT_EXCLUDED = ['bug'];
+
+const adoptBacklogItems = (db, {
+  project_url,
+  backlog_item_ids,
+  include_bugs = false,
+} = {}) =>
+  db.transaction(async (trx) => {
+    if (!project_url || typeof project_url !== 'string') {
+      throw badRequest('adopt_backlog_items requires project_url');
+    }
+    const ids = backlog_item_ids === undefined || backlog_item_ids === null
+      ? null
+      : backlog_item_ids;
+    if (ids !== null && (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string' || !id.trim()))) {
+      throw badRequest('backlog_item_ids must be an array of backlog item ids');
+    }
+
+    const initiative = await loadActiveInitiative(trx, project_url);
+    if (!initiative) {
+      throw badRequest(
+        `adopt_backlog_items requires an active initiative for ${project_url}; run create_initiative first`,
+      );
+    }
+    const epic = await loadEpic(trx, initiative.id);
+    if (!epic) {
+      throw badRequest(
+        `la iniciativa activa de ${project_url} no tiene épica; no hay dónde adoptar`,
+        'NO_EPIC',
+      );
+    }
+
+    // Candidatos. Con ids explícitos se respeta lo que pide el llamante (incluidos
+    // los bugs); el barrido sin ids deja los bugs fuera salvo que se pidan, porque
+    // arrastrar el triaje entero a un plan BMAD no es lo que nadie quiere por defecto.
+    const base = trx('backlog_items')
+      .where({ project_url })
+      .whereNull('deleted_at')
+      .orderBy('priority', 'asc')
+      .orderBy('sort_order', 'asc')
+      .orderBy('created_at', 'asc')
+      .orderBy('id', 'asc')
+      .forUpdate();
+    if (ids) base.whereIn('id', ids.map((id) => id.trim()));
+    else {
+      base.whereNull('epic_id');
+      if (!include_bugs) base.whereNotIn('item_type', ADOPTABLE_ITEM_TYPES_DEFAULT_EXCLUDED);
+    }
+    const candidates = await base.select('id', 'title', 'status', 'epic_id', 'item_type');
+
+    const skipped = [];
+    const byId = new Map(candidates.map((row) => [row.id, row]));
+    if (ids) {
+      for (const raw of ids) {
+        const id = raw.trim();
+        if (!byId.has(id)) skipped.push({ backlog_item_id: id, reason: 'no existe en este proyecto (o está borrado)' });
+      }
+    }
+
+    const adoptables = candidates.filter((row) => {
+      if (row.epic_id) {
+        skipped.push({ backlog_item_id: row.id, reason: `ya está en la épica ${row.epic_id}` });
+        return false;
+      }
+      return true;
+    });
+
+    // Con ids explícitos manda el orden de la lista: es la única forma que tiene el
+    // llamante de expresar el plan cuando los huérfanos no traen orden propio —y no lo
+    // traen casi nunca, porque `create_backlog_item` los deja a todos con la misma
+    // prioridad y el mismo sort_order—. Sin esto, el desempate acababa en el id.
+    if (ids) {
+      const posicion = new Map(ids.map((id, i) => [id.trim(), i]));
+      adoptables.sort((a, b) => posicion.get(a.id) - posicion.get(b.id));
+    }
+
+    const [{ max_order: maxOrder }] = await trx('backlog_items')
+      .where({ epic_id: epic.id })
+      .whereNull('deleted_at')
+      .max('sort_order as max_order');
+    let order = Number(maxOrder || 0) + 1;
+
+    const adopted = [];
+    for (const row of adoptables) {
+      const status = methodEntryStatus(row.status);
+      await trx('backlog_items').where({ id: row.id }).update({
+        initiative_id: initiative.id,
+        epic_id: epic.id,
+        status,
+        sort_order: order,
+        updated_at: trx.fn.now(),
+      });
+      adopted.push({
+        backlog_item_id: row.id,
+        title: row.title,
+        status_from: row.status,
+        status_to: status,
+        sort_order: order,
+      });
+      order += 1;
+    }
+
+    return {
+      initiative_id: initiative.id,
+      epic_id: epic.id,
+      adopted_count: adopted.length,
+      adopted,
+      skipped,
+    };
+  });
+
 module.exports = {
   createInitiative,
   setAgentRole,
+  adoptBacklogItems,
   writeSpecArtifact,
   ensureProject,
   SPEC_DOC_TYPE,

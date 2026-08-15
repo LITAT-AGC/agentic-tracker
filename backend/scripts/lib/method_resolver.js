@@ -140,6 +140,17 @@ const STORY_METHOD_TRANSITIONS = {
   done: [],
 };
 
+// Estados de backlog ANTERIORES al método: los que pone la vía libre
+// (`create_backlog_item`, el triaje, el panel). Un item que entra a una épica desde
+// ahí arranca en la puerta de la máquina de método; si ya está EN la máquina
+// —ready_for_dev/in_progress/review/done— o fuera de juego —archived, blocked—, se
+// respeta su estado: adoptar no es reponer, y reponer es otra decisión.
+const PRE_METHOD_STATUSES = ['draft', 'needs_details', 'ready'];
+const METHOD_ENTRY_STATUS = 'ready_for_dev';
+const methodEntryStatus = (status) => (
+  PRE_METHOD_STATUSES.includes(status) ? METHOD_ENTRY_STATUS : status
+);
+
 // Error de máquina de estados con código/HTTP para que la ruta mapee 404/409.
 class MethodStatusError extends Error {
   constructor(message, { code, statusCode }) {
@@ -511,6 +522,39 @@ const aptsNext = (db, { project_url, agent_name }) =>
       if (step.iterable) {
         const claim = await claimDevStory(trx, ctx, caller, workflow, step);
         if (!claim) {
+          // Dos causas muy distintas daban el MISMO `wait`. Una es transitoria —las
+          // historias existen y las sostiene otro agente, hay que esperar—; la otra es
+          // terminal: la épica no tiene ni una historia, así que no hay nada que
+          // esperar y nunca lo habrá (la fase no cierra con la épica vacía y el
+          // reparto no puede repartir de un conjunto vacío). Con el mismo mensaje, el
+          // agente no puede distinguirlas y el conductor gira hasta el freno de
+          // estancamiento. La segunda es `blocked`, y dice qué hacer.
+          const vacia = await trx('backlog_items')
+            .where({ epic_id: ctx.epic_id })
+            .whereNull('deleted_at')
+            .count('* as c')
+            .first();
+          if (!ctx.epic_id || Number(vacia.c) === 0) {
+            const huerfanos = Number((await trx('backlog_items')
+              .where({ project_url })
+              .whereNull('epic_id')
+              .whereNull('deleted_at')
+              .count('* as c')
+              .first()).c);
+            return {
+              next: 'blocked',
+              target_id: null,
+              role,
+              why: 'la épica de la iniciativa no tiene ninguna historia, así que no hay unidades de '
+                + 'trabajo y no las va a haber esperando'
+                + (huerfanos
+                  ? `. El backlog del proyecto sí tiene ${huerfanos} item(s) fuera de toda épica: el `
+                    + 'motor no los ve. Adoptalos con adopt_backlog_items y volvé a pedir apts_next'
+                  : '. El backlog del proyecto tampoco tiene items sueltos: creá las historias con '
+                    + 'create_backlog_item y adoptalas con adopt_backlog_items, o reponé la iniciativa'),
+              args,
+            };
+          }
           return { next: 'wait', target_id: null, role, why: 'sin unidades de trabajo libres para este agente', args };
         }
         return { next: 'run_step', target_id: claim.story_id, role, why: verdict.why, args };
@@ -890,8 +934,8 @@ const aptsSubmitStep = (db, { project_url, agent_name, output }) =>
     }
 
     // ---- 0.bis. Compuerta de cierre: artefactos `required_for_close` ----
-    // Un `extra` corriente se captura si viene y se ignora si no (backlog_items). Éste
-    // no: la revisión adversaria de la unidad es la condición para cerrarla, y sin este
+    // Un `extra` sin la marca se captura si viene y se ignora si no. Éste no: la
+    // revisión adversaria de la unidad es la condición para cerrarla, y sin este
     // rechazo sería una recomendación con nombre de compuerta.
     //
     // Se comprueba ANTES de capturar y sin excepción para HALT. La captura corre antes
@@ -908,6 +952,34 @@ const aptsSubmitStep = (db, { project_url, agent_name, output }) =>
           + 'mandá su texto en output.content (y su título en output.title). '
           + 'Si no podés producirlo, no cierres la unidad: reportá el bloqueo y detenete',
       };
+    }
+
+    // ---- 0.ter. Compuerta de cierre: la épica no se queda vacía ----
+    // Misma marca `required_for_close`, otra clase de output. Se comprueba contra el
+    // ESTADO y no contra la forma del payload: rechaza sólo si, tras este submit, la
+    // épica seguiría sin un solo hijo. Así un re-submit legítimo —el documento se
+    // reescribe y las historias ya están— no rebota, y el único caso que rebota es el
+    // que deja el plan sin unidades de trabajo, que es un callejón sin salida: la fase
+    // 'implementation' no cierra con la épica vacía y el reparto no tiene qué repartir.
+    const historiasRequeridas = declared.find((d) => d.kind === 'backlog_items' && d.required_for_close);
+    if (historiasRequeridas) {
+      const epicActual = await loadEpic(trx, initiative.id);
+      const propuestas = Array.isArray(out.stories)
+        ? out.stories.filter((s) => (typeof s === 'string' ? s.trim() : s && typeof s.title === 'string' && s.title.trim()))
+        : [];
+      const yaHay = epicActual
+        ? Number((await trx('backlog_items').where({ epic_id: epicActual.id }).whereNull('deleted_at').count('* as c'))[0].c)
+        : 0;
+      if (!propuestas.length && yaHay === 0) {
+        return {
+          ok: false,
+          why: `el paso '${step.key}' no cierra el plan con la épica vacía: mandá las historias en `
+            + 'output.stories, una lista de { title, description?, acceptance_criteria? } '
+            + '(o de títulos). El motor las liga a la épica y a la iniciativa; sin ellas la fase '
+            + "'implementation' se queda sin unidades de trabajo y el ciclo no vuelve a avanzar. "
+            + 'Si ya las creaste con create_backlog_item, adoptálas primero con adopt_backlog_items',
+        };
+      }
     }
 
     // ---- 1. Captura de output según el descriptor del paso ----
@@ -933,17 +1005,44 @@ const aptsSubmitStep = (db, { project_url, agent_name, output }) =>
         // o strings); el motor las liga a la jerarquía (epic/initiative) con el status
         // canónico del método ('ready_for_dev'). Determinista = estructura; generativo
         // = contenido. Idempotente: no duplica por título bajo la iniciativa.
+        //
+        // Y tampoco duplica un HUÉRFANO: si el proyecto ya tiene un item con ese
+        // título fuera de toda épica —lo normal cuando alguien pobló el backlog con
+        // `create_backlog_item`, que no acepta jerarquía—, se ADOPTA en vez de crear
+        // otro. La deduplicación miraba sólo `initiative_id = esta iniciativa`, y los
+        // huérfanos lo tienen nulo: re-generar el plan clonaba el backlog entero y
+        // dejaba dos copias de cada historia, una visible para el motor y otra no.
         const epic = await loadEpic(trx, initiative.id);
         const proposed = Array.isArray(out.stories) ? out.stories : [];
         const existing = await trx('backlog_items')
           .where({ initiative_id: initiative.id }).whereNull('deleted_at').select('title');
         const seen = new Set(existing.map((r) => r.title));
         const createdIds = [];
+        const adoptedIds = [];
         let order = existing.length;
         for (const s of proposed) {
           const title = typeof s === 'string' ? s : (s && s.title);
           if (!title || seen.has(title)) continue;
           seen.add(title);
+
+          const huerfano = await trx('backlog_items')
+            .where({ project_url, title })
+            .whereNull('epic_id')
+            .whereNull('deleted_at')
+            .orderBy('created_at', 'asc')
+            .first('id', 'status');
+          if (huerfano) {
+            await trx('backlog_items').where({ id: huerfano.id }).update({
+              initiative_id: initiative.id,
+              epic_id: epic ? epic.id : null,
+              status: methodEntryStatus(huerfano.status),
+              sort_order: order++,
+              updated_at: trx.fn.now(),
+            });
+            adoptedIds.push(huerfano.id);
+            continue;
+          }
+
           const [row] = await trx('backlog_items').insert({
             project_url, title,
             description: (typeof s === 'object' && s.description) || null,
@@ -954,7 +1053,12 @@ const aptsSubmitStep = (db, { project_url, agent_name, output }) =>
           }).returning(['id']);
           createdIds.push(row.id);
         }
-        captured.push({ kind: 'backlog_items', created: createdIds.length, ids: createdIds });
+        captured.push({
+          kind: 'backlog_items',
+          created: createdIds.length,
+          adopted: adoptedIds.length,
+          ids: [...createdIds, ...adoptedIds],
+        });
       } else if (decl.kind === 'status') {
         // Iterable (dev-story): actualiza la story reclamada + registra code_ref.
         if (cursor.story_id) {
@@ -1144,6 +1248,13 @@ module.exports = {
   STORY_METHOD_STATUSES,
   STORY_METHOD_TRANSITIONS,
   MethodStatusError,
+  // Adopción de items huérfanos: la usan la captura de este módulo y la operación
+  // de reparación (method_bootstrap.adoptBacklogItems), que tienen que coincidir.
+  PRE_METHOD_STATUSES,
+  METHOD_ENTRY_STATUS,
+  methodEntryStatus,
+  loadActiveInitiative,
+  loadEpic,
   LIFECYCLE,
   nextPhase,
   claimDevStory,

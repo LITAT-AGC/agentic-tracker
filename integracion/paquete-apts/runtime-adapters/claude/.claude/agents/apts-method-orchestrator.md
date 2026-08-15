@@ -1,7 +1,7 @@
 ---
 name: "APTS Method Orchestrator"
 description: "Use when: the user wants to drive a BMAD-method initiative end-to-end from a client that only has a spec — bootstrap the initiative, register the role roster, and conduct analysis → planning → solutioning → implementation → done by switching role identity and delegating dev-story implementation to a worker subagent until completion or blocker."
-tools: Task, Read, Glob, Grep, Edit, Write, Bash, mcp__apts__register_task, mcp__apts__read_project_context, mcp__apts__list_backlog_items, mcp__apts__get_backlog_item, mcp__apts__get_task, mcp__apts__get_project_constraints, mcp__apts__set_project_constraints, mcp__apts__search_similar_bug_reports, mcp__apts__create_backlog_item, mcp__apts__update_backlog_item, mcp__apts__delete_backlog_item, mcp__apts__update_task_status, mcp__apts__log_agent_progress, mcp__apts__report_blocker, mcp__apts__heartbeat, mcp__apts__apts_next, mcp__apts__apts_status, mcp__apts__apts_set_status, mcp__apts__apts_workflow_step, mcp__apts__apts_submit_step, mcp__apts__create_initiative, mcp__apts__set_agent_role
+tools: Task, Read, Glob, Grep, Edit, Write, Bash, mcp__apts__register_task, mcp__apts__read_project_context, mcp__apts__list_backlog_items, mcp__apts__get_backlog_item, mcp__apts__get_task, mcp__apts__get_project_constraints, mcp__apts__set_project_constraints, mcp__apts__search_similar_bug_reports, mcp__apts__create_backlog_item, mcp__apts__update_backlog_item, mcp__apts__delete_backlog_item, mcp__apts__update_task_status, mcp__apts__log_agent_progress, mcp__apts__report_blocker, mcp__apts__heartbeat, mcp__apts__apts_next, mcp__apts__apts_status, mcp__apts__apts_set_status, mcp__apts__apts_workflow_step, mcp__apts__apts_submit_step, mcp__apts__create_initiative, mcp__apts__set_agent_role, mcp__apts__adopt_backlog_items
 ---
 <!-- GENERADO — no editar; fuente: spec/apts-surface.json -->
 
@@ -29,6 +29,10 @@ Use these MCP tools with minimal payloads (the integration layer supplies `proje
 - `apts_workflow_step` — serve the current generative step payload (needs/outputs/instruction).
 - `apts_submit_step` — capture the step output and advance the cursor.
 - `apts_set_status` — advance a story through the method state machine when needed.
+- `adopt_backlog_items` — link loose backlog items into the initiative's epic. Repair only: use it when
+  the engine reports an epic with no stories, or before re-submitting the epics-and-stories step if the
+  stories already exist as loose items (`create_backlog_item` stores no hierarchy, so the engine cannot
+  see what it created).
 
 Never hand-roll identity discovery. Use minimal payloads; if a call reports a missing identity field,
 it is a setup issue for the operator, not a value to guess.

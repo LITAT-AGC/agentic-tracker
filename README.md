@@ -108,6 +108,7 @@ Las operaciones del contrato, con su endpoint REST equivalente (la fuente formal
 | `apts_set_status` | PATCH | `/api/backlog/:id/method-status` | Cambiar el estado de metodo de un item. |
 | `apts_workflow_step` | POST | `/api/projects/workflow-step` | Obtener la definicion del paso de workflow en curso. |
 | `apts_submit_step` | POST | `/api/projects/submit-step` | Entregar la salida de un paso de workflow. |
+| `adopt_backlog_items` | POST | `/api/projects/backlog/adopt` | Ligar a la epica de la iniciativa activa los items del backlog que no estan en ninguna. |
 
 ## Flujo esperado de un agente
 
@@ -190,6 +191,13 @@ Dos consecuencias que conviene saber de antemano:
 - **La fase de implementacion no termina hasta que TODAS las stories estan `done`.**
   `bmad-dev-story` es *iterable*: no se completa por producir un documento, sino cuando no
   le queda ninguna unidad pendiente.
+- **El plan no cierra con la epica vacia.** `bmad-create-epics-and-stories` declara los
+  backlog items como `required_for_close`: un submit que dejaria la epica sin un solo hijo
+  se rechaza. Una epica vacia no tendria vuelta atras —`implementation` no cierra sin hijos
+  y el paso iterable no tiene que repartir—, asi que el motor prefiere no dejarla nacer. Si
+  las historias ya existen como items sueltos (`create_backlog_item` no guarda jerarquia),
+  se ligan con `adopt_backlog_items`; y una historia de `stories[]` cuyo titulo coincida con
+  un item suelto se adopta en vez de duplicarse.
 
 ### Los tres bucles anidados
 
