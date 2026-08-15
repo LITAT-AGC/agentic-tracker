@@ -109,6 +109,8 @@ El coste esta medido, porque el manifiesto lo lee todo cliente en el arranque: *
 (2.944 la regla, 445 los dos bloques de invocacion) sobre 39.307, un **8,6%**. Es el precio de que
 el bucle deje de ser descubrible solo por casualidad.
 
+En PROD desde el 2026-08-15 (`dee0746`), comprobado contra `apts.informaticos.ar`.
+
 **La revision adversaria ya es una compuerta, y de la unidad.** `bmad-code-review` esta sembrado en
 la biblioteca (`bmad:v6.8.0`, fase `implementation`, dueño `bmad-agent-dev`) y describe exactamente
 lo que hacia falta —tres capas paralelas: Blind Hunter, Edge Case Hunter, Acceptance Auditor— pero
