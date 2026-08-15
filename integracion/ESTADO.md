@@ -1302,6 +1302,53 @@ un spec viejo con el aborta nombrandolo, que es justo lo que se quiere en vez de
 vacia—. La guia en HTML ya no dice que ningun runtime lee el `.env`: dice la excepcion y de que
 paso depende. Correr el generador dos veces sigue sin mover nada.
 
+## Una iniciativa del metodo no se podia cerrar sin entrar en la base
+
+Ninguna de las 23 operaciones cierra, archiva ni resetea una iniciativa, y `create_initiative` es
+idempotente por `(project_url, status='active')`: mientras esa fila siga activa, un cliente que
+quiere re-planificar desde cero recibe SIEMPRE la vieja, resumida en su fase. El panel tampoco
+ayudaba, porque la capa del metodo entera —iniciativa, fase, epicas, artefactos— no tenia pantalla:
+la ficha del proyecto enseñaba backlog, conductor, restricciones, roster, reglas de conduccion,
+tareas y logs, y nada del motor.
+
+Se vio en `tickets` el 2026-08-15. Le redefinieron el producto, el agente comprobo el estado, encontro
+la iniciativa vieja en `implementation` con 21 historias obsoletas y **paro en preflight** en vez de
+improvisar la re-planificacion por otro camino. Acerto: dijo que no existia herramienta para
+resetear y que era accion de operador. El unico camino fue un SSH a la base de PROD.
+
+Ahora es la pestaña **Metodo** de la ficha del proyecto, con dos acciones. **Archivar** es el camino
+blando y el que resuelve el caso comun: basta con que la fila deje de estar `active` para que el
+siguiente `create_initiative` de de alta una NUEVA en `analysis`, y los artefactos viejos quedan de
+historico sin contaminar porque su `scope_key` es `initiative:<id-viejo>:<doc_type>` y la nueva no
+los alcanza. Pregunta que hacer con las historias —retirarlas es borrado blando— porque las que se
+quedan se duplican con el plan nuevo.
+
+**Purgar** es el duro, y no es un DELETE con adornos. Borrar la iniciativa no limpia el proyecto:
+solo `epics` y `project_state` cuelgan por CASCADE, mientras `backlog_items` (por `initiative_id` y
+por `epic_id`), `semantic_documents.initiative_id` y `action_items` son SET NULL, de modo que las
+historias sobreviven vivas y huerfanas —visibles en `list_backlog_items`, invisibles para el motor—,
+que es un estado peor que el de partida. Por eso es una secuencia: los `agent_logs` de las tareas de
+sus historias (esa tabla no tiene `project_url`, cuelga de `task_id`), esas tareas, los documentos de
+las historias (`scope_key` `backlog_item:<id>`, sin FK que los ate), las historias, los artefactos de
+la iniciativa —que arrastra `semantic_document_embeddings`— y por fin la iniciativa. La fila de
+`projects` se conserva a proposito: el re-bootstrap necesita esa url. Las tareas sin historia
+tampoco se tocan, porque no hay forma de atribuirselas.
+
+La mecanica vive en `backend/scripts/lib/method_lifecycle.js` (patron de servidor puro, como
+`method_bootstrap.js`) y las rutas finas en `index.js`, bajo
+`/api/dashboard/projects/:url/initiatives`: una de lectura y dos POST, `archive` y `purge`. Purgar
+exige teclear el nombre del proyecto, y esa compuerta vive en el modulo y no en la ruta, para que
+viaje con la mecanica si algun dia se expone por otra superficie. **No** es operacion de agente y no
+esta en el manifiesto: cerrar la propia iniciativa es decision de operador —el agente que se topo con
+esto acerto al pararse—, y el contrato no se toca, con lo que `schema_version` no se mueve.
+
+Comprobado con `backend/scripts/test_method_lifecycle.js`, 32 aserciones contra la base de prueba
+dentro de una transaccion que se revierte. La que importa de verdad no es ninguna de las cuentas:
+es que tras archivar, `create_initiative` da de alta una **nueva** en `analysis` en vez de resumir la
+vieja, que era el bloqueo entero. Y la que cierra la purga: que no queden historias con
+`initiative_id` en NULL. Ademas, las tres rutas por HTTP contra el servidor de prueba —401 sin
+sesion, 400 sin confirmacion— y el ciclo completo pulsando los botones.
+
 ## Abierto
 
 **El camino de Cloudflare no se ha visto devolver un vector.** El `CLOUDFLARE_API_TOKEN` del `.env`
@@ -1336,7 +1383,7 @@ acaba de quitar. La variante sin ese coste es aceptar `backlog_item_id` sin `tas
 tiene ciclo de vida—, que sirve cuando hay unidad y no cuando lo roto es el tooling, que era el
 caso.
 
-Todo lo anterior esta **desplegado**: produccion corre `1da2d92` desde el 2026-08-14, sin
+Todo lo anterior esta **desplegado**: entro en produccion con `1da2d92` el 2026-08-14, sin
 migraciones —siguen siendo 23— y con el frontend recompilado en el mismo viaje. El manifiesto
 publico anuncia `adapter_generator 1.3.0`, `surface_spec 1.1.0`, `skills_json 1.0.3` y
 `agent_guidelines 1.1.1`; el generador que se descarga de PROD trae las `mcp__*` y emite el
@@ -1347,6 +1394,15 @@ Las seis comprobaciones del desplegador pasaron y el aviso de `/mcp` **no salio*
 proxya—. El frontend desplegado es el nuevo: el `index.html` que sirve nginx pide
 `assets/index-DtQKkcdH.js`, que esta en el dist recien compilado. El backend volvio `online` con
 **un** reinicio (30 acumulados contra 29), asi que ninguno de los auto-chequeos de arranque abortó.
+
+**Produccion corre `8f14bf8` desde el 2026-08-15**, el despliegue de la pestaña «Metodo». Sin
+migraciones nuevas, asi que no hubo copia previa de la base. Las seis comprobaciones del desplegador
+pasaron, el aviso de `/mcp` no salio, el `index.html` publicado pide `assets/index-_forGAHd.js` —que
+esta en el dist recien compilado— y el backend volvio `online` con **un** reinicio (32 acumulados
+contra 31). Comprobado ademas por la URL publica que la ruta nueva esta registrada en el backend que
+corre: `/api/dashboard/projects/<url>/initiatives` responde **401** sin sesion y una ruta inventada
+del mismo prefijo responde **404**. Ese par es la comprobacion: con `try_files` un 200 no probaria
+nada, y un bundle nuevo con un backend viejo daria 404 en la buena.
 
 **El `.env` de PROD no necesita ninguna clave nueva.** Tiene diez y ninguna de las que llegaron
 despues es obligatoria: `EMBEDDING_DEFAULT_MODEL` no hace falta porque
@@ -1367,8 +1423,12 @@ entre ellas, y el manifiesto publica `skills_json` en 1.1.0 y `surface_spec` en 
 pasaron, el aviso de `/mcp` no salio, y el `index.html` publicado pide `assets/index-DtQKkcdH.js`,
 que esta en el dist recien compilado.
 
-**El estado de los dos proyectos vivos, leido en PROD despues de desplegar.** `tickets` es el caso
-que motivo el arreglo y sigue como estaba —el despliegue no repara datos—: iniciativa
+**El estado de los dos proyectos vivos, leido en PROD despues de desplegar.** (Lo de `tickets`
+quedo **superado el 2026-08-15**: le redefinieron el producto y esa iniciativa se purgo entera —1
+iniciativa, 1 epica, 8 punteros de roster, 21 historias, 29 documentos, 2 tareas—, asi que el
+proyecto existe sin ninguna iniciativa y el cliente dara de alta la suya en `analysis`. Se hizo por
+la base, que era el unico camino que habia; hoy es la pestaña «Metodo» del panel.) `tickets` era el
+caso que motivo el arreglo y seguia como estaba —el despliegue no repara datos—: iniciativa
 `f6e6e4e5` en `implementation`, epica `af4d8e88` con **0 hijos**, y **21 items sueltos**, todos
 `feature`, con prioridad y orden ya puestos (p1 `US-01`…`US-13` mas la historia `1.1`, p2 `US-14`…
 `US-17`, p3 `US-18`…`US-20`), asi que un barrido de `adopt_backlog_items` sin ids los adopta en el
