@@ -612,6 +612,219 @@
         </div>
       </div>
 
+      <div v-if="activeTab === 'method'" class="space-y-8">
+        <div>
+          <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center gap-2">
+              <div class="w-1 h-5 bg-rose-500 rounded-full"></div>
+              <h3 class="text-lg font-bold">Iniciativas del Método</h3>
+            </div>
+            <Button
+              @click="loadInitiatives()"
+              :disabled="initiativesLoading"
+              label="Actualizar"
+              icon="pi pi-refresh"
+              severity="secondary"
+              outlined
+              size="small"
+            />
+          </div>
+
+          <Message v-if="initiativesError" severity="error" :closable="false" class="mb-4">{{ initiativesError }}</Message>
+          <Message v-if="initiativesMessage" severity="success" :closable="false" class="mb-4">{{ initiativesMessage }}</Message>
+
+          <Card class="border border-surface-200">
+            <template #content>
+              <p class="text-sm text-surface-500 mb-4">
+                La iniciativa es la unidad del método: de ella cuelgan la fase, las épicas, las
+                historias y los artefactos. La crea el propio cliente al arrancar, y no puede
+                cerrarla: <code>create_initiative</code> devuelve siempre la que esté activa,
+                resumida en su fase. Un proyecto al que le redefinen el producto se queda por eso
+                atascado en el plan viejo, y salir de ahí es lo que se hace desde aquí.
+              </p>
+
+              <div v-if="initiativesLoading" class="text-sm text-surface-500">Cargando iniciativas...</div>
+
+              <div v-else-if="!initiatives.length" class="text-sm text-surface-500">
+                Este proyecto no tiene ninguna iniciativa. El cliente dará de alta una en
+                <span class="font-semibold">analysis</span> la próxima vez que arranque el método.
+              </div>
+
+              <div v-else class="space-y-5">
+                <section
+                  v-for="initiative in initiatives"
+                  :key="initiative.id"
+                  class="rounded-xl border p-4 space-y-4"
+                  :class="initiative.status === 'active'
+                    ? 'border-rose-500/30 bg-rose-500/5'
+                    : 'border-surface-200 bg-surface-50/50'"
+                >
+                  <div class="flex flex-wrap items-start justify-between gap-3">
+                    <div class="min-w-0">
+                      <p class="font-semibold break-words">{{ initiative.title }}</p>
+                      <p class="text-[11px] text-surface-400 break-all mt-0.5">{{ initiative.id }}</p>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                      <Tag :value="initiative.status" :severity="initiative.status === 'active' ? 'danger' : 'secondary'" class="text-[11px]" />
+                      <Tag :value="initiative.phase" severity="info" class="text-[11px]" />
+                      <Tag :value="initiative.track" severity="secondary" class="text-[11px]" />
+                    </div>
+                  </div>
+
+                  <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                    <div>
+                      <p class="text-[11px] uppercase tracking-wider text-rose-700/70 mb-1">Épicas</p>
+                      <p v-if="!initiative.epics.length" class="text-surface-400">ninguna</p>
+                      <p v-for="epic in initiative.epics" :key="epic.id" class="text-surface-700 break-words">
+                        {{ epic.title }} <span class="text-surface-400">({{ epic.status }})</span>
+                      </p>
+                    </div>
+                    <div>
+                      <p class="text-[11px] uppercase tracking-wider text-rose-700/70 mb-1">
+                        Historias ({{ initiative.backlog.total }})
+                      </p>
+                      <p v-if="!initiative.backlog.total" class="text-surface-400">ninguna</p>
+                      <p v-for="(n, estado) in initiative.backlog.by_status" :key="estado" class="text-surface-700">
+                        {{ n }} {{ estado.replace('_', ' ') }}
+                      </p>
+                    </div>
+                    <div>
+                      <p class="text-[11px] uppercase tracking-wider text-rose-700/70 mb-1">
+                        Artefactos ({{ initiative.artifacts.total }})
+                      </p>
+                      <p v-if="!initiative.artifacts.total" class="text-surface-400">ninguno</p>
+                      <p v-for="(n, tipo) in initiative.artifacts.by_doc_type" :key="tipo" class="text-surface-700">
+                        {{ n }} {{ tipo }}
+                      </p>
+                    </div>
+                    <div>
+                      <p class="text-[11px] uppercase tracking-wider text-rose-700/70 mb-1">
+                        Roster ({{ initiative.roster.length }})
+                      </p>
+                      <p v-if="!initiative.roster.length" class="text-surface-400">vacío</p>
+                      <p v-for="fila in initiative.roster" :key="fila.agent_name" class="text-surface-700 break-words">
+                        {{ fila.agent_name }} <span class="text-surface-400">({{ fila.step_status }})</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div class="flex flex-wrap items-center gap-3 pt-3 border-t border-surface-200/40">
+                    <span class="text-[11px] text-surface-400">
+                      creada {{ formatDateTime(initiative.created_at) }} · tocada {{ formatDateTime(initiative.updated_at) }}
+                    </span>
+                    <Button
+                      v-if="initiative.status === 'active'"
+                      @click="openLifecycleDialog(initiative, 'archive')"
+                      label="Archivar"
+                      icon="pi pi-inbox"
+                      severity="warn"
+                      outlined
+                      size="small"
+                      class="ml-auto"
+                    />
+                    <Button
+                      @click="openLifecycleDialog(initiative, 'purge')"
+                      label="Purgar"
+                      icon="pi pi-trash"
+                      severity="danger"
+                      size="small"
+                      :class="initiative.status === 'active' ? '' : 'ml-auto'"
+                    />
+                  </div>
+                </section>
+              </div>
+            </template>
+          </Card>
+        </div>
+
+        <Dialog
+          v-model:visible="showLifecycleDialog"
+          modal
+          :dismissableMask="!lifecycleBusy"
+          :header="lifecycleAction === 'purge' ? 'Purgar la iniciativa' : 'Archivar la iniciativa'"
+          :style="{ width: '95vw', maxWidth: '640px' }"
+        >
+          <div v-if="lifecycleTarget" class="space-y-4">
+            <p class="text-sm text-surface-700 break-words">
+              <span class="font-semibold">{{ lifecycleTarget.title }}</span>
+              <span class="text-surface-400"> — {{ lifecycleTarget.phase }} / {{ lifecycleTarget.status }}</span>
+            </p>
+
+            <template v-if="lifecycleAction === 'archive'">
+              <p class="text-sm text-surface-500">
+                Deja de estar activa y el cliente podrá dar de alta una nueva en
+                <span class="font-semibold">analysis</span>. No se borra nada: los artefactos
+                quedan de histórico y no contaminan a la nueva, porque cuelgan de este id.
+              </p>
+              <div class="space-y-2">
+                <span class="block text-[11px] uppercase tracking-wider text-amber-700/70">
+                  Las {{ lifecycleTarget.backlog.total }} historia(s) de esta iniciativa
+                </span>
+                <SelectButton
+                  v-model="lifecycleWithdraw"
+                  :options="withdrawOptions"
+                  optionLabel="label"
+                  optionValue="value"
+                  :allowEmpty="false"
+                />
+                <p class="text-xs text-surface-500">
+                  Retirarlas es un borrado blando: salen del backlog y del motor, pero se
+                  recuperan mirando los borrados. Si se quedan, se duplicarán con el plan nuevo.
+                </p>
+              </div>
+            </template>
+
+            <template v-else>
+              <Message severity="error" :closable="false">
+                Irreversible. Se borran la iniciativa, su épica, el roster, sus
+                {{ lifecycleTarget.backlog.total }} historia(s) con sus documentos, sus
+                {{ lifecycleTarget.artifacts.total }} artefacto(s) y las tareas de esas historias.
+                El proyecto y las tareas sin historia se conservan.
+              </Message>
+              <label class="space-y-2 block">
+                <span class="block text-[11px] uppercase tracking-wider text-red-700/70">
+                  Escribí el nombre del proyecto para confirmar
+                </span>
+                <!-- Fuera del <span>: esa clase lo pinta en mayusculas, y un nombre con
+                     mayusculas propias se leeria mal justo donde hay que copiarlo exacto. -->
+                <code class="block text-sm text-red-700 break-all">{{ selectedProject?.name }}</code>
+                <InputText v-model="lifecycleConfirmText" class="w-full" :placeholder="selectedProject?.name" />
+              </label>
+            </template>
+
+            <Message v-if="lifecycleError" severity="error" :closable="false">{{ lifecycleError }}</Message>
+
+            <div class="flex flex-wrap items-center justify-end gap-3 pt-2">
+              <Button
+                @click="closeLifecycleDialog"
+                :disabled="lifecycleBusy"
+                label="Cancelar"
+                severity="secondary"
+                outlined
+                size="small"
+              />
+              <Button
+                v-if="lifecycleAction === 'archive'"
+                @click="confirmArchiveInitiative"
+                :loading="lifecycleBusy"
+                label="Archivar"
+                severity="warn"
+                size="small"
+              />
+              <Button
+                v-else
+                @click="confirmPurgeInitiative"
+                :loading="lifecycleBusy"
+                :disabled="!purgeConfirmed"
+                label="Purgar definitivamente"
+                severity="danger"
+                size="small"
+              />
+            </div>
+          </div>
+        </Dialog>
+      </div>
+
       <div v-if="activeTab === 'config'" class="space-y-8">
         <div>
           <div class="flex items-center gap-2 mb-4">
@@ -1033,6 +1246,7 @@ const activeTab = ref('backlog');
 const tabOptions = [
   { label: 'Backlog', value: 'backlog' },
   { label: 'Conductor', value: 'conductor' },
+  { label: 'Método', value: 'method' },
   { label: 'Logs', value: 'logs' },
   { label: 'Semántico', value: 'semantic' },
   { label: 'Configuración', value: 'config' }
@@ -1184,6 +1398,9 @@ const resetDetails = () => {
   logFilters.value = {
     action_type: { value: [], matchMode: 'in' }
   };
+  initiatives.value = [];
+  initiativesError.value = null;
+  initiativesMessage.value = null;
   conductorAgentName.value = '';
   conductorForm.value = { agent_cmd: '', workflows: 'bmad-dev-story', model_escalation: '' };
   conductorState.value = null;
@@ -1313,6 +1530,135 @@ const saveProjectConstraints = async () => {
     isSavingConstraints.value = false;
   }
 };
+
+// Ciclo de vida de la iniciativa. Esta pestana existe porque toda la capa del metodo era
+// invisible desde la web y no habia forma de cerrar una iniciativa: `create_initiative` es
+// idempotente por (project_url, status='active'), asi que un proyecto al que le redefinen
+// el producto recibia siempre la vieja resumida en su fase. El unico camino era un SSH a
+// la base de produccion.
+const initiatives = ref([]);
+const initiativesLoading = ref(false);
+const initiativesError = ref(null);
+const initiativesMessage = ref(null);
+
+const showLifecycleDialog = ref(false);
+const lifecycleAction = ref(null);
+const lifecycleTarget = ref(null);
+const lifecycleBusy = ref(false);
+const lifecycleError = ref(null);
+const lifecycleConfirmText = ref('');
+// Retirar es lo que se quiere casi siempre —dejarlas las duplica con el plan nuevo—, pero
+// se pregunta en vez de suponerlo: es un borrado, aunque sea blando.
+const lifecycleWithdraw = ref(true);
+const withdrawOptions = [
+  { label: 'Retirarlas', value: true },
+  { label: 'Conservarlas', value: false }
+];
+
+// El nombre tecleado tiene que ser exacto. El servidor lo vuelve a comprobar: esto solo
+// apaga el boton, y un boton apagado no es una compuerta.
+const purgeConfirmed = computed(() => {
+  const esperado = String(selectedProject.value?.name || '').trim();
+  return esperado.length > 0 && lifecycleConfirmText.value.trim() === esperado;
+});
+
+const loadInitiatives = async ({ silent = false } = {}) => {
+  const url = selectedProject.value?.url || String(route.params.projectId || '').trim();
+  if (!url) return;
+
+  if (!silent) initiativesLoading.value = true;
+  initiativesError.value = null;
+
+  try {
+    const { data } = await apiFetchJson(`/dashboard/projects/${encodeURIComponent(url)}/initiatives`, {
+      credentials: 'include'
+    }, 'No se pudieron cargar las iniciativas.');
+
+    initiatives.value = Array.isArray(data?.initiatives) ? data.initiatives : [];
+  } catch (error) {
+    initiativesError.value = getApiErrorMessage(error, 'No se pudieron cargar las iniciativas.');
+    console.error('Failed to load initiatives', error);
+  } finally {
+    initiativesLoading.value = false;
+  }
+};
+
+const openLifecycleDialog = (initiative, action) => {
+  lifecycleTarget.value = initiative;
+  lifecycleAction.value = action;
+  lifecycleConfirmText.value = '';
+  lifecycleWithdraw.value = true;
+  lifecycleError.value = null;
+  showLifecycleDialog.value = true;
+};
+
+const closeLifecycleDialog = () => {
+  if (lifecycleBusy.value) return;
+  showLifecycleDialog.value = false;
+  lifecycleTarget.value = null;
+  lifecycleAction.value = null;
+};
+
+// Las dos acciones comparten todo menos la ruta y el cuerpo: el estado del dialogo, el
+// refresco de la lista y el mensaje. Lo unico que cambia es lo que se le cuenta despues.
+const runLifecycleAction = async (sufijo, body, mensaje, fallback) => {
+  const url = selectedProject.value?.url;
+  const initiative = lifecycleTarget.value;
+  if (!url || !initiative) return;
+
+  lifecycleBusy.value = true;
+  lifecycleError.value = null;
+  initiativesMessage.value = null;
+
+  try {
+    const { data } = await apiFetchJson(
+      `/dashboard/projects/${encodeURIComponent(url)}/initiatives/${encodeURIComponent(initiative.id)}/${sufijo}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body)
+      },
+      fallback
+    );
+
+    lifecycleBusy.value = false;
+    closeLifecycleDialog();
+    initiativesMessage.value = mensaje(data);
+    await loadInitiatives({ silent: true });
+    // El backlog de la ficha cambia con las dos acciones; recargarlo evita que la otra
+    // pestana siga ensenando historias que ya no estan. Se recarga el detalle, no el
+    // proyecto entero: `loadProject` vacia `selectedProject` y devolveria la pantalla al
+    // spinner despues de una accion que ya termino bien.
+    await fetchProjectDetails(url).catch(() => {});
+  } catch (error) {
+    lifecycleError.value = getApiErrorMessage(error, fallback);
+    console.error('Initiative lifecycle action failed', error);
+  } finally {
+    lifecycleBusy.value = false;
+  }
+};
+
+const confirmArchiveInitiative = () => runLifecycleAction(
+  'archive',
+  { withdraw_backlog: lifecycleWithdraw.value === true },
+  (data) => `Iniciativa archivada${data?.withdrawn_backlog_items
+    ? `, ${data.withdrawn_backlog_items} historia(s) retiradas`
+    : ''}. El cliente ya puede dar de alta una nueva.`,
+  'No se pudo archivar la iniciativa.'
+);
+
+const confirmPurgeInitiative = () => runLifecycleAction(
+  'purge',
+  { confirm: lifecycleConfirmText.value.trim() },
+  (data) => {
+    const d = data?.deleted || {};
+    return `Iniciativa purgada: ${d.backlog_items || 0} historia(s), ${d.artifacts || 0} artefacto(s), `
+      + `${d.story_documents || 0} documento(s) de historia, ${d.tasks || 0} tarea(s), `
+      + `${d.epics || 0} épica(s) y ${d.project_state || 0} fila(s) de roster.`;
+  },
+  'No se pudo purgar la iniciativa.'
+);
 
 const conductorStorageKey = (url) => `apts.conductor.agent_name.${url}`;
 
@@ -2011,6 +2357,9 @@ watch(() => route.params.projectId, () => {
 // a una pantalla con datos de hace diez segundos es justo lo que este refresco evita.
 watch(activeTab, (tab) => {
   if (tab === 'conductor') loadConductorState({ silent: true });
+  // Las iniciativas no se cargan con la ficha: solo se miran en su pestana, y traerlas al
+  // entrar evita pagar esas cuatro consultas en cada visita al proyecto.
+  if (tab === 'method') loadInitiatives({ silent: initiatives.value.length > 0 });
 });
 
 onMounted(() => {

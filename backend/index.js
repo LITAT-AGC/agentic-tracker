@@ -31,6 +31,7 @@ const {
   ENTITY_PROFILE_FIELDS
 } = require('./scripts/lib/method_resolver');
 const { createInitiative, setAgentRole, adoptBacklogItems } = require('./scripts/lib/method_bootstrap');
+const { loadInitiativesOverview, archiveInitiative, purgeInitiative } = require('./scripts/lib/method_lifecycle');
 // Deuda de que esto cierra: la llamada de embedding estaba implementada dos
 // veces —aquí y en la librería—, con el mismo `fetch`, las mismas cabeceras y el
 // mismo plazo copiados. Se conserva una sola: la de la librería.
@@ -6187,6 +6188,72 @@ app.put('/api/dashboard/projects/:url/method-conduction', requireAuth, async (re
       fallbackMessage: 'Failed to write method conduction',
       logMessage: 'Dashboard method conduction write failed',
       logContext: { project_url: req.params.url }
+    });
+  }
+});
+
+// Ciclo de vida de la iniciativa desde el panel. Toda la capa del método —iniciativa,
+// fase, épicas, artefactos— era invisible en la web, y ninguna de las operaciones
+// publicadas la cierra: un proyecto que quería re-planificar desde cero sólo salía de ahí
+// con un SSH a la base. La mecánica vive en scripts/lib/method_lifecycle.js; esto es la
+// ruta fina. No se publica como operación de agente a propósito: cerrar la propia
+// iniciativa es una decisión de operador, y el agente que se topó con esto acertó al
+// pararse en vez de improvisar.
+app.get('/api/dashboard/projects/:url/initiatives', requireAuth, async (req, res) => {
+  try {
+    const url = normalizeUrl(decodeURIComponent(req.params.url));
+    if (!url) return res.status(400).json({ error: 'Project url is required' });
+
+    return res.json(await loadInitiativesOverview(db, url));
+  } catch (error) {
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to read initiatives',
+      logMessage: 'Dashboard initiatives read failed',
+      logContext: { project_url: req.params.url }
+    });
+  }
+});
+
+app.post('/api/dashboard/projects/:url/initiatives/:id/archive', requireAuth, async (req, res) => {
+  try {
+    const url = normalizeUrl(decodeURIComponent(req.params.url));
+    if (!url) return res.status(400).json({ error: 'Project url is required' });
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+
+    const result = await archiveInitiative(db, {
+      initiative_id: req.params.id,
+      project_url: url,
+      withdraw_backlog: body.withdraw_backlog === true
+    });
+    return res.json(result);
+  } catch (error) {
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to archive initiative',
+      logMessage: 'Dashboard initiative archive failed',
+      logContext: { project_url: req.params.url, initiative_id: req.params.id }
+    });
+  }
+});
+
+// POST y no DELETE: el borrado exige un cuerpo con la confirmación, y un DELETE con cuerpo
+// es de los que algún proxy se come por el camino sin decirlo.
+app.post('/api/dashboard/projects/:url/initiatives/:id/purge', requireAuth, async (req, res) => {
+  try {
+    const url = normalizeUrl(decodeURIComponent(req.params.url));
+    if (!url) return res.status(400).json({ error: 'Project url is required' });
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+
+    const result = await purgeInitiative(db, {
+      initiative_id: req.params.id,
+      project_url: url,
+      confirm: body.confirm
+    });
+    return res.json(result);
+  } catch (error) {
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to purge initiative',
+      logMessage: 'Dashboard initiative purge failed',
+      logContext: { project_url: req.params.url, initiative_id: req.params.id }
     });
   }
 });
