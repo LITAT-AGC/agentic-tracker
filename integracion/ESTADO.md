@@ -1355,3 +1355,26 @@ despues es obligatoria: `EMBEDDING_DEFAULT_MODEL` no hace falta porque
 valor por defecto; `PUBLIC_APP_URL` cae en `CORS_ORIGIN`, que apunta al sitio bueno; y las tres
 `CLOUDFLARE_*` solo hacen falta el dia que el modelo por defecto pase a ser un `@cf/...`.
 
+
+**Comprobado despues del despliegue del 2026-08-14** (`d1c18c4`, **con migracion**: la 024, la
+segunda que corre en PROD desde el arranque de cero). La copia previa quedo en
+`/root/apts-backup-20260814-213603-1da2d92a6.dump` (648 KB). En la base del servidor, el paso
+terminal de `bmad-create-epics-and-stories` (`bmad:v6.8.0`, el 2) trae los dos descriptores con
+`backlog_items` marcado `required_for_close`, asi que el recableado alcanzo a la libreria ya sembrada
+sin re-sembrar. Por la URL publica, `skills.json` trae **23 operaciones** con `adopt_backlog_items`
+entre ellas, y el manifiesto publica `skills_json` en 1.1.0 y `surface_spec` en 1.1.1 con
+`schema_version` **1.1.2** (sin cambios: no hay clave nueva). Las seis comprobaciones del desplegador
+pasaron, el aviso de `/mcp` no salio, y el `index.html` publicado pide `assets/index-DtQKkcdH.js`,
+que esta en el dist recien compilado.
+
+**El estado de los dos proyectos vivos, leido en PROD despues de desplegar.** `tickets` es el caso
+que motivo el arreglo y sigue como estaba —el despliegue no repara datos—: iniciativa
+`f6e6e4e5` en `implementation`, epica `af4d8e88` con **0 hijos**, y **21 items sueltos**, todos
+`feature`, con prioridad y orden ya puestos (p1 `US-01`…`US-13` mas la historia `1.1`, p2 `US-14`…
+`US-17`, p3 `US-18`…`US-20`), asi que un barrido de `adopt_backlog_items` sin ids los adopta en el
+orden del plan. Los siete punteros del roster estan registrados —`opencode` entre ellos, como
+`bmad-agent-dev`— y los ocho artefactos del metodo escritos hasta `story_spec`. `fm-synth` tiene su
+epica con 25 hijos y 29 sueltos que **no** son plan: 23 `feature` y 2 `chore` archivados y 4 bugs en
+`review`. Ahi un barrido sin ids adoptaria los 25 archivados —los bugs quedan fuera por defecto—, que
+no es lo que nadie quiere: en ese proyecto la adopcion va con `backlog_item_ids` explicitos, si es
+que hace falta.
