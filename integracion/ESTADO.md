@@ -196,9 +196,15 @@ terminal con la pagina de codigos en OEM sigue enseñando mal el resto, y eso no
 arreglar desde dentro del conductor (`chcp 65001`).
 
 Cubierto ampliando `test_conductor_agent_env.js`, que ya levantaba un APTS de mentira y lanzaba
-el conductor de verdad: 30 comprobaciones, y las que importan son que el agente mudo sale con
+el conductor de verdad: 32 comprobaciones, y las que importan son que el agente mudo sale con
 24 y no con 20, que se le corta el arbol **de verdad** —el falso agente no llega a despertar—,
 que `--agent-silence 0` deja de vigilar, y que el BOM ya no esconde la primera clave.
+
+En PROD desde el 2026-08-15 (`d7498ba`), sin migraciones, comprobado contra
+`apts.informaticos.ar`: el manifiesto sirve los tres artefactos en 1.9.0, 1.10.0 y 1.2.0 con la
+linea de opencode corregida dentro de `registration_by_runtime`, y las descargas de
+`apts-loop.js?v=1.9.0` y `README.md?v=1.10.0` coinciden byte a byte con el repositorio
+—normalizando CRLF a LF, que es lo que checkoutea el servidor—.
 
 **La sesion del agente ya se ve mientras pasa, y se puede consultar despues.** De una
 ejecucion de media hora APTS guardaba lo que se puede medir DESDE FUERA —modelo, intento,
