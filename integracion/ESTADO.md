@@ -237,6 +237,10 @@ minutos de silencio y la ultima señal coincide con el final de las otras dos ca
 Las lineas `--agent-cmd` no cambian. Artefactos: el conductor a **1.11.0**, su README a
 **1.12.0** y `adapter_generator` a **1.5.0**.
 
+En PROD desde el 2026-08-15 (`7548dee`), sin migraciones, comprobado contra
+`apts.informaticos.ar`: el manifiesto sirve los tres artefactos en 1.11.0, 1.12.0 y 1.5.0, y las
+tres descargas coinciden byte a byte con el repositorio.
+
 **Un agente que ni falla ni termina ya no deja el ciclo plantado.** Todos los frenos del
 conductor median ENTRE vueltas —`--max-stalls` compara el estado del motor de una vuelta con
 el de la anterior, y para eso la vuelta tiene que terminar—, asi que dentro de una vuelta no
