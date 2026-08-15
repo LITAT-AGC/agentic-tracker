@@ -80,6 +80,18 @@ const main = async () => {
     assert.equal(LOOP_CONDUCTOR_INVOCATION_BY_RUNTIME.opencode.agent_cmd_windows, undefined);
   });
 
+  comprobar('opencode: el mensaje va antes de -f y la corrida es desatendida', () => {
+    const cmd = LOOP_CONDUCTOR_INVOCATION_BY_RUNTIME.opencode.agent_cmd;
+    // `-f/--file` es un flag de tipo array en yargs: se traga el positional que venga
+    // detras. Escrito al reves, opencode 1.18.18 muere con «File not found: Implementa la
+    // unidad...» antes de resolver el modelo y el conductor lo anota como agente_fallo.
+    // Se vio en un cliente real el 2026-08-15 y se reprodujo contra la CLI.
+    assert.ok(cmd.indexOf('"Implementa') < cmd.indexOf('-f '), 'el mensaje tiene que ir antes de -f');
+    // El hermano de --permission-mode acceptEdits: sin el, `opencode run` en headless
+    // auto-rechaza los permisos en "ask" y la sesion muere en el primer comando de shell.
+    assert.ok(cmd.includes('--auto'));
+  });
+
   comprobar('la variante de Windows no usa $(cat ...) y conserva el modo de permisos', () => {
     const enWindows = LOOP_CONDUCTOR_INVOCATION_BY_RUNTIME.claudecode.agent_cmd_windows;
     assert.ok(!enWindows.includes('$(cat'), 'cmd.exe no expande $(...)');

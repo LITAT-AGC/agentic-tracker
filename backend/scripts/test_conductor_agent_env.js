@@ -105,13 +105,22 @@ const crearApts = () => http.createServer((req, res) => {
 // Imprime por stderr lo que le diga el entorno y sale con el codigo que le digan. Por
 // stdout escribe una marca, que es lo que permite comprobar que el eco sigue llegando a
 // la consola despues de dejar de heredar la salida.
+//
+// Con FALSO_MUDO_MS hace otra cosa: saluda y se calla. Es el agente colgado —el que ni
+// falla ni termina— que dejaba el ciclo plantado hasta que una persona lo matara.
 const AGENTE_FALSO = `
-const dormir = Number(process.env.FALSO_DORMIR_MS || 0);
-setTimeout(() => {
+const mudo = Number(process.env.FALSO_MUDO_MS || 0);
+if (mudo) {
   process.stdout.write('marca-de-eco-del-agente\\n');
-  if (process.env.FALSO_SALIDA) process.stderr.write(process.env.FALSO_SALIDA + '\\n');
-  process.exit(Number(process.env.FALSO_CODIGO || 0));
-}, dormir);
+  setTimeout(() => { process.stdout.write('desperte\\n'); process.exit(0); }, mudo);
+} else {
+  const dormir = Number(process.env.FALSO_DORMIR_MS || 0);
+  setTimeout(() => {
+    process.stdout.write('marca-de-eco-del-agente\\n');
+    if (process.env.FALSO_SALIDA) process.stderr.write(process.env.FALSO_SALIDA + '\\n');
+    process.exit(Number(process.env.FALSO_CODIGO || 0));
+  }, dormir);
+}
 `;
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'apts-loop-prueba-'));
@@ -119,8 +128,13 @@ const rutaAgente = path.join(tmp, 'falso-agente.js');
 fs.writeFileSync(rutaAgente, AGENTE_FALSO);
 fs.writeFileSync(path.join(tmp, 'vacio.env'), '');
 
-const correr = (puerto, { salida, codigo, dormirMs = 0, escalera = 'modelo-a,modelo-b', arranqueMaxMs = 1500 }) => {
-  const diario = path.join(tmp, `diario-${Math.abs(salida.length + codigo + dormirMs)}-${escalera.length}.jsonl`);
+let corridas = 0;
+const correr = (puerto, {
+  salida, codigo, dormirMs = 0, escalera = 'modelo-a,modelo-b', arranqueMaxMs = 1500,
+  mudoMs = 0, silencioMs = null, dotenv = null,
+}) => {
+  corridas += 1;
+  const diario = path.join(tmp, `diario-${corridas}.jsonl`);
   try { fs.unlinkSync(diario); } catch (_) { /* no existia */ }
 
   return new Promise((resolve) => {
@@ -132,10 +146,12 @@ const correr = (puerto, { salida, codigo, dormirMs = 0, escalera = 'modelo-a,mod
       '--agent-name', AGENTE,
       '--agent-email', 'prueba@example.invalid',
       '--agent-cmd', `"${process.execPath}" "${rutaAgente}" {prompt_file} {model}`,
-      '--model-escalation', escalera,
+      // Sin escalera no se pasa la bandera: la linea de comandos que habla de modelos deja
+      // fuera la capa de entorno entera, y la prueba 13 necesita justo esa capa.
+      ...(escalera ? ['--model-escalation', escalera] : []),
       '--max-iterations', '1',
       '--journal', diario,
-      '--dotenv', path.join(tmp, 'vacio.env'),
+      '--dotenv', dotenv || path.join(tmp, 'vacio.env'),
       '--no-task-log',
       '--no-journal-remote',
     ], {
@@ -144,7 +160,11 @@ const correr = (puerto, { salida, codigo, dormirMs = 0, escalera = 'modelo-a,mod
         FALSO_SALIDA: salida,
         FALSO_CODIGO: String(codigo),
         FALSO_DORMIR_MS: String(dormirMs),
+        FALSO_MUDO_MS: String(mudoMs),
         APTS_LOOP_STARTUP_MAX_MS: String(arranqueMaxMs),
+        // Sin tocar salvo que la prueba lo pida: asi las otras corridas usan el valor por
+        // defecto de verdad (20 min), que no puede dispararse en una prueba de segundos.
+        ...(silencioMs == null ? {} : { APTS_LOOP_AGENT_SILENCE_MS: String(silencioMs) }),
         // La espera entre intentos, al minimo: lo que se mide es cuantos hubo, no cuanto
         // tardaron. Y los avisos, apagados: una prueba no manda Telegram.
         APTS_LOOP_RETRY_MS: '1',
@@ -200,6 +220,11 @@ const intentos = (r) => r.eventos.filter((e) => e.evento === 'agente');
     ok(r.codigoSalida === 20, 'sigue saliendo con 20', `salio ${r.codigoSalida}`);
     ok(parada(r).motivo === 'agente_fallo', 'sigue siendo agente_fallo', parada(r).motivo);
     ok(intentos(r).length === 2, 'gasta la escalera entera', `gasto ${intentos(r).length}`);
+    // Sin motivo reconocido, la ultima linea en prosa es lo unico que separa «el agente
+    // fallo» de la causa. El caso que lo pidio: una CLI diciendo «File not found: Implementa
+    // la unidad...» por una bandera mal ordenada, con el conductor reportando solo el 20.
+    ok((parada(r).detalle || '').includes('algo revento a mitad de la story'),
+      'y el detalle se lleva la ultima linea que escribio el agente', parada(r).detalle);
     console.log();
 
     console.log('3) el comando no existe: configuracion, no fallo del agente');
@@ -251,6 +276,58 @@ const intentos = (r) => r.eventos.filter((e) => e.evento === 'agente');
       'el mensaje de dentro del objeto llega al aviso');
     ok(!r.visto.includes('[object Object]'),
       'y no queda ni un [object Object] por el camino');
+    console.log();
+
+    console.log('9) el vigilante de silencio: un agente que ni falla ni termina');
+    // Es el caso de campo del 2026-08-15: la story implementada, el commit hecho, las tres
+    // capas de la revision adversaria lanzadas en paralelo y la sesion bloqueada esperando
+    // un retorno que no llego. Veinticinco minutos sin una linea, con el conductor latiendo.
+    r = await correr(puerto, {
+      salida: 'da igual', codigo: 0, mudoMs: 60000, silencioMs: 700, escalera: 'modelo-a',
+    });
+    ok(r.codigoSalida === 24, 'sale con 24 y no con 20', `salio ${r.codigoSalida}`);
+    ok(parada(r).motivo === 'agente_mudo', 'el motivo es agente_mudo', parada(r).motivo);
+    ok(r.eventos.some((e) => e.evento === 'agente_mudo' && e.silencio_ms >= 700),
+      'el diario deja el evento con cuanto silencio hubo');
+    ok(!r.visto.includes('desperte'),
+      'el agente no llego a despertar: se le corto el arbol de verdad');
+    ok(/sin salida durante/.test(JSON.stringify(intentos(r))),
+      'el intento se anota diciendo por que murio');
+    console.log();
+
+    console.log('10) y gasta la escalera, al reves que los codigos 21 a 23');
+    r = await correr(puerto, {
+      salida: 'da igual', codigo: 0, mudoMs: 60000, silencioMs: 700, escalera: 'modelo-a,modelo-b',
+    });
+    ok(intentos(r).length === 2, 'reintentar SI puede salir distinto, asi que reintenta', `gasto ${intentos(r).length}`);
+    ok(r.codigoSalida === 24, 'y si el ultimo tambien queda mudo, sale 24', `salio ${r.codigoSalida}`);
+    console.log();
+
+    console.log('11) con --agent-silence 0 no hay vigilante');
+    r = await correr(puerto, {
+      salida: 'da igual', codigo: 0, mudoMs: 900, silencioMs: 0, escalera: 'modelo-a',
+    });
+    ok(r.visto.includes('desperte'), 'el agente llega a despertar solo');
+    ok(r.codigoSalida !== 24, 'y nadie lo da por mudo', `salio ${r.codigoSalida}`);
+    console.log();
+
+    console.log('12) el freno viene puesto: 20 minutos por defecto');
+    r = await correr(puerto, { salida: 'trabajo hecho', codigo: 0 });
+    const arranque = r.eventos.find((e) => e.evento === 'arranque') || {};
+    ok(arranque.silencio_min === 20, 'el diario deja escrito el valor por defecto', String(arranque.silencio_min));
+    console.log();
+
+    console.log('13) un .env con BOM UTF-8 se lee igual');
+    // Node no lo ignora: la primera clave pasa a llamarse "﻿APTS_LOOP_MODEL" y el
+    // conductor abortaba con «falta configuracion» teniendo el valor delante. Se comprueba
+    // con --model porque es lo unico del .env que el conductor repite por consola: la
+    // identidad ya va por bandera en esta prueba.
+    const conBom = path.join(tmp, 'con-bom.env');
+    fs.writeFileSync(conBom, Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('APTS_LOOP_MODEL=modelo-del-dotenv\n', 'utf8')]));
+    r = await correr(puerto, { salida: 'trabajo hecho', codigo: 0, escalera: '', dotenv: conBom });
+    ok(r.visto.includes('modelo-del-dotenv'),
+      'la PRIMERA clave del archivo llega al conductor pese al BOM');
+    ok(/BOM/.test(r.visto), 'y el conductor dice que se lo encontro');
   } finally {
     servidor.close();
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) { /* da igual */ }

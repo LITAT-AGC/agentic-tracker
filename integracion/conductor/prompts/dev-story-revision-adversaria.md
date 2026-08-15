@@ -62,11 +62,26 @@ fully done") no se entrega hasta que el trabajo de ESTA unidad haya pasado una r
 adversaria. No es un repaso de cortesía ni un extra: es parte de esa validación, y sin
 ella el paso 8 no está hecho.
 
-Lanza las TRES capas A LA VEZ, cada una en su propio subagente, en una sola tanda de
-llamadas paralelas. Van en subagentes y no en tu propio hilo por una razón concreta:
-acabas de escribir este código, y aquí dentro ya no puedes hacerte el ciego. Una capa
-que hereda tu contexto hereda también tus puntos ciegos, y entonces no revisa: te da la
-razón.
+Las TRES capas van cada una en su propio subagente, con contexto limpio. Eso es lo
+innegociable: acabas de escribir este código, y aquí dentro ya no puedes hacerte el
+ciego. Una capa que hereda tu contexto hereda también tus puntos ciegos, y entonces no
+revisa: te da la razón.
+
+Lánzalas A LA VEZ, en una sola tanda, **si tu runtime lo sostiene**. Si no —si tu
+herramienta de subagentes no admite varios en vuelo, o si ya has visto que una tanda
+paralela se queda sin volver—, lánzalas UNA DETRÁS DE OTRA. Tarda más y da exactamente el
+mismo resultado: las tres capas son independientes por construcción, ninguna lee lo que
+encontró otra, y el paralelismo sólo compraba tiempo de reloj.
+
+Prefiere la vía secuencial si conduces con **opencode**: el 2026-08-15, en una corrida
+real, las tres capas lanzadas en paralelo trabajaron entre cero y cuatro minutos y se
+quedaron mudas, y la sesión principal se bloqueó esperando un retorno que no llegó nunca.
+No sabemos que esté arreglado. Una capa que no vuelve no es una revisión más floja: es una
+unidad que no cierra.
+
+Y no la esquives: si las tres capas no se pueden lanzar de ninguna de las dos formas,
+declara `HALT`, reporta el bloqueo y para. Revisar en tu propio hilo no cuenta como
+revisión adversaria, y el paso 8 no está hecho.
 
 - Blind Hunter. Dale SÓLO el diff de esta unidad (`git diff` contra el punto de partida,
   más los archivos nuevos). Nada de story, nada de criterios de aceptación, nada de

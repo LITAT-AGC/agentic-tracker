@@ -2553,7 +2553,19 @@ const integrationArtifacts = {
     // unico de este script que lo va— porque lo que viaja no son las decisiones del bucle
     // sino el contenido de la sesion. El bump es lo que permite enterarse de que la opcion
     // existe: quien se quede en 1.7.1 no tiene forma de ver una corrida por dentro.
-    artifactVersion: '1.8.0',
+    // 1.9.0: freno nuevo DENTRO de la vuelta. Hasta ahora todos median entre vueltas
+    // —`--max-stalls` compara el estado del motor de una vuelta con el de la anterior, y
+    // para eso la vuelta tiene que terminar—, asi que un agente que no falla y no termina
+    // dejaba el ciclo plantado indefinidamente sosteniendo el claim: un cliente de opencode
+    // lo vio el 2026-08-15, veinticinco minutos, y solo se salio matando a mano. Ahora
+    // `--agent-silence` (20 min por defecto, `0` lo apaga) corta el arbol del agente que
+    // deja de escribir y para con codigo propio (24) si el ultimo intento tambien queda
+    // mudo. Va PUESTO, unico freno que se estrena encendido, porque olvidarse de encenderlo
+    // cuesta la corrida entera y olvidarse de apagarlo cuesta un intento. Ademas, un `.env`
+    // con BOM UTF-8 ya se lee: `loadEnvFile` no lo ignora y dejaba la PRIMERA clave
+    // inservible, con el conductor diciendo «falta configuracion: --api-key» con la clave
+    // delante. Quien se quede en 1.8.0 conserva las dos formas de quedarse parado.
+    artifactVersion: '1.9.0',
     kind: 'loop_conductor',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -2593,7 +2605,12 @@ const integrationArtifacts = {
     // cierto al pasar a `stream-json`: la consola ya no se queda muda. Deja explicito que la
     // promesa del diario local («no contiene secretos») sigue en pie porque el contenido de
     // la sesion no pasa por el.
-    artifactVersion: '1.9.0',
+    // 1.10.0: documenta `--agent-silence` y el codigo 24, y corrige la linea de opencode por
+    // partida doble —el mensaje va ANTES de `-f`, que es un flag de tipo array y se tragaba
+    // el positional, y lleva `--auto`, sin el cual una corrida headless muere en el primer
+    // comando de shell—. Las dos cosas las trajo un cliente real el 2026-08-15 y la primera
+    // se reprodujo contra opencode 1.18.18.
+    artifactVersion: '1.10.0',
     kind: 'loop_conductor_manual',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -2614,13 +2631,21 @@ const integrationArtifacts = {
     // en vez de registrar la suya, que iría ligada al backlog item.
     // 1.1.1: esa explicación pasa a hablar de posesión, que es lo que el campo nuevo
     // separa. Sólo cambia el texto que lee el agente.
-    artifactVersion: '1.1.1',
+    // 1.2.0: el paralelismo de las tres capas pasa de exigencia a preferencia. Lo
+    // innegociable siempre fue el contexto limpio de cada capa, no que fueran a la vez: son
+    // independientes por construcción y lanzarlas en fila da el mismo resultado más
+    // despacio. Lo pidió la realidad —el 2026-08-15, con opencode, las tres capas paralelas
+    // se quedaron mudas y la sesión principal se bloqueó esperando un retorno que no
+    // llegó—, así que la plantilla nombra ese runtime y recomienda la vía secuencial. Y deja
+    // dicho que revisar en el propio hilo NO es una salida: si no hay subagentes, se declara
+    // HALT.
+    artifactVersion: '1.2.0',
     kind: 'loop_conductor_prompt',
     recommended: false,
     usagePriority: 'optional_entrypoint',
     optional: true,
     dependsOnArtifactIds: ['loop_conductor'],
-    selection_rule: 'Prompt template for the loop conductor (--prompt-file), replacing its built-in default. It adds an adversarial review gate before the dev-story validation step: three layers in parallel subagents under distinct lenses (Blind Hunter sees only the diff, Edge Case Hunter the boundaries, Acceptance Auditor only the story and its acceptance criteria), a triage that counts a finding only with file:line plus a concrete failure scenario, and the method\'s own {"goto":"step:5"} branch when something is confirmed. Download it only if you run the conductor and want the gate in the agent session; the engine gate (the required_for_close code_review artifact on the terminal dev-story step) applies either way. Placeholders substituted by the conductor: {story_id}, {agent_name}, {project_url}, {role}, {iteration}, {attempt}, {max_attempts}, {task_id}.',
+    selection_rule: 'Prompt template for the loop conductor (--prompt-file), replacing its built-in default. It adds an adversarial review gate before the dev-story validation step: three layers in SEPARATE subagents under distinct lenses (Blind Hunter sees only the diff, Edge Case Hunter the boundaries, Acceptance Auditor only the story and its acceptance criteria) — in parallel where the runtime sustains it, sequentially otherwise, which is the recommended way under opencode because a parallel batch was seen to hang there, a triage that counts a finding only with file:line plus a concrete failure scenario, and the method\'s own {"goto":"step:5"} branch when something is confirmed. Download it only if you run the conductor and want the gate in the agent session; the engine gate (the required_for_close code_review artifact on the terminal dev-story step) applies either way. Placeholders substituted by the conductor: {story_id}, {agent_name}, {project_url}, {role}, {iteration}, {attempt}, {max_attempts}, {task_id}.',
     description: 'Prompt template for the conductor that demands an adversarial review before a story closes.'
   }
 };

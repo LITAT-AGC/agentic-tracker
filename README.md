@@ -608,8 +608,14 @@ Y para opencode, que ni siquiera mete el prompt en la linea de shell y por eso v
 los dos sistemas:
 
 ```bash
-opencode run --format json -m {model} -f {prompt_file} "Implementa la unidad descrita en el archivo adjunto"
+opencode run --format json -m {model} --auto "Implementa la unidad descrita en el archivo adjunto" -f {prompt_file}
 ```
+
+El mensaje va **antes** de `-f`: ese flag es de tipo array y se traga el positional que venga
+detras, asi que al reves la CLI muere con `File not found: Implementa la unidad...` sin llegar
+a resolver el modelo. Y `--auto` es el equivalente de `--permission-mode acceptEdits`: en
+headless, `opencode run` auto-rechaza los permisos que su config deje en `ask` y la sesion
+muere en el primer comando de shell.
 
 El JSON no es decoracion: es lo unico que deja al conductor anotar **lo que costo cada
 story** —tokens, coste, turnos y el id de sesion— en vez de solo su duracion y su codigo de

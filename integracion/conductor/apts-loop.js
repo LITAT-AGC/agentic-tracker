@@ -77,6 +77,11 @@ const SALIDA = {
   limite_de_uso: 21,
   agente_no_ejecutable: 22,
   agente_sin_credenciales: 23,
+  // El agente no falló ni terminó: se quedó callado. No comparte código con el 20 por la
+  // misma razón que los tres de arriba —el 20 manda a buscar el problema en la story y
+  // aquí el problema es que la sesión no volvió—, y no comparte código con ellos porque
+  // sí gasta la escalera: reintentar SÍ puede salir distinto.
+  agente_mudo: 24,
 };
 
 // ---- condiciones del ENTORNO del agente ----
@@ -106,6 +111,41 @@ const COLA_MAX_BYTES = 4096;
 // nadie lo toca en una corrida normal, pero una prueba no puede tardar un minuto en
 // comprobar que el cerrojo cierra.
 const ARRANQUE_MAX_MS = entero(process.env.APTS_LOOP_STARTUP_MAX_MS, 60000);
+
+// ---- el agente que no falla y no termina ----
+//
+// Los frenos de este conductor medían todos ENTRE vueltas: `--max-stalls` compara el
+// estado del motor de una vuelta con el de la anterior, y para eso la vuelta tiene que
+// terminar. Dentro de una vuelta no había nada, y el hueco es real: un cliente de opencode
+// lo encontró el 2026-08-15 en el proyecto "tickets". El agente había implementado la
+// story entera, con las dos suites verdes y el commit hecho; al llegar a la revisión
+// adversaria lanzó las tres capas en subagentes paralelos y el proceso se quedó esperando
+// a que volvieran. Veinticinco minutos después las tres seguían mudas, el proceso gastaba
+// cuatro segundos de CPU y el conductor —que no ve dentro de la sesión del agente— seguía
+// latiendo tan campante, sosteniendo el claim. Sólo se salió de ahí matando a mano.
+//
+// La señal es el SILENCIO y no la duración: una story legítima puede tardar cuarenta
+// minutos, pero las dos CLIs publicadas hablan NDJSON mientras trabajan, así que una
+// sesión viva escribe algo mucho antes de veinte minutos. Un tope duro de duración
+// mataría corridas sanas y no distinguiría nada; éste distingue exactamente lo que hay
+// que distinguir, que es lento de colgado.
+//
+// Va PUESTO por defecto. Es la misma asimetría de siempre: olvidarse de encenderlo cuesta
+// una corrida desatendida que se queda plantada hasta que una persona la mire —o sea, el
+// caso entero que esto viene a cerrar— y olvidarse de apagarlo cuesta, como mucho, un
+// intento cortado que la escalera vuelve a lanzar. `--agent-silence 0` lo apaga.
+const SILENCIO_MIN_POR_DEFECTO = 20;
+
+// La bandera va en MINUTOS porque es lo que escribe una persona. El atajo en milisegundos
+// no es bandera y existe por el mismo motivo que `APTS_LOOP_STARTUP_MAX_MS`: nadie lo toca
+// en una corrida normal, pero una prueba no puede tardar veinte minutos en comprobar que el
+// vigilante corta. Gana sobre las otras dos capas, que es lo que lo hace útil para probar.
+const resolverSilencioMs = (args) => {
+  const crudo = entero(process.env.APTS_LOOP_AGENT_SILENCE_MS, -1);
+  if (crudo >= 0) return crudo;
+  const min = entero(args['agent-silence'], entero(process.env.APTS_LOOP_AGENT_SILENCE_MIN, SILENCIO_MIN_POR_DEFECTO));
+  return min * 60000;
+};
 
 const CONDICIONES_ENTORNO = [
   {
@@ -362,6 +402,17 @@ Frenos:
   --max-iterations N      tope duro de vueltas (por defecto 50). Los reintentos NO
                           consumen vueltas: una vuelta es una story, con sus intentos.
   --max-stalls N          vueltas seguidas sin que cambie nada antes de parar (por defecto 2)
+  --agent-silence MIN     APTS_LOOP_AGENT_SILENCE_MIN
+                          minutos que el agente puede pasar SIN escribir una sola línea
+                          antes de darlo por colgado y cortarle el árbol de procesos (por
+                          defecto 20; 0 lo apaga). Es el único freno que mide DENTRO de
+                          una vuelta: --max-stalls compara el estado del motor entre
+                          vueltas, y para eso la vuelta tiene que terminar. Lo que se mide
+                          es el silencio y no la duración: una story puede tardar cuarenta
+                          minutos, pero una sesión viva habla —las dos CLIs publicadas
+                          emiten NDJSON mientras trabajan—. Cortado así, el intento cuenta
+                          como fallido y la escalera sigue; si el último también queda
+                          mudo, se para con el código 24.
   --dry-run               resuelve e informa la primera decisión sin lanzar nada
   --no-task-log           APTS_LOOP_NO_TASK_LOG=1
                           no abrir una tarea por unidad en APTS. Por defecto SÍ se abre:
@@ -412,9 +463,11 @@ no vuelve a pagar los pasos que ya cerraron.
 Códigos de salida: 0 done · 1 configuración · 2 red · 10 blocked · 11 wait ·
 12 fuera de alcance · 13 estancado · 14 tope de iteraciones · 15 detenido ·
 20 el agente falló · 21 la CLI del agente agotó su límite de uso ·
-22 el comando de --agent-cmd no existe · 23 la CLI del agente no tiene credenciales.
+22 el comando de --agent-cmd no existe · 23 la CLI del agente no tiene credenciales ·
+24 el agente se quedó mudo.
 Del 21 al 23 no es la story: el agente no llegó a trabajar, así que no se gasta la
 escalera de modelos —el límite es de la CUENTA, no del modelo— y se para al primer intento.
+El 24 sí la gasta: un agente colgado puede no colgarse en el intento siguiente.
 `;
 
 // El prompt no reexplica el ciclo: apunta al manifiesto, que es la fuente autoritativa
@@ -550,17 +603,42 @@ class Parada extends Error {
 // bandera a `process.argv` sin cargar nada, y si falta mata el proceso con exit 9 y un
 // mensaje del runtime. O sea, se quedaría justo con el caso que aquí queremos reportar
 // bien.
+//
+// El BOM se quita antes de cargar, y no es un detalle de codificación: `loadEnvFile` NO
+// lo ignora, así que un `.env` guardado por el Bloc de notas o por `Set-Content` de
+// PowerShell deja la PRIMERA clave llamada "﻿APTS_API_KEY" —medido en Node 24.11.1—.
+// El síntoma es el peor posible: el conductor dice «falta configuración: --api-key /
+// APTS_API_KEY» con la clave delante, en el archivo, escrita bien. Lo encontró un cliente
+// real de opencode el 2026-08-15, cuyo plugin sí toleraba el BOM, así que la misma copia
+// del archivo funcionaba para una mitad de la corrida y no para la otra.
+//
+// Se resuelve copiando el archivo sin BOM a un temporal y cargando ÉSE, en vez de parsear
+// aquí: el parser de `.env` tiene comillas, escapes y valores multilínea, y una segunda
+// implementación se separaría de la de Node en el primer caso raro. El temporal se escribe
+// con permisos de sólo-dueño y se borra en el `finally`, porque es una copia de un archivo
+// de secretos.
 const cargarEnv = (ruta) => {
   const explicito = typeof ruta === 'string' && ruta.trim() ? ruta.trim() : '';
   const destino = path.resolve(explicito || '.env');
+  let copiaSinBom = null;
   try {
-    process.loadEnvFile(destino);
+    const crudo = fs.readFileSync(destino);
+    if (crudo.length >= 3 && crudo[0] === 0xef && crudo[1] === 0xbb && crudo[2] === 0xbf) {
+      copiaSinBom = path.join(os.tmpdir(), `${NOMBRE}-env-${process.pid}-${Date.now()}`);
+      fs.writeFileSync(copiaSinBom, crudo.subarray(3), { mode: 0o600 });
+      process.loadEnvFile(copiaSinBom);
+      log(`${destino} empieza con BOM UTF-8; se ignora al cargarlo (Node no lo hace solo y la primera clave quedaría inservible)`);
+    } else {
+      process.loadEnvFile(destino);
+    }
     return destino;
   } catch (error) {
     // Que falte no es error: la mayoría de las corridas pasan la identidad por entorno.
     // Señalado a mano y ausente, sí: quien escribe --dotenv espera que se lea.
     if (explicito) throw new ErrorConfig(`no se pudo leer --dotenv ${destino}: ${error.message}`);
     return null;
+  } finally {
+    if (copiaSinBom) { try { fs.unlinkSync(copiaSinBom); } catch (_error) { /* desechable */ } }
   }
 };
 
@@ -1383,6 +1461,7 @@ const MARCA = {
   estancado: '🔁', tope_iteraciones: '⏱', agente_fallo: '❌', desconocido: '❓',
   red: '📡',
   limite_de_uso: '🪫', agente_no_ejecutable: '🔧', agente_sin_credenciales: '🔑',
+  agente_mudo: '🔇',
 };
 
 const dormir = (ms) => new Promise((res) => setTimeout(res, ms));
@@ -1699,8 +1778,8 @@ const lanzarAgente = (cfg, contexto) => {
   //
   // La salida ya no se hereda entera: `stdio: 'inherit'` dejaba al conductor sin ver una
   // sola palabra de lo que el agente escribía, y por eso una CLI sin crédito y un bug de
-  // la story eran el mismo código 1. Ahora se hace de eco —cada trozo se reescribe tal
-  // cual, así que en consola se ve exactamente lo mismo que antes— y se guarda la cola.
+  // la story eran el mismo código 1. Ahora se hace de eco —cada trozo se reescribe según
+  // llega, así que en consola se ve lo mismo que antes— y se guarda la cola.
   // La entrada SÍ se hereda: el prompt viaja por archivo, pero `type X | claude` necesita
   // que el hijo tenga stdin.
   return new Promise((resolve) => {
@@ -1711,23 +1790,38 @@ const lanzarAgente = (cfg, contexto) => {
     });
 
     // Sólo la cola, y acotada: la salida de una story larga son megabytes y no hay
-    // ninguna razón para tenerla entera en memoria. Lo que se escribe al terminal es el
-    // Buffer original, así que el eco es byte a byte; el troceo en UTF-8 sólo puede
-    // estropear un carácter del buffer de búsqueda, que se compara contra patrones ASCII.
+    // ninguna razón para tenerla entera en memoria.
     let cola = '';
     // Buffer aparte y sólo de stdout: es donde las dos CLIs escriben su JSON, y mezclarlo
     // con stderr metería trazas de la propia CLI entre las líneas que hay que parsear.
     let salida = '';
+    // Cuándo se oyó al agente por última vez, por cualquiera de sus dos flujos. Es el
+    // reloj del vigilante de silencio: lo que se mide es que la sesión siga hablando, no
+    // que trabaje deprisa.
+    let ultimaSenal = Date.now();
+    let mudo = null;
+    let corteMudo = null;
     // El troceo del flujo parte caracteres UTF-8 por la mitad, y un `toString` por trozo
     // deja un carácter roto en cada frontera. Contra los patrones ASCII de las condiciones
     // de entorno daba igual; contra `JSON.parse` no, porque tira la línea entera. El
     // decodificador retiene los bytes incompletos hasta el trozo siguiente. Sólo para
     // stdout: al terminal se sigue escribiendo el Buffer original, así que el eco es byte
     // a byte como antes.
-    const decodificador = new StringDecoder('utf8');
+    //
+    // Y se echa el TEXTO decodificado, no el Buffer. Antes era byte a byte y eso partía
+    // caracteres en la frontera de trozo: un acento cuyos dos bytes caen en lecturas
+    // distintas llegaba a la consola como dos escrituras independientes, o sea como dos
+    // símbolos rotos. Cada flujo tiene el suyo porque son dos flujos: compartirlo mezclaría
+    // los bytes a medias de uno con los del otro. (Un terminal con la página de códigos en
+    // OEM sigue enseñando el resto mal: eso no lo puede arreglar el conductor desde dentro,
+    // se arregla con `chcp 65001`.)
+    const decodificadores = { estructurada: new StringDecoder('utf8'), suelta: new StringDecoder('utf8') };
     const eco = (destino, estructurada) => (trozo) => {
-      destino.write(trozo);
-      const texto = estructurada ? decodificador.write(trozo) : trozo.toString('utf8');
+      ultimaSenal = Date.now();
+      const texto = estructurada
+        ? decodificadores.estructurada.write(trozo)
+        : decodificadores.suelta.write(trozo);
+      if (texto) destino.write(texto);
       cola = (cola + texto).slice(-COLA_MAX_BYTES);
       if (estructurada) {
         salida = (salida + texto).slice(-RESUMEN_MAX_BYTES);
@@ -1741,8 +1835,37 @@ const lanzarAgente = (cfg, contexto) => {
     procesoAgente = hijo;
     const parar = vigilarAgente(cfg);
 
-    const terminar = (codigoCrudo, errorCrudo) => {
+    // El vigilante del silencio. Mira a menudo y mide poco: lo caro sería el reloj de
+    // pared, y aquí sólo se compara contra una marca que escriben los dos flujos.
+    const silencioMs = cfg.silencioMs > 0 ? cfg.silencioMs : 0;
+    const vigilante = silencioMs > 0
+      ? setInterval(() => {
+        const callado = Date.now() - ultimaSenal;
+        if (callado < silencioMs || mudo) return;
+        mudo = { ms: callado };
+        const min = Math.round(callado / 60000);
+        log(`el agente lleva ${min} min sin escribir una sola línea; se le corta el árbol de procesos`);
+        registrar(cfg, {
+          evento: 'agente_mudo',
+          iteracion: contexto.iteration,
+          intento: contexto.intento,
+          story_id: contexto.story_id,
+          silencio_ms: callado,
+        });
+        // Mismo corte que el de una orden del panel: matar sólo al hijo directo dejaría
+        // al agente vivo escribiendo en APTS mientras el conductor lo da por muerto.
+        corteMudo = matarArbol(hijo);
+      }, Math.max(200, Math.min(30000, Math.floor(silencioMs / 4))))
+      : null;
+    if (vigilante) vigilante.unref();
+
+    const terminar = async (codigoCrudo, errorCrudo) => {
       parar();
+      if (vigilante) clearInterval(vigilante);
+      // Cortar no termina cuando muere el hijo directo: en POSIX ése es el shell. Si el
+      // vigilante disparó, aquí se espera al remate antes de devolver el resultado, o el
+      // intento siguiente arrancaría con el anterior todavía vivo.
+      if (corteMudo) { await corteMudo; corteMudo = null; }
       procesoAgente = null;
       const ms = Date.now() - inicio;
 
@@ -1758,10 +1881,14 @@ const lanzarAgente = (cfg, contexto) => {
       // leyendo lo de siempre; y como la cola contiene ahora ese JSON, el reconocimiento
       // de condiciones de entorno encuentra dentro el texto del error igual que antes.
       const fallaEnJson = codigoCrudo === 0 && resumen && resumen.fallo;
-      const codigo = fallaEnJson ? -2 : codigoCrudo;
-      const error = errorCrudo || (fallaEnJson
-        ? `la CLI terminó con código 0 pero su resultado dice is_error (${resumen.subtipo || 'sin subtipo'})`
-        : null);
+      // Un agente cortado por mudo no puede contar como éxito aunque su CLI alcance a
+      // salir con 0 mientras se muere: lo que se sabe de él es que dejó de hablar.
+      const codigo = mudo ? (codigoCrudo === 0 ? -3 : codigoCrudo) : (fallaEnJson ? -2 : codigoCrudo);
+      const error = mudo
+        ? `sin salida durante ${Math.round(mudo.ms / 60000)} min: cortado por el vigilante de silencio`
+        : errorCrudo || (fallaEnJson
+          ? `la CLI terminó con código 0 pero su resultado dice is_error (${resumen.subtipo || 'sin subtipo'})`
+          : null);
 
       if (codigo === 0) {
         try { fs.unlinkSync(ficheroPrompt); } catch (_) { /* el prompt es desechable */ }
@@ -1772,7 +1899,7 @@ const lanzarAgente = (cfg, contexto) => {
       // La cola viaja con el resultado: quien decide si esto fue un fallo del agente o
       // de su entorno es el bucle, no esta función. Se emite en 'close' y no en 'exit'
       // justo por esto: `close` espera a que los flujos se hayan vaciado.
-      resolve({ codigo, ms, error, cola, resumen });
+      resolve({ codigo, ms, error, cola, resumen, mudo });
     };
 
     // Un proceso muerto por señal vuelve con `code` null: se normaliza a un código no cero
@@ -1812,6 +1939,9 @@ const construirConfig = (args, { esperando = false } = {}) => {
     telegramApi: (process.env.APTS_LOOP_TELEGRAM_API || 'https://api.telegram.org').trim(),
     maxIterations: entero(args['max-iterations'], 50),
     maxStalls: entero(args['max-stalls'], 2),
+    // En minutos por bandera y en milisegundos aquí dentro, para que no circulen dos
+    // unidades. `0` lo apaga.
+    silencioMs: resolverSilencioMs(args),
     dryRun: Boolean(args['dry-run']),
     // Escape para quien no quiera que el conductor escriba tareas en su proyecto. Va en
     // negativo —el registro está puesto por defecto— porque una ejecución sin rastro es
@@ -1894,9 +2024,33 @@ const describirIntentos = (intentos) => {
     return `el agente terminó con código ${i.exit_code}${i.error ? ` (${i.error})` : ''}`;
   }
   const detalle = intentos
-    .map((i) => `${i.intento}: ${i.modelo || 'modelo por defecto'} → código ${i.exit_code}`)
+    .map((i) => `${i.intento}: ${i.modelo || 'modelo por defecto'} → ${i.mudo ? 'mudo' : `código ${i.exit_code}`}`)
     .join('; ');
   return `el agente falló en los ${intentos.length} intentos (${detalle})`;
+};
+
+// La última línea EN PROSA que escribió el agente. Cuando el fallo no encaja en ninguna
+// condición reconocida, esto es lo único que separa «el agente falló» —que manda a mirar la
+// story— de la causa de verdad, y estaba tirándose: quedaba en la consola de la máquina que
+// lanzó el bucle y no llegaba ni al diario ni al aviso. El caso que lo pidió: una línea de
+// `--agent-cmd` mal formada, con la CLI diciendo exactamente qué le pasaba —«Error: File not
+// found: Implementa la unidad descrita en el archivo adjunto»— mientras el conductor
+// reportaba un escueto código 20.
+//
+// Se saltan las líneas JSON a propósito: con `--output-format stream-json` la última es
+// siempre el objeto `result`, que ya se lee entero por otro camino y aquí sólo sería ruido.
+// Los fallos fatales de una CLI salen por stderr y en prosa, que es justo lo que queda.
+const PISTA_MAX = 200;
+const ultimaLineaEnProsa = (cola) => {
+  const lineas = String(cola || '').split(/\r?\n/);
+  for (let i = lineas.length - 1; i >= 0; i -= 1) {
+    // Los colores ya no vienen —el agente no ve un terminal— pero una CLI puede escribirlos
+    // igualmente, y un escape ANSI dentro del diario no lo lee nadie.
+    const linea = lineas[i].replace(/\u001b\[[0-9;]*m/g, '').trim();
+    if (!linea || linea.startsWith('{') || linea.startsWith('[')) continue;
+    return linea.length > PISTA_MAX ? `${linea.slice(0, PISTA_MAX)}…` : linea;
+  }
+  return '';
 };
 
 // Se guarda aparte porque el manejador de errores de abajo necesita poder avisar, y para
@@ -1921,6 +2075,7 @@ const conducir = async (cfg, plantillaPrompt) => {
     agent_name: cfg.agentName,
     max_iterations: cfg.maxIterations,
     max_stalls: cfg.maxStalls,
+    silencio_min: cfg.silencioMs > 0 ? cfg.silencioMs / 60000 : 0,
     workflows: [...cfg.workflows],
     dry_run: cfg.dryRun,
     env_file: envCargado,
@@ -2075,7 +2230,7 @@ const conducir = async (cfg, plantillaPrompt) => {
       });
 
       ultimo = await lanzarAgente(cfg, { story_id: storyId, iteration: iteracion, intento, modelo, prompt });
-      intentos.push({ intento, modelo: modelo || null, exit_code: ultimo.codigo, error: ultimo.error });
+      intentos.push({ intento, modelo: modelo || null, exit_code: ultimo.codigo, error: ultimo.error, mudo: Boolean(ultimo.mudo) });
       // Se acumula haya ido bien o mal: un intento que reventó a mitad también se pagó, y
       // esconderlo del total daría una factura que sólo cuenta lo que salió bien.
       acumularGasto(ultimo.resumen);
@@ -2090,6 +2245,7 @@ const conducir = async (cfg, plantillaPrompt) => {
         exit_code: ultimo.codigo,
         ms: ultimo.ms,
         error: ultimo.error,
+        ...(ultimo.mudo ? { mudo: true, silencio_ms: ultimo.mudo.ms } : {}),
         // Sólo cuando la CLI habló JSON. Se escriben como campos y no dentro de una frase
         // para que el diario se pueda consultar: la pregunta que esto viene a contestar
         // —cuánto cuesta una story— es una suma, no una lectura.
@@ -2110,7 +2266,11 @@ const conducir = async (cfg, plantillaPrompt) => {
       // ¿Falló el agente, o falló su entorno? Se resuelve aquí y se usa más abajo,
       // después de la orden de parada: lo que pida una persona desde el panel gana
       // sobre cualquier diagnóstico automático.
-      const condicion = ultimo.codigo === 0 ? null : reconocerCondicion(ultimo.cola, ultimo.ms);
+      // Un intento cortado por mudo no se somete a los patrones: su cola es la de hace
+      // veinte minutos, y de esa sesión ya se sabe lo único que hay que saber. Sin esta
+      // guarda, un agente que se colgó justo después de imprimir un mensaje de límite de
+      // uso pararía la corrida con el motivo de al lado.
+      const condicion = (ultimo.codigo === 0 || ultimo.mudo) ? null : reconocerCondicion(ultimo.cola, ultimo.ms);
       const quedaban = cfg.escalera.length - intento;
 
       // Una historia cortada a mitad de paso se comporta igual que un agente que muere:
@@ -2176,10 +2336,18 @@ const conducir = async (cfg, plantillaPrompt) => {
     if (seguir) continue;
 
     if (ultimo.codigo !== 0) {
+      // Si el ÚLTIMO intento murió mudo, el motivo es ése y no `agente_fallo`: son dos
+      // cosas distintas que hacer —mirar la story contra mirar por qué la sesión del
+      // agente no vuelve— y con el 20 las dos se leían igual.
+      const mudoAlFinal = Boolean(ultimo.mudo);
+      // La última línea en prosa del agente. Con un motivo reconocido no hace falta —el
+      // detalle ya nombra la causa— pero aquí es lo único que separa «el agente falló» de
+      // por qué, y hasta ahora se quedaba en la consola de esta máquina.
+      const pista = mudoAlFinal ? '' : ultimaLineaEnProsa(ultimo.cola);
       await parar(cfg, {
-        motivo: 'agente_fallo',
-        detalle: describirIntentos(intentos),
-        codigo: SALIDA.agente_fallo,
+        motivo: mudoAlFinal ? 'agente_mudo' : 'agente_fallo',
+        detalle: describirIntentos(intentos) + (pista ? ` Última línea del agente: «${pista}»` : ''),
+        codigo: mudoAlFinal ? SALIDA.agente_mudo : SALIDA.agente_fallo,
         fase,
         storyId,
         iteracion,

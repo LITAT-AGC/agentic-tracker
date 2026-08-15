@@ -42,6 +42,15 @@ intercepta aunque venga detrás del script — y de forma asimétrica, además: 
 archivo existe deja pasar la bandera sin cargar nada, y si falta mata el proceso con
 `exit 9`.
 
+**Un `.env` que empiece con BOM UTF-8 se lee igual**, y eso hay que decirlo porque el
+lector de Node no lo ignora: la primera clave del archivo pasa a llamarse `﻿APTS_API_KEY`
+y el conductor abortaba con «falta configuración: `--api-key` / `APTS_API_KEY`» teniendo la
+clave delante, escrita bien, en el archivo que acababa de leer. Lo escriben el Bloc de
+notas y el `Set-Content` de PowerShell sin avisar, y otras herramientas lo toleran —el
+plugin de opencode, sin ir más lejos—, así que la misma copia del archivo funcionaba para
+media corrida y no para la otra media. Ahora el conductor lo quita al cargar y lo dice por
+consola.
+
 `--agent-name` debe ser la identidad **registrada como rol dev en el roster**
 (`set_agent_role`) y tiene que ser estable entre vueltas: es el puntero que sostiene el
 claim de la story. Si no lo es, el motor devuelve `wait` nombrando el rol que falta y el
@@ -71,13 +80,27 @@ APTS_LOOP_AGENT_CMD='claude -p "$(cat {prompt_file})" --model {model} --permissi
 APTS_LOOP_MODEL_ESCALATION='claude-sonnet-5,claude-opus-5'
 
 # Opencode — `-f` adjunta el archivo, así que el prompt no pasa por el shell
-APTS_LOOP_AGENT_CMD='opencode run --format json -m {model} -f {prompt_file} "Implementa la unidad descrita en el archivo adjunto"'
+APTS_LOOP_AGENT_CMD='opencode run --format json -m {model} --auto "Implementa la unidad descrita en el archivo adjunto" -f {prompt_file}'
 APTS_LOOP_MODEL_ESCALATION='anthropic/claude-sonnet-5,anthropic/claude-opus-5'
 ```
 
 Los nombres de modelo son de la CLI, no de APTS: el conductor los trata como texto opaco
 y los sustituye sin validarlos. Por eso la escalera de Opencode lleva `proveedor/modelo`
 y la de Claude Code no.
+
+**En la línea de Opencode el mensaje va ANTES de `-f`, y no es cosmético.** `-f/--file`
+es un flag de tipo array, así que se traga el positional que venga detrás: escrito al
+revés, la CLI muere con `Error: File not found: Implementa la unidad descrita en el
+archivo adjunto` antes siquiera de resolver el modelo, y el conductor lo anota como
+`agente_fallo` (código 20), que manda a buscar el problema en la story. Medido contra
+opencode 1.18.18.
+
+**Y `--auto` es lo que hace que la corrida sea desatendida de verdad**, igual que
+`--permission-mode acceptEdits` en Claude Code: sin él, `opencode run` en headless
+auto-rechaza todo permiso que su configuración deje en `ask` y la sesión muere en el
+primer comando de shell. Aprueba todo lo que no esté explícitamente denegado, así que la
+denegación explícita es tu único freno: si eso no te vale para este repositorio, quita
+`--auto` y conduce con la CLI delante.
 
 **En Windows el `$(cat ...)` no existe**: `shell: true` resuelve a `cmd.exe`, así que la
 forma equivalente es `type {prompt_file} | claude -p --model {model} --permission-mode acceptEdits --output-format stream-json --verbose`.
@@ -243,8 +266,39 @@ que `--no-task-log` la apaga de paso.
 |---|---|---|
 | `--max-iterations` | 50 | tope duro; red de seguridad contra un bucle desbocado |
 | `--max-stalls` | 2 | vueltas seguidas sin que cambie **nada** del estado del método |
+| `--agent-silence` | 20 min | el agente lleva ese rato **sin escribir una línea**: se le corta el árbol |
 | guarda de alcance | `bmad-dev-story` | el motor pide un paso que este conductor no conduce |
 | código del agente | 1 intento | el proceso del agente terminó distinto de 0 en **todos** sus intentos |
+
+### El agente que no falla y no termina
+
+`--agent-silence` es el único freno que mide **dentro** de una vuelta. Todos los demás
+comparan el estado del motor de una vuelta con el de la anterior, y para eso la vuelta
+tiene que terminar: mientras el proceso del agente siga vivo, el conductor late, sostiene
+el claim y espera. Sin límite.
+
+Ese hueco es real y se pagó. El 2026-08-15, en un cliente que conduce con opencode, el
+agente implementó la story entera —dos suites verdes, commit hecho—, lanzó las tres capas
+de la revisión adversaria en subagentes paralelos y se quedó esperando un retorno que no
+llegó. Veinticinco minutos después las tres seguían mudas, el proceso gastaba cuatro
+segundos de CPU y los latidos del conductor seguían frescos. Sólo se salió de ahí matando
+el proceso a mano.
+
+Lo que se mide es el **silencio**, no la duración. Una story legítima puede tardar
+cuarenta minutos, así que un tope duro de duración mataría corridas sanas sin distinguir
+nada; pero las dos CLIs publicadas emiten NDJSON mientras trabajan, de modo que una sesión
+viva habla mucho antes de veinte minutos. Cuenta cualquier byte por cualquiera de los dos
+flujos.
+
+Cortado así, el intento cuenta como **fallido** y la escalera sigue: a diferencia de los
+códigos 21–23, aquí reintentar sí puede salir distinto. Si el último intento también queda
+mudo, se para con el **código 24** (`agente_mudo`) y no con el 20, que manda a buscar el
+problema en la story. El diario deja un evento `agente_mudo` con `silencio_ms`.
+
+Va **puesto por defecto**, único freno que se estrena encendido, por la asimetría de
+siempre: olvidarse de encenderlo cuesta una corrida desatendida plantada hasta que una
+persona la mire, y olvidarse de apagarlo cuesta, como mucho, un intento cortado que la
+escalera vuelve a lanzar. `--agent-silence 0` lo apaga.
 
 La huella de estancamiento se compone en el cliente con lo que `apts_status` ya
 devuelve —fase, `next`, rol, `workflow_key`, `step_key`, `target_id` y el reparto del
@@ -377,9 +431,9 @@ bajarse. Son opcionales de verdad —el conductor trae su plantilla por defecto 
 que no bajarlas no rompe nada.
 
 **Revisión adversaria.** Reproduce dentro de la sesión del agente lo que
-`bmad-code-review` describe y nunca ejecuta: tres capas en subagentes paralelos —Blind
-Hunter (sólo el diff), Edge Case Hunter (los bordes) y Acceptance Auditor (sólo la story
-y sus criterios)— con triage. Van en subagentes y no en el hilo principal porque ese hilo
+`bmad-code-review` describe y nunca ejecuta: tres capas en subagentes —Blind Hunter (sólo
+el diff), Edge Case Hunter (los bordes) y Acceptance Auditor (sólo la story y sus
+criterios)— con triage. Van en subagentes y no en el hilo principal porque ese hilo
 acaba de escribir el código: una capa que hereda su contexto hereda sus puntos ciegos.
 Un hallazgo cuenta sólo con `archivo:línea` y un escenario de fallo concreto; lo demás se
 anota y no se corrige. Si queda alguno confirmado, la validación del paso 8 ha fallado y
@@ -395,7 +449,18 @@ sin él se rechaza con `ok:false` y la story no cierra. La plantilla vale tambi�
 servidor que todavía no tenga la compuerta —ahí ese `content` simplemente no se captura—,
 así que no hay que sincronizar el despliegue con el reinicio del conductor.
 
-Cuesta: tres subagentes por story, y en reloj entre cuatro y ocho minutos más por vuelta.
+**En paralelo si tu runtime lo sostiene; en fila si no.** Lo innegociable es el contexto
+limpio de cada capa, no que vayan a la vez: son independientes por construcción —ninguna
+lee lo que encontró otra— así que lanzarlas una detrás de otra da el mismo resultado más
+despacio. Si conduces con **opencode**, prefiere la vía secuencial: el 2026-08-15, en una
+corrida real, las tres capas paralelas trabajaron entre cero y cuatro minutos, se quedaron
+mudas y la sesión principal se bloqueó esperando un retorno que no llegó. Es exactamente el
+caso que el freno de silencio corta ahora, pero cortar es el segundo mejor final. Lo que la
+plantilla **no** admite es revisar en el hilo principal: sin subagentes se declara `HALT` y
+se reporta el bloqueo.
+
+Cuesta: tres subagentes por story, y en reloj entre cuatro y ocho minutos más por vuelta
+si van en paralelo; el triple de eso si van en fila.
 
 ## Avisos al parar
 
@@ -475,12 +540,24 @@ operador que puede colgarse.
 | 21 | la CLI del agente agotó su límite de uso |
 | 22 | el comando de `--agent-cmd` no se pudo ejecutar |
 | 23 | la CLI del agente rechazó sus credenciales |
+| 24 | el agente se quedó mudo y hubo que cortarlo (`--agent-silence`) |
 
 No hay código nuevo para "falló incluso después de escalar": el motivo es el mismo y el
 detalle lleva la historia — `el agente falló en los 3 intentos (1: sonnet → código 1;
 2: sonnet → código 1; 3: opus → código 1)`, en consola, en el diario y en el aviso.
 
-Del **21 al 23** sí lo hay, y el siguiente apartado explica por qué.
+Y con el **20**, el detalle se lleva además la **última línea en prosa** que escribió el
+agente. Cuando el fallo no encaja en ninguna condición reconocida, eso es lo único que
+separa «el agente falló» —que manda a mirar la story— de la causa de verdad, y antes se
+quedaba sólo en la consola de la máquina que lanzó el bucle: un `--agent-cmd` mal formado,
+por ejemplo, hace que la CLI diga exactamente qué le pasa mientras el conductor reporta un
+escueto código 20. Se saltan las líneas JSON a propósito —con `stream-json` la última es
+siempre el objeto `result`, que ya se lee por otro camino— así que lo que queda es lo que
+la CLI escribió por stderr, que es donde salen sus errores fatales.
+
+Del **21 al 23** sí lo hay, y el siguiente apartado explica por qué. El **24** es de otra
+familia: ahí el agente no es que no llegara a trabajar, es que no volvió — sí gasta la
+escalera, y lo cuenta el apartado del freno de silencio.
 
 ## Cuando el que falla es el entorno y no la story
 

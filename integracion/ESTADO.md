@@ -13,7 +13,7 @@ llego hasta aqui: eso esta en el historial de git.
 | Manifiesto | `GET /api/public/integrar`, `schema_version` 1.1.3 |
 | Guia para personas | `GET /api/public/integrar/guia`, HTML renderizado del manifiesto |
 | Runtimes soportados | Dos: Claude Code y opencode |
-| Artefactos publicados | 8; el conductor en `artifact_version` 1.7.1 y su README en 1.8.0, `adapter_generator` en 1.3.0, `loop_prompt_code_review`, `agent_guidelines` y `surface_spec` en 1.1.1, `skill_markdown` y `skills_json` en 1.1.0 |
+| Artefactos publicados | 8; el conductor en `artifact_version` 1.9.0 y su README en 1.10.0, `adapter_generator` en 1.3.0, `loop_prompt_code_review` en 1.2.0, `agent_guidelines` y `surface_spec` en 1.1.1, `skill_markdown` y `skills_json` en 1.1.0 |
 | Descargas necesarias para **llamar** a las operaciones | Ninguna |
 | Descargas necesarias para **conducir** | El spec y el generador (agentes y comandos); el conductor y su README si se quiere el bucle desatendido, y su plantilla de revision si se quiere ademas la compuerta dentro de la sesion del agente |
 
@@ -110,6 +110,95 @@ El coste esta medido, porque el manifiesto lo lee todo cliente en el arranque: *
 el bucle deje de ser descubrible solo por casualidad.
 
 En PROD desde el 2026-08-15 (`dee0746`), comprobado contra `apts.informaticos.ar`.
+
+**Un agente que ni falla ni termina ya no deja el ciclo plantado.** Todos los frenos del
+conductor median ENTRE vueltas —`--max-stalls` compara el estado del motor de una vuelta con
+el de la anterior, y para eso la vuelta tiene que terminar—, asi que dentro de una vuelta no
+habia nada. Lo encontro un cliente de opencode el 2026-08-15 en el proyecto "tickets": el
+agente implemento la story entera (dos suites verdes, commit hecho), lanzo las tres capas de
+la revision adversaria en subagentes paralelos y se quedo esperando un retorno que no llego.
+Veinticinco minutos despues las tres seguian mudas, el proceso gastaba cuatro segundos de CPU
+y los latidos del conductor seguian frescos sosteniendo el claim. Solo se salio matando a
+mano, dos veces, con dos variantes de modelo distintas.
+
+Ahora `--agent-silence` corta el arbol del agente que pasa N minutos **sin escribir una sola
+linea**. Se mide el silencio y no la duracion: una story legitima puede tardar cuarenta
+minutos, asi que un tope duro de duracion mataria corridas sanas sin distinguir nada, pero las
+dos CLIs publicadas emiten NDJSON mientras trabajan, de modo que una sesion viva habla mucho
+antes de veinte minutos. Cuenta cualquier byte por cualquiera de los dos flujos, que es lo que
+hace que la señal no dependa de que la CLI escriba por el que esperabamos.
+
+Cortado asi, el intento cuenta como fallido y **gasta la escalera**, al reves que los codigos
+21 a 23: alli reintentar no puede salir distinto —el limite de uso es de la cuenta, el binario
+que no existe sigue sin existir— y aqui si. Si el ultimo intento tambien queda mudo se para
+con codigo propio, **24** (`agente_mudo`), y no con el 20, que manda a buscar el problema en la
+story. Y un intento cortado por mudo no se somete a los patrones del entorno: su cola es la de
+hace veinte minutos, y sin esa guarda un agente colgado justo despues de imprimir un mensaje
+de limite de uso pararia la corrida con el motivo de al lado.
+
+Va **PUESTO por defecto**, 20 minutos, unico freno que se estrena encendido. La asimetria
+decide, como con `--session-stream` pero al reves: olvidarse de encenderlo cuesta la corrida
+desatendida entera —que es el caso que esto viene a cerrar— y olvidarse de apagarlo cuesta,
+como mucho, un intento cortado que la escalera vuelve a lanzar. `--agent-silence 0` lo apaga.
+
+**Y la revision adversaria deja de exigir paralelismo.** Lo innegociable siempre fue el
+contexto limpio de cada capa —el hilo que acaba de escribir el codigo no puede hacerse el
+ciego— y no que las tres fueran a la vez: son independientes por construccion, ninguna lee lo
+que encontro otra, y el paralelismo solo compraba tiempo de reloj. La plantilla
+(`loop_prompt_code_review` 1.2.0) pide la tanda paralela **si el runtime la sostiene**,
+recomienda la fila para opencode nombrando lo que se vio, y cierra la unica salida falsa que
+quedaba: revisar en el hilo principal no cuenta, y sin subagentes se declara `HALT`.
+
+**Tres cosas mas de la misma corrida, y las tres eran defectos de APTS.** La linea de opencode
+que publica el manifiesto, `opencode run --format json -m {model} -f {prompt_file} "Implementa
+la unidad…"`, **no funciona**: `-f/--file` es un flag de tipo array y se traga el positional
+que venga detras, asi que la CLI muere con «Error: File not found: Implementa la unidad
+descrita en el archivo adjunto» antes de resolver el modelo y el conductor lo anota como
+`agente_fallo` (exit 20). Reproducido aqui contra opencode 1.18.18. El mensaje pasa a ir ANTES
+de `-f`, y de paso la linea gana `--auto`, que es el hermano de `--permission-mode
+acceptEdits` y le faltaba por el mismo motivo por el que le faltaba a la variante de Windows:
+sin el, `opencode run` en headless auto-rechaza los permisos que su config deja en `ask` y la
+sesion muere en el primer comando de shell. Una linea publicada para una corrida DESATENDIDA
+que se planta esperando una aprobacion que nadie va a dar no sirve de nada. El auto-chequeo del
+arranque ya ataba las tres copias, asi que las tres se movieron juntas; el test gana ademas una
+comprobacion de que el mensaje va delante de `-f`, que es lo que ninguna copia podia detectar
+por si sola.
+
+Y un `.env` con **BOM UTF-8** ya se lee. `process.loadEnvFile` no lo ignora —medido en Node
+24.11.1—, asi que la primera clave del archivo pasa a llamarse `﻿APTS_API_KEY` y el
+conductor abortaba con «falta configuracion: --api-key / APTS_API_KEY» teniendo la clave
+delante, escrita bien, en el archivo que acababa de leer. Lo escriben el Bloc de notas y el
+`Set-Content` de PowerShell sin avisar, y el plugin de opencode si lo toleraba, asi que la
+misma copia del archivo funcionaba para media corrida y no para la otra media. Se resuelve
+copiando el archivo sin BOM a un temporal de solo-dueño y cargando ESE, en vez de parsear a
+mano: el formato tiene comillas, escapes y valores multilinea, y una segunda implementacion se
+separaria de la de Node en el primer caso raro.
+
+De ese mismo caso sale una mejora que no depende de ninguna CLI: la parada con codigo 20 se
+lleva ahora la **ultima linea en prosa** que escribio el agente. Cuando el fallo no encaja en
+ninguna condicion reconocida, eso es lo unico que separa «el agente fallo» de la causa, y se
+quedaba en la consola de la maquina que lanzo el bucle sin llegar al diario ni al aviso —el
+operador tuvo que leerla a mano para descubrir lo del `-f`—. Se saltan las lineas JSON a
+proposito: con `stream-json` la ultima es siempre el objeto `result`, que ya se lee por otro
+camino, asi que lo que queda es el stderr, que es donde una CLI escribe sus errores fatales.
+
+Descartado, en cambio, validar la linea de `--agent-cmd` al arrancar, que era lo que pedia el
+informe: el conductor trata ese comando como opaco a proposito —«no sabe que hay al otro
+lado»— y meterle conocimiento de la sintaxis de yargs de opencode lo convertiria en algo que
+hay que actualizar cada vez que una CLI cambie sus banderas. La linea publicada arreglada, el
+auto-chequeo que ata sus tres copias y la ultima linea en prosa cubren el caso sin eso.
+
+El eco del agente pasa a escribir el TEXTO decodificado y no el Buffer. Antes era byte a byte y
+eso partia caracteres en la frontera de trozo —un acento cuyos dos bytes caen en lecturas
+distintas llegaba como dos escrituras rotas—, con un decodificador por flujo porque compartirlo
+mezclaria los bytes a medias de uno con los del otro. Lo que **no** arregla, y se dice: un
+terminal con la pagina de codigos en OEM sigue enseñando mal el resto, y eso no se puede
+arreglar desde dentro del conductor (`chcp 65001`).
+
+Cubierto ampliando `test_conductor_agent_env.js`, que ya levantaba un APTS de mentira y lanzaba
+el conductor de verdad: 30 comprobaciones, y las que importan son que el agente mudo sale con
+24 y no con 20, que se le corta el arbol **de verdad** —el falso agente no llega a despertar—,
+que `--agent-silence 0` deja de vigilar, y que el BOM ya no esconde la primera clave.
 
 **La sesion del agente ya se ve mientras pasa, y se puede consultar despues.** De una
 ejecucion de media hora APTS guardaba lo que se puede medir DESDE FUERA —modelo, intento,

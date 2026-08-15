@@ -43,7 +43,22 @@ const LOOP_CONDUCTOR_INVOCATION_BY_RUNTIME = {
   opencode: {
     // `-f` adjunta el archivo, asi que el prompt nunca pasa por la linea de shell y
     // esta forma vale igual en Windows: no necesita variante.
-    agent_cmd: 'opencode run --format json -m {model} -f {prompt_file} "Implementa la unidad descrita en el archivo adjunto"',
+    //
+    // El MENSAJE VA ANTES DE `-f`, y no es cosmetico: en opencode 1.18.18 `-f/--file` es
+    // un flag de tipo array (yargs) y se traga el positional que venga detras, asi que la
+    // forma obvia —`-f {prompt_file} "mensaje"`— muere con «Error: File not found:
+    // Implementa la unidad descrita en el archivo adjunto» antes de resolver el modelo, y
+    // el conductor lo reporta como `agente_fallo` (exit 20), que manda a buscar el fallo
+    // en la story. Lo encontro un cliente real el 2026-08-15 y se reprodujo aqui contra la
+    // CLI de verdad. `--auto` es boolean, asi que puede ir donde sea.
+    //
+    // `--auto` es el hermano de `--permission-mode acceptEdits`: en headless, `opencode
+    // run` AUTO-RECHAZA los permisos que su config deja en "ask", de modo que sin el la
+    // sesion muere en el primer comando de shell. Es peligroso por definicion —aprueba
+    // todo lo que no este explicitamente denegado— y va en la linea publicada por la misma
+    // razon que su equivalente de Claude Code: esta linea es la de una corrida DESATENDIDA,
+    // y una que se planta esperando una aprobacion que nadie va a dar no sirve de nada.
+    agent_cmd: 'opencode run --format json -m {model} --auto "Implementa la unidad descrita en el archivo adjunto" -f {prompt_file}',
     model_escalation_example: 'anthropic/claude-sonnet-5,anthropic/claude-opus-5'
   }
 };
