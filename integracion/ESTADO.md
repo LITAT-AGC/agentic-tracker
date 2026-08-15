@@ -190,6 +190,12 @@ parada salta las trazas pero no las de ERROR.
 `schema_version` no cambia: no hay clave nueva, solo cambia el VALOR de `loop_agent_cmd`, la
 misma regla con la que subieron 1.1.1, 1.1.2 y 1.1.3.
 
+En PROD desde el 2026-08-15 (`6eb50a5`), sin migraciones, comprobado contra
+`apts.informaticos.ar`: el manifiesto sirve los cuatro artefactos en 1.10.0, 1.11.0, 1.4.0 y
+1.3.0 con la linea de opencode ya con `--print-logs` dentro de `registration_by_runtime`, y las
+cuatro descargas coinciden byte a byte con el repositorio —normalizando CRLF a LF, que es lo que
+checkoutea el servidor—.
+
 **Un agente que ni falla ni termina ya no deja el ciclo plantado.** Todos los frenos del
 conductor median ENTRE vueltas —`--max-stalls` compara el estado del motor de una vuelta con
 el de la anterior, y para eso la vuelta tiene que terminar—, asi que dentro de una vuelta no
