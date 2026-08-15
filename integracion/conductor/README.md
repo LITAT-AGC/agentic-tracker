@@ -80,7 +80,7 @@ APTS_LOOP_AGENT_CMD='claude -p "$(cat {prompt_file})" --model {model} --permissi
 APTS_LOOP_MODEL_ESCALATION='claude-sonnet-5,claude-opus-5'
 
 # Opencode — `-f` adjunta el archivo, así que el prompt no pasa por el shell
-APTS_LOOP_AGENT_CMD='opencode run --format json -m {model} --auto "Implementa la unidad descrita en el archivo adjunto" -f {prompt_file}'
+APTS_LOOP_AGENT_CMD='opencode run --format json --print-logs -m {model} --auto "Implementa la unidad descrita en el archivo adjunto" -f {prompt_file}'
 APTS_LOOP_MODEL_ESCALATION='anthropic/claude-sonnet-5,anthropic/claude-opus-5'
 ```
 
@@ -101,6 +101,33 @@ auto-rechaza todo permiso que su configuración deje en `ask` y la sesión muere
 primer comando de shell. Aprueba todo lo que no esté explícitamente denegado, así que la
 denegación explícita es tu único freno: si eso no te vale para este repositorio, quita
 `--auto` y conduce con la CLI delante.
+
+**Pero `--auto` no alcanza a los subagentes, y eso cuelga la corrida entera.** Comprobado
+contra opencode 1.18.18 leyendo su binario, son dos cosas que se componen: una sesión de
+subagente no hereda del padre más que sus `deny` (y `external_directory`), así que el
+permiso que `--auto` concedió no le llega; y `--auto` no es una postura de permisos sino un
+contestador de eventos cuyo manejador filtra por sesión, así que la petición de una sesión
+hija no se aprueba **ni se rechaza**: queda abierta para siempre, la herramienta `task` del
+padre nunca vuelve y el proceso se planta sin gastar CPU. `--yolo` y
+`--dangerously-skip-permissions` son alias de `--auto`; mismo código, misma trampa.
+
+Le costó dos corridas a un cliente real el 2026-08-15, las dos en la revisión adversaria,
+que es justo el paso que usa subagentes. **Lo cierra el adaptador de opencode que genera
+APTS**: su plugin aplana a `allow` los permisos que quedarían en `ask` cuando el conductor
+se anuncia en el entorno (`APTS_UNATTENDED=1`, que este script pone al lanzar al agente).
+El `opencode.json` comiteado conserva su `ask` para cuando haya una persona delante. Si
+conduces opencode con un adaptador que no salió de APTS, o con uno anterior al 2026-08-15,
+regenéralo: sin ese plugin, cualquier subagente que necesite la shell cuelga la vuelta
+hasta que el freno de silencio la corte.
+
+**`--print-logs` no está para leerlo**: es lo que le da oído al freno de silencio. El
+stream `--format json` de opencode descarta todo evento cuya sesión no sea la principal y
+sólo emite una herramienta cuando ya terminó, de modo que el proceso calla durante **toda**
+herramienta larga —un subagente, una suite de veinte minutos— aunque esté trabajando a
+pleno. `--print-logs` manda el registro de la CLI a stderr, que es un flujo que el vigilante
+cuenta igual, y así veinte minutos de silencio vuelven a significar veinte minutos sin pasar
+nada. Si escribes tu propia línea y la quitas, quítale también el freno (`--agent-silence 0`)
+o cortará corridas sanas.
 
 **En Windows el `$(cat ...)` no existe**: `shell: true` resuelve a `cmd.exe`, así que la
 forma equivalente es `type {prompt_file} | claude -p --model {model} --permission-mode acceptEdits --output-format stream-json --verbose`.
@@ -282,13 +309,21 @@ agente implementó la story entera —dos suites verdes, commit hecho—, lanzó
 de la revisión adversaria en subagentes paralelos y se quedó esperando un retorno que no
 llegó. Veinticinco minutos después las tres seguían mudas, el proceso gastaba cuatro
 segundos de CPU y los latidos del conductor seguían frescos. Sólo se salió de ahí matando
-el proceso a mano.
+el proceso a mano. (La causa de aquel cuelgue está arriba, en `--auto`, y ya está cerrada;
+el freno se queda porque un agente puede quedarse mudo de muchas otras formas.)
 
 Lo que se mide es el **silencio**, no la duración. Una story legítima puede tardar
 cuarenta minutos, así que un tope duro de duración mataría corridas sanas sin distinguir
-nada; pero las dos CLIs publicadas emiten NDJSON mientras trabajan, de modo que una sesión
-viva habla mucho antes de veinte minutos. Cuenta cualquier byte por cualquiera de los dos
-flujos.
+nada. Cuenta cualquier byte por cualquiera de los dos flujos.
+
+**Y lo que se oye depende de la línea que le pases.** Que una CLI hable NDJSON no basta:
+el stream `--format json` de opencode descarta todo evento cuya sesión no sea la principal
+y sólo emite una herramienta cuando ya terminó, así que el proceso calla durante **toda**
+herramienta larga aunque esté trabajando a pleno — una revisión adversaria en subagentes
+calla de principio a fin. Por eso la línea publicada lleva `--print-logs`: el registro de
+la CLI sale por stderr, el vigilante lo cuenta, y el silencio vuelve a significar lo que
+dice. Con una línea propia sin esa bandera, veinte minutos es un tope de duración
+disfrazado; ahí, o la pones, o subes el margen, o apagas el freno.
 
 Cortado así, el intento cuenta como **fallido** y la escalera sigue: a diferencia de los
 códigos 21–23, aquí reintentar sí puede salir distinto. Si el último intento también queda

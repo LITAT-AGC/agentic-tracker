@@ -2489,7 +2489,16 @@ const integrationArtifacts = {
     //     ninguno. Ahora se emite `.opencode/plugin/apts-env.js`, que lo carga en el arranque.
     // Medido el 2026-08-14 en un cliente real (opencode 1.14.33, Windows) y comprobado de punta
     // a punta contra opencode 1.18.18. Depende del spec 1.1.0 por `mcp.defaultUrl`.
-    artifactVersion: '1.3.0',
+    // 1.4.0: el plugin del adaptador de opencode aplana a `allow` los permisos que quedarian
+    // en `ask` cuando el conductor se anuncia en el entorno (`APTS_UNATTENDED`). No es una
+    // preferencia: en opencode 1.18.18 un SUBAGENTE que pide permiso no tiene quien le
+    // conteste —no hereda el `allow` del padre, y el manejador de `--auto` filtra por sesion—,
+    // asi que la peticion queda abierta para siempre y cuelga el proceso entero. Costo dos
+    // corridas de un cliente real el 2026-08-15, las dos en la revision adversaria. El
+    // `opencode.json` comiteado conserva su `ask` para la sesion con persona delante. Quien se
+    // quede en 1.3.0 tiene un adaptador con el que ningun subagente puede tocar la shell en una
+    // corrida desatendida.
+    artifactVersion: '1.4.0',
     kind: 'adapter_generator',
     recommended: true,
     usagePriority: 'primary',
@@ -2565,7 +2574,16 @@ const integrationArtifacts = {
     // con BOM UTF-8 ya se lee: `loadEnvFile` no lo ignora y dejaba la PRIMERA clave
     // inservible, con el conductor diciendo «falta configuracion: --api-key» con la clave
     // delante. Quien se quede en 1.8.0 conserva las dos formas de quedarse parado.
-    artifactVersion: '1.9.0',
+    // 1.10.0: se anuncia en el entorno del agente (`APTS_UNATTENDED=1`). Es lo unico que le
+    // dice al agente sobre si mismo y no rompe la regla de tratar el comando como opaco: no es
+    // conocimiento de ninguna CLI, es un hecho sobre la corrida —no hay nadie delante— que solo
+    // quien la lanza puede saber. Lo lee el adaptador de opencode para aplanar los permisos que
+    // colgarian a un subagente. Ademas la cola sube a 16 KB y la ultima linea en prosa salta el
+    // registro estructurado de la CLI salvo `level=ERROR`: las dos son consecuencia de que las
+    // lineas publicadas pidan ahora `--print-logs`, sin el cual el freno de silencio no oye a
+    // un subagente trabajar. Quien se quede en 1.9.0 y regenere el adaptador no arregla nada:
+    // el plugin espera esa marca y este conductor es quien la pone.
+    artifactVersion: '1.10.0',
     kind: 'loop_conductor',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -2610,7 +2628,12 @@ const integrationArtifacts = {
     // el positional, y lleva `--auto`, sin el cual una corrida headless muere en el primer
     // comando de shell—. Las dos cosas las trajo un cliente real el 2026-08-15 y la primera
     // se reprodujo contra opencode 1.18.18.
-    artifactVersion: '1.10.0',
+    // 1.11.0: dice por que `--auto` no basta —no alcanza a los subagentes, y una peticion de
+    // permiso de una sesion hija no se aprueba ni se rechaza, asi que cuelga la corrida— y que
+    // eso lo cierra el plugin del adaptador con `APTS_UNATTENDED`. Corrige ademas la premisa
+    // del freno de silencio: que una CLI hable NDJSON no basta, porque el stream de opencode
+    // calla durante toda herramienta larga, y por eso la linea publicada gana `--print-logs`.
+    artifactVersion: '1.11.0',
     kind: 'loop_conductor_manual',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -2639,13 +2662,20 @@ const integrationArtifacts = {
     // llegó—, así que la plantilla nombra ese runtime y recomienda la vía secuencial. Y deja
     // dicho que revisar en el propio hilo NO es una salida: si no hay subagentes, se declara
     // HALT.
-    artifactVersion: '1.2.0',
+    // 1.3.0: retira la recomendacion de conducir las tres capas EN FILA bajo opencode, que la
+    // 1.2.0 introdujo sobre un diagnostico equivocado. El cuelgue no era del paralelismo: era
+    // un subagente esperando un permiso que nadie iba a contestar, y esperaba igual lanzado en
+    // fila —se reprodujo asi el 2026-08-15, en la primera capa, a los ocho segundos—. La
+    // plantilla vuelve a pedir la tanda paralela, dice que una capa que no vuelve se arregla en
+    // la configuracion del runtime y no en el prompt, y conserva lo unico que si era del
+    // prompt: que revisar en el hilo propio no cuenta y que sin subagentes se declara HALT.
+    artifactVersion: '1.3.0',
     kind: 'loop_conductor_prompt',
     recommended: false,
     usagePriority: 'optional_entrypoint',
     optional: true,
     dependsOnArtifactIds: ['loop_conductor'],
-    selection_rule: 'Prompt template for the loop conductor (--prompt-file), replacing its built-in default. It adds an adversarial review gate before the dev-story validation step: three layers in SEPARATE subagents under distinct lenses (Blind Hunter sees only the diff, Edge Case Hunter the boundaries, Acceptance Auditor only the story and its acceptance criteria) — in parallel where the runtime sustains it, sequentially otherwise, which is the recommended way under opencode because a parallel batch was seen to hang there, a triage that counts a finding only with file:line plus a concrete failure scenario, and the method\'s own {"goto":"step:5"} branch when something is confirmed. Download it only if you run the conductor and want the gate in the agent session; the engine gate (the required_for_close code_review artifact on the terminal dev-story step) applies either way. Placeholders substituted by the conductor: {story_id}, {agent_name}, {project_url}, {role}, {iteration}, {attempt}, {max_attempts}, {task_id}.',
+    selection_rule: 'Prompt template for the loop conductor (--prompt-file), replacing its built-in default. It adds an adversarial review gate before the dev-story validation step: three layers in SEPARATE subagents under distinct lenses (Blind Hunter sees only the diff, Edge Case Hunter the boundaries, Acceptance Auditor only the story and its acceptance criteria) — in parallel where the runtime sustains it, sequentially otherwise, a triage that counts a finding only with file:line plus a concrete failure scenario, and the method\'s own {"goto":"step:5"} branch when something is confirmed. Download it only if you run the conductor and want the gate in the agent session; the engine gate (the required_for_close code_review artifact on the terminal dev-story step) applies either way. Placeholders substituted by the conductor: {story_id}, {agent_name}, {project_url}, {role}, {iteration}, {attempt}, {max_attempts}, {task_id}.',
     description: 'Prompt template for the conductor that demands an adversarial review before a story closes.'
   }
 };

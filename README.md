@@ -608,7 +608,7 @@ Y para opencode, que ni siquiera mete el prompt en la linea de shell y por eso v
 los dos sistemas:
 
 ```bash
-opencode run --format json -m {model} --auto "Implementa la unidad descrita en el archivo adjunto" -f {prompt_file}
+opencode run --format json --print-logs -m {model} --auto "Implementa la unidad descrita en el archivo adjunto" -f {prompt_file}
 ```
 
 El mensaje va **antes** de `-f`: ese flag es de tipo array y se traga el positional que venga
@@ -616,6 +616,14 @@ detras, asi que al reves la CLI muere con `File not found: Implementa la unidad.
 a resolver el modelo. Y `--auto` es el equivalente de `--permission-mode acceptEdits`: en
 headless, `opencode run` auto-rechaza los permisos que su config deje en `ask` y la sesion
 muere en el primer comando de shell.
+
+`--auto`, eso si, **no alcanza a los subagentes**: una sesion hija no hereda del padre mas que
+sus `deny`, y el manejador que contesta los permisos filtra por sesion, asi que la peticion de
+un subagente no se aprueba ni se rechaza y el proceso se planta para siempre. Lo cierra el
+plugin del adaptador de opencode, que aplana esos permisos cuando el conductor se anuncia en el
+entorno (`APTS_UNATTENDED`). Y `--print-logs` esta por el freno de silencio, no para leerlo: el
+stream de opencode calla durante toda herramienta larga —un subagente entero, por ejemplo—, asi
+que sin el registro por stderr el vigilante no distingue trabajar de estar colgado.
 
 El JSON no es decoracion: es lo unico que deja al conductor anotar **lo que costo cada
 story** —tokens, coste, turnos y el id de sesion— en vez de solo su duracion y su codigo de

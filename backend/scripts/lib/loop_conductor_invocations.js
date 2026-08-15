@@ -58,7 +58,16 @@ const LOOP_CONDUCTOR_INVOCATION_BY_RUNTIME = {
     // todo lo que no este explicitamente denegado— y va en la linea publicada por la misma
     // razon que su equivalente de Claude Code: esta linea es la de una corrida DESATENDIDA,
     // y una que se planta esperando una aprobacion que nadie va a dar no sirve de nada.
-    agent_cmd: 'opencode run --format json -m {model} --auto "Implementa la unidad descrita en el archivo adjunto" -f {prompt_file}',
+    //
+    // `--print-logs` manda el registro de la CLI a stderr, y no es para leerlo: es lo que hace
+    // que el vigilante de silencio del conductor mida ACTIVIDAD y no charla del stream. En
+    // opencode los dos no son lo mismo —comprobado contra 1.18.18 leyendo su binario—: el
+    // stream `--format json` descarta todo evento cuya sesion no sea la principal y solo emite
+    // una herramienta cuando ya termino, asi que el proceso calla durante TODA herramienta
+    // larga aunque este trabajando. Una revision adversaria en subagentes, que es justo lo que
+    // la plantilla publicada pide, calla de principio a fin. Sin esta bandera el freno de los
+    // veinte minutos corta corridas sanas.
+    agent_cmd: 'opencode run --format json --print-logs -m {model} --auto "Implementa la unidad descrita en el archivo adjunto" -f {prompt_file}',
     model_escalation_example: 'anthropic/claude-sonnet-5,anthropic/claude-opus-5'
   }
 };

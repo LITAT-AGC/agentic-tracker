@@ -117,7 +117,17 @@ if (mudo) {
   const dormir = Number(process.env.FALSO_DORMIR_MS || 0);
   setTimeout(() => {
     process.stdout.write('marca-de-eco-del-agente\\n');
-    if (process.env.FALSO_SALIDA) process.stderr.write(process.env.FALSO_SALIDA + '\\n');
+    // Lo unico que el conductor le dice al agente sobre la corrida. Se escupe para poder
+    // comprobar desde fuera que LLEGA: es lo que el adaptador de opencode necesita leer.
+    // Solo cuando la prueba lo pide: los dos flujos llegan al padre sin orden garantizado
+    // entre si, y una linea de mas por stdout puede quedar la ultima y desplazar a la de
+    // stderr que otras pruebas miran como pista.
+    if (process.env.FALSO_ECO_MARCA) {
+      process.stdout.write('marca-desatendida=' + (process.env.APTS_UNATTENDED || '(sin marca)') + '\\n');
+    }
+    // El \\\\n literal se expande aqui y no en el entorno: hace falta poder mandar VARIAS
+    // lineas por stderr para comprobar cual de ellas acaba siendo la pista de la parada.
+    if (process.env.FALSO_SALIDA) process.stderr.write(process.env.FALSO_SALIDA.split('\\\\n').join('\\n') + '\\n');
     process.exit(Number(process.env.FALSO_CODIGO || 0));
   }, dormir);
 }
@@ -131,7 +141,7 @@ fs.writeFileSync(path.join(tmp, 'vacio.env'), '');
 let corridas = 0;
 const correr = (puerto, {
   salida, codigo, dormirMs = 0, escalera = 'modelo-a,modelo-b', arranqueMaxMs = 1500,
-  mudoMs = 0, silencioMs = null, dotenv = null,
+  mudoMs = 0, silencioMs = null, dotenv = null, ecoMarca = false,
 }) => {
   corridas += 1;
   const diario = path.join(tmp, `diario-${corridas}.jsonl`);
@@ -161,6 +171,7 @@ const correr = (puerto, {
         FALSO_CODIGO: String(codigo),
         FALSO_DORMIR_MS: String(dormirMs),
         FALSO_MUDO_MS: String(mudoMs),
+        FALSO_ECO_MARCA: ecoMarca ? '1' : '',
         APTS_LOOP_STARTUP_MAX_MS: String(arranqueMaxMs),
         // Sin tocar salvo que la prueba lo pida: asi las otras corridas usan el valor por
         // defecto de verdad (20 min), que no puede dispararse en una prueba de segundos.
@@ -328,6 +339,47 @@ const intentos = (r) => r.eventos.filter((e) => e.evento === 'agente');
     ok(r.visto.includes('modelo-del-dotenv'),
       'la PRIMERA clave del archivo llega al conductor pese al BOM');
     ok(/BOM/.test(r.visto), 'y el conductor dice que se lo encontro');
+    console.log();
+
+    console.log('14) el conductor se anuncia en el entorno del agente');
+    // Es lo unico que le dice al agente sobre si mismo, y lo que cierra el cuelgue de
+    // opencode: su adaptador lo lee para aplanar los permisos que quedarian en `ask`, que
+    // en una sesion de subagente no tienen a quien preguntar y cuelgan la corrida entera.
+    r = await correr(puerto, { salida: 'trabajo hecho', codigo: 0, ecoMarca: true });
+    ok(r.visto.includes('marca-desatendida=1'),
+      'APTS_UNATTENDED=1 llega al proceso del agente', r.visto.match(/marca-desatendida=.*/)?.[0]);
+    console.log();
+
+    console.log('15) la pista de una parada salta el registro de la CLI, salvo ERROR');
+    // Desde que las lineas publicadas piden `--print-logs`, stderr trae decenas de trazas
+    // por minuto. Sin este filtro la pista seria siempre la ultima de ellas —«message=loop
+    // session.id=…»—, que no dice nada de por que paro: el arreglo del 2026-08-15 quedaria
+    // devuelto por el arreglo de al lado.
+    r = await correr(puerto, {
+      escalera: 'modelo-a',
+      codigo: 1,
+      salida: [
+        'timestamp=2026-08-15T19:03:22.845Z level=INFO message=stream session.id=ses_uno',
+        'la causa de verdad, en prosa',
+        'timestamp=2026-08-15T19:03:27.850Z level=INFO message=loop session.id=ses_dos',
+      ].join('\\n'),
+    });
+    ok((parada(r).detalle || '').includes('la causa de verdad, en prosa'),
+      'la prosa gana a las trazas que vinieron despues', parada(r).detalle);
+    ok(!/level=INFO/.test(parada(r).detalle || ''),
+      'y ninguna traza se cuela como pista', parada(r).detalle);
+
+    r = await correr(puerto, {
+      escalera: 'modelo-a',
+      codigo: 1,
+      salida: [
+        'algo viejo que ya no importa',
+        'timestamp=2026-08-15T19:03:42.982Z level=ERROR message=process error=Aborted',
+      ].join('\\n'),
+    });
+    ok((parada(r).detalle || '').includes('level=ERROR'),
+      'pero un ERROR del registro SI es la pista: ahi es donde una CLI escribe su fallo',
+      parada(r).detalle);
   } finally {
     servidor.close();
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) { /* da igual */ }

@@ -41,6 +41,13 @@ const SPEC_PATH = path.join(adaptersRoot, 'spec', 'apts-surface.json');
 const BANNER = 'GENERADO — no editar; fuente: spec/apts-surface.json';
 const BANNER_MD = `<!-- ${BANNER} -->`;
 
+// Cómo se entera un adaptador de que NO hay nadie delante. Lo pone el conductor del bucle en
+// el entorno del proceso del agente antes de lanzarlo; aquí sólo se lee. Es un contrato entre
+// dos artefactos descargables que no pueden importarse el uno al otro —el conductor es un
+// CommonJS suelto y esto un ESM del paquete—, así que el nombre está escrito dos veces y lo
+// ata `test_adapters_unattended.js`, que compara este valor contra el del conductor.
+const UNATTENDED_ENV = 'APTS_UNATTENDED';
+
 // Neutral capability -> concrete tool identifiers per runtime.
 const CLAUDE_TOOLS = { read: ['Read'], search: ['Glob', 'Grep'], edit: ['Edit', 'Write'], execute: ['Bash'], agent: ['Task'] };
 const OPENCODE_TOOLS = { read: ['read'], search: ['grep', 'glob', 'list'], edit: ['edit', 'write'], execute: ['bash'], agent: ['task'] };
@@ -230,6 +237,12 @@ function emitOpencode(spec, root, written) {
   for (const perm of spec.permissions) {
     if (perm.capability === 'execute') bash[perm.pattern] = perm.action;
   }
+  // El `ask` se QUEDA, y no por inercia: este archivo se comitea en el repositorio del cliente y
+  // lo lee también la sesión interactiva de una persona, que sí puede contestar. Lo que no puede
+  // seguir es que ese mismo `ask` alcance a una corrida desatendida: allí no cuelga una pregunta,
+  // cuelga el proceso entero, porque un subagente de opencode que pide permiso no tiene quien le
+  // conteste (el porqué está entero en el plugin de abajo). De eso se encarga el plugin cuando el
+  // conductor se anuncia en el entorno, que es el único que sabe que no hay nadie mirando.
   bash['*'] = 'ask';
   // La url va LITERAL, las cabeceras siguen interpoladas. No es una asimetria gratuita: en
   // opencode `{env:VAR}` es una sustitucion de TEXTO sobre el archivo entero, hecha al cargar
@@ -319,6 +332,10 @@ function opencodeEnvPlugin(spec) {
     '// mutar la configuracion, asi que esto ocurre antes de que el registro MCP se conecte.',
     '//',
     '// Precedencia: el entorno del proceso gana al `.env`, como cualquier dotenv.',
+    '//',
+    '// Y hace una segunda cosa con el mismo gancho, porque es el mismo momento: si el conductor',
+    '// del bucle se anuncia en el entorno, aplana los permisos que quedarian en `ask`. Comparten',
+    '// gancho y no motivo; el porque esta escrito junto al codigo.',
     '',
     "import fs from 'node:fs';",
     "import path from 'node:path';",
@@ -326,6 +343,49 @@ function opencodeEnvPlugin(spec) {
     `const SERVER = ${JSON.stringify(spec.mcp.server)};`,
     `const URL_ENV = ${JSON.stringify(spec.mcp.urlEnv)};`,
     `const HEADERS = ${JSON.stringify(headers, null, 2)};`,
+    `const UNATTENDED_ENV = ${JSON.stringify(UNATTENDED_ENV)};`,
+    '',
+    '// ---- permisos de una corrida desatendida ----',
+    '//',
+    '// `ask` no tiene a quien preguntar cuando no hay nadie mirando, y en opencode eso no se',
+    '// queda en una espera del proceso principal: cuelga la corrida ENTERA. Comprobado contra',
+    '// opencode 1.18.18 leyendo su binario, son dos defectos que se componen.',
+    '//',
+    '// Uno: una sesion de subagente NO hereda los permisos del padre. Al crearla, opencode se',
+    '// queda solo con los del padre que sean `external_directory` o `action: "deny"`, asi que el',
+    '// permiso concedido por `--auto` no le llega y el hijo cae a lo que diga esta configuracion.',
+    '//',
+    '// Dos: `--auto` no es una postura de permisos sino un contestador de eventos, y su manejador',
+    '// filtra por sesion —`if (part.sessionID !== mainSession) continue`—. Una peticion de una',
+    '// sesion HIJA no se aprueba ni se rechaza: queda abierta para siempre, la herramienta `task`',
+    '// del padre no vuelve nunca y el proceso se planta sin gastar CPU ni escribir una linea.',
+    '// `--yolo` y `--dangerously-skip-permissions` son alias de `--auto`: mismo codigo, misma',
+    '// trampa. Costo dos corridas de un cliente real el 2026-08-15, las dos en la revision',
+    '// adversaria, que es justo el paso que usa subagentes.',
+    '//',
+    '// Por eso el arreglo va en la CONFIGURACION, que es lo unico que el hijo si mira, y solo',
+    '// cuando el conductor se anuncia en el entorno. El archivo comiteado conserva su `ask` para',
+    '// la sesion interactiva de una persona, que es para quien se escribio.',
+    '//',
+    '// Se lee del entorno del PROCESO y nunca del `.env`: el `.env` esta en el repositorio y lo',
+    '// comparten las dos formas de trabajar, asi que una linea ahi aplanaria tambien las sesiones',
+    '// con persona delante. Quien lo pone es quien sabe que no hay nadie mirando.',
+    'function unattended() {',
+    '  const raw = String(process.env[UNATTENDED_ENV] || process.env.APTS_LOOP_UNATTENDED || \'\').trim().toLowerCase();',
+    "  return raw !== '' && raw !== '0' && raw !== 'false' && raw !== 'no';",
+    '}',
+    '',
+    '// Solo `ask` -> `allow`. Un `deny` se queda como esta: es la unica clase de regla que el',
+    '// subagente SI hereda, y aplanarla convertiria esto en «desactivar los permisos», que es otra',
+    '// cosa y no la que hace falta. La forma del arbol se respeta —opencode admite una cadena o un',
+    '// objeto de patrones por capacidad—, asi que se recorre en vez de reescribirlo.',
+    'function allowAsks(node) {',
+    "  if (node === 'ask') return 'allow';",
+    "  if (!node || typeof node !== 'object') return node;",
+    '  const out = Array.isArray(node) ? [...node] : { ...node };',
+    '  for (const key of Object.keys(out)) out[key] = allowAsks(out[key]);',
+    '  return out;',
+    '}',
     '',
     '// `.env` minimalista: un `CLAVE=valor` por linea, `export ` opcional, comillas opcionales y',
     '// `#` de comentario. No expande variables dentro del valor: una clave no deberia depender de',
@@ -374,7 +434,14 @@ function opencodeEnvPlugin(spec) {
     '',
     '  return {',
     '    config: async (config) => {',
-    '      const server = config && config.mcp && config.mcp[SERVER];',
+    '      if (!config) return;',
+    '',
+    '      // Antes que nada y con su propia salida: esto no depende del registro MCP, y colgarlo',
+    '      // debajo de la guarda de abajo lo dejaria sin aplicar en cuanto alguien tocara el',
+    '      // servidor. Son dos arreglos independientes que comparten gancho.',
+    '      if (config.permission && unattended()) config.permission = allowAsks(config.permission);',
+    '',
+    '      const server = config.mcp && config.mcp[SERVER];',
     "      if (!server || server.type !== 'remote') return;",
     '',
     '      // Solo si viene definida: la url literal del archivo generado ya es valida, y esto es',

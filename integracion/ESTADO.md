@@ -13,7 +13,7 @@ llego hasta aqui: eso esta en el historial de git.
 | Manifiesto | `GET /api/public/integrar`, `schema_version` 1.1.3 |
 | Guia para personas | `GET /api/public/integrar/guia`, HTML renderizado del manifiesto |
 | Runtimes soportados | Dos: Claude Code y opencode |
-| Artefactos publicados | 8; el conductor en `artifact_version` 1.9.0 y su README en 1.10.0, `adapter_generator` en 1.3.0, `loop_prompt_code_review` en 1.2.0, `agent_guidelines` y `surface_spec` en 1.1.1, `skill_markdown` y `skills_json` en 1.1.0 |
+| Artefactos publicados | 8; el conductor en `artifact_version` 1.10.0 y su README en 1.11.0, `adapter_generator` en 1.4.0, `loop_prompt_code_review` en 1.3.0, `agent_guidelines` y `surface_spec` en 1.1.1, `skill_markdown` y `skills_json` en 1.1.0 |
 | Descargas necesarias para **llamar** a las operaciones | Ninguna |
 | Descargas necesarias para **conducir** | El spec y el generador (agentes y comandos); el conductor y su README si se quiere el bucle desatendido, y su plantilla de revision si se quiere ademas la compuerta dentro de la sesion del agente |
 
@@ -111,6 +111,85 @@ el bucle deje de ser descubrible solo por casualidad.
 
 En PROD desde el 2026-08-15 (`dee0746`), comprobado contra `apts.informaticos.ar`.
 
+**Y el agente que ni fallaba ni terminaba no estaba colgado: estaba esperando un permiso que
+nadie iba a contestar.** El freno de silencio cerro el sintoma el 2026-08-15 y el mismo cliente
+lo reprodujo esa tarde con la revision SECUENCIAL, en la primera capa, a los ocho segundos: no
+era el paralelismo. La corrida entera quedo en el registro de opencode de la maquina
+(`~/.local/share/opencode/log/opencode.log`), y ahi esta la causa escrita:
+
+```
+19:03:22  created id=ses_ff9315… title="Blind Hunter code review (@general subagent)" parentID=ses_ff9340…
+19:03:27  stream providerID=deepseek … mode=subagent          <- la unica escritura que se vio
+19:03:30  evaluated permission=bash pattern="Get-Item …unit-78511ee0.diff" action.action=ask
+19:03:30  asking id=per_006cecb8… permission=bash
+```
+
+Y se acaba. **Son dos defectos de opencode 1.18.18 que se componen**, verificados leyendo su
+binario y no deducidos. Uno: una sesion de subagente no hereda del padre mas que sus `deny` y su
+`external_directory` —`parentSessionPermission.filter(i => i.permission === "external_directory"
+|| i.action === "deny")`—, asi que el permiso que `--auto` concedio no le llega y cae a lo que
+diga la configuracion. Dos: `--auto` no es una postura de permisos sino un contestador de
+eventos, y su manejador filtra por sesion (`if (props.sessionID !== mainSession) continue`), de
+modo que la peticion de una sesion HIJA no se aprueba **ni se rechaza**: queda abierta para
+siempre, la herramienta `task` del padre no vuelve nunca y el proceso se planta sin gastar CPU.
+`--yolo` y `--dangerously-skip-permissions` son alias de la misma variable: mismo codigo, misma
+trampa. Un `opencode run` headless cuyo subagente necesite la shell cuelga **siempre**, y sin
+`--auto` cuelga igual, porque la rama que auto-rechaza tambien filtra por sesion.
+
+**Y la trampa la armaba APTS.** El generador escribia `bash['*'] = 'ask'` a pelo —no sale de la
+spec, que no declara ningun permiso `execute`—, inofensivo con una persona delante y letal en una
+corrida desatendida con subagentes, que es justo lo que la plantilla de revision adversaria pide.
+
+El arreglo va donde el hijo si mira, que es la CONFIGURACION, y solo cuando no hay nadie delante.
+El conductor se anuncia en el entorno del agente (`APTS_UNATTENDED=1`) y el plugin del adaptador
+de opencode aplana a `allow` lo que quedaria en `ask`. El `opencode.json` comiteado conserva su
+`ask`, porque lo lee tambien la sesion interactiva de una persona, que si puede contestar.
+
+Tres decisiones que no son gratis. La marca va por el ENTORNO y no por la linea de `--agent-cmd`
+porque esa linea tiene que valer igual en `cmd.exe` y en un shell POSIX, y el prefijo
+`VAR=valor comando` solo existe en uno de los dos; descartado tambien `OPENCODE_CONFIG_CONTENT`
+por lo mismo. Se lee del entorno del PROCESO y nunca del `.env`, que esta en el repositorio y lo
+comparten las dos formas de trabajar: una linea ahi aplanaria tambien las sesiones con persona.
+Y se aplana **solo `ask`**: el `deny` es la unica clase de regla que un subagente si hereda, o
+sea el unico freno que le queda a una corrida desatendida, y tocarlo convertiria esto en
+«desactivar los permisos», que es otra cosa. Esto no rompe la regla de que el conductor trate el
+comando como opaco: no es conocimiento de ninguna CLI, es un hecho sobre la corrida —no hay nadie
+delante— que solo quien la lanza puede saber.
+
+**El freno de silencio se queda, pero su premisa era falsa.** Decia que las dos CLIs publicadas
+hablan NDJSON mientras trabajan, asi que una sesion viva habla mucho antes de veinte minutos. En
+opencode no: el mismo manejador que descarta los permisos de las sesiones hijas descarta tambien
+sus `message.part.updated` y sus `session.error`, y en formato JSON una herramienta solo se emite
+cuando ya termino —el estado `running` esta explicitamente detras de `format !== "json"`—. El
+stream del padre calla durante **toda** herramienta larga aunque el proceso este a pleno: una
+revision adversaria en subagentes calla de principio a fin, y una suite de veinticinco minutos
+tambien. Con esa premisa, arreglar el cuelgue habria empezado a matar corridas sanas.
+
+Por eso la linea publicada de opencode gana `--print-logs`, que no esta para leerlo: manda el
+registro de la CLI a stderr, que es un flujo que el vigilante ya cuenta, y convierte «el stream
+no dice nada» en «no pasa nada», que es lo que siempre quiso medir. Arrastra dos consecuencias
+que se pagan aqui: la cola sube de 4 KB a 16 KB —lo que importa no es el tamaño sino el TIEMPO
+que cubre, y con decenas de trazas por minuto 4 KB era menos de un minuto— y la ultima linea en
+prosa salta el registro estructurado (`timestamp=… level=INFO`) salvo `level=ERROR`, que es donde
+una CLI escribe su fallo fatal. Sin eso, la pista de cada parada habria pasado a ser
+«message=loop session.id=ses_…» y el arreglo de esa misma mañana quedaba devuelto por el de al
+lado.
+
+**Y la plantilla se corrige en vez de conservarse.** La 1.2.0 recomendaba la via secuencial bajo
+opencode nombrando el caso; se escribio sobre un diagnostico equivocado y no protegia de nada.
+Vuelve a pedir la tanda paralela, dice que una capa que no vuelve se arregla en la configuracion
+del runtime y no en el prompt, y conserva lo unico que si era suyo: que revisar en el hilo propio
+no cuenta y que sin subagentes se declara HALT.
+
+Cubierto por `test_adapters_unattended.js` (11 comprobaciones, ata las dos copias del nombre de la
+marca —el conductor y el generador no pueden importarse el uno al otro— y comprueba que el `deny`
+sobrevive al aplanado y que el `opencode.json` comiteado sigue preguntando) y por dos casos nuevos
+en `test_conductor_agent_env.js`: que la marca LLEGA al proceso del agente y que la pista de una
+parada salta las trazas pero no las de ERROR.
+
+`schema_version` no cambia: no hay clave nueva, solo cambia el VALOR de `loop_agent_cmd`, la
+misma regla con la que subieron 1.1.1, 1.1.2 y 1.1.3.
+
 **Un agente que ni falla ni termina ya no deja el ciclo plantado.** Todos los frenos del
 conductor median ENTRE vueltas —`--max-stalls` compara el estado del motor de una vuelta con
 el de la anterior, y para eso la vuelta tiene que terminar—, asi que dentro de una vuelta no
@@ -148,6 +227,11 @@ que encontro otra, y el paralelismo solo compraba tiempo de reloj. La plantilla
 (`loop_prompt_code_review` 1.2.0) pide la tanda paralela **si el runtime la sostiene**,
 recomienda la fila para opencode nombrando lo que se vio, y cierra la unica salida falsa que
 quedaba: revisar en el hilo principal no cuenta, y sin subagentes se declara `HALT`.
+
+(Esa recomendacion duro un dia: la 1.3.0 la retira. El cuelgue no era del paralelismo —se
+reprodujo igual en fila— sino del permiso de un subagente sin quien lo conteste, y esta contado
+arriba. Lo que sobrevive de este parrafo es lo de siempre: lo innegociable es el contexto limpio,
+no el reloj.)
 
 **Tres cosas mas de la misma corrida, y las tres eran defectos de APTS.** La linea de opencode
 que publica el manifiesto, `opencode run --format json -m {model} -f {prompt_file} "Implementa

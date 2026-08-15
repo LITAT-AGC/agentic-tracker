@@ -106,7 +106,18 @@ const SALIDA = {
 // implementando el manejo de un ENOENT, o imprimiendo el error de una prueba—. El límite
 // de uso no lleva cerrojo a propósito: llega justo cuando el agente lleva rato trabajando,
 // que es exactamente el caso que se vio.
-const COLA_MAX_BYTES = 4096;
+// Sube de 4 KB a 16 KB desde el 2026-08-15, y es consecuencia de otro cambio: las líneas
+// publicadas piden ahora a las CLIs que escriban su registro por stderr, para que el vigilante
+// del silencio mida actividad de verdad. Ese registro comparte la cola con lo que se busca
+// aquí, así que a 4 KB la ventana pasaba a ser de menos de un minuto de charla. Lo que importa
+// no es el tamaño sino el TIEMPO que cubre, y esto lo devuelve a donde estaba.
+const COLA_MAX_BYTES = 16384;
+
+// El nombre por el que el conductor se anuncia en el entorno del agente. Está escrito también
+// en el generador de adaptadores (`generate-adapters.js`), que es quien lo lee desde el otro
+// lado: son dos artefactos descargables que no pueden importarse el uno al otro. Los ata
+// `test_adapters_unattended.js`, porque una copia que nadie vigila se separa en silencio.
+const MARCA_DESATENDIDA = 'APTS_UNATTENDED';
 // Ajustable por entorno y sin bandera, como el latido y el sondeo, y por el mismo motivo:
 // nadie lo toca en una corrida normal, pero una prueba no puede tardar un minuto en
 // comprobar que el cerrojo cierra.
@@ -125,10 +136,21 @@ const ARRANQUE_MAX_MS = entero(process.env.APTS_LOOP_STARTUP_MAX_MS, 60000);
 // latiendo tan campante, sosteniendo el claim. Sólo se salió de ahí matando a mano.
 //
 // La señal es el SILENCIO y no la duración: una story legítima puede tardar cuarenta
-// minutos, pero las dos CLIs publicadas hablan NDJSON mientras trabajan, así que una
-// sesión viva escribe algo mucho antes de veinte minutos. Un tope duro de duración
-// mataría corridas sanas y no distinguiría nada; éste distingue exactamente lo que hay
-// que distinguir, que es lento de colgado.
+// minutos, así que un tope duro de duración mataría corridas sanas y no distinguiría nada.
+// Éste distingue lo que hay que distinguir, que es lento de colgado.
+//
+// Y para distinguirlo hace falta oír lo que el agente HACE, no lo que su stream cuenta.
+// El 2026-08-15 se midió que no son lo mismo: en opencode, el stream `--format json`
+// descarta todo evento cuya sesión no sea la principal y sólo emite una herramienta cuando
+// ya terminó, de modo que el proceso calla durante TODA herramienta larga —un subagente, una
+// suite de veinte minutos— aunque esté trabajando a pleno. Medido contra 1.18.18 leyendo su
+// binario, no deducido. Con esa premisa, veinte minutos de silencio no significaban colgado.
+//
+// Por eso las líneas publicadas piden ahora a la CLI que escriba su registro por stderr
+// (`--print-logs` en opencode). El vigilante cuenta cualquier byte por cualquiera de los dos
+// flujos, así que eso convierte «el stream no dice nada» en «no pasa nada», que es lo que
+// siempre quiso medir. Quien escriba su propia línea de `--agent-cmd` y quite esa bandera se
+// queda con la medida de antes: no es un fallo del vigilante, es que le quitaron el oído.
 //
 // Va PUESTO por defecto. Es la misma asimetría de siempre: olvidarse de encenderlo cuesta
 // una corrida desatendida que se queda plantada hasta que una persona la mire —o sea, el
@@ -1787,6 +1809,17 @@ const lanzarAgente = (cfg, contexto) => {
       shell: true,
       stdio: ['inherit', 'pipe', 'pipe'],
       detached: process.platform !== 'win32',
+      // Lo único que este conductor le dice al agente sobre sí mismo, y no rompe la regla de
+      // tratar el comando como opaco: no es conocimiento de ninguna CLI, es un hecho sobre la
+      // corrida —no hay nadie delante— que sólo quien la lanza puede saber. Qué haga cada
+      // runtime con eso es cosa suya; el adaptador de opencode lo usa para aplanar los
+      // permisos que quedarían en `ask`, porque allí una pregunta sin respuesta no espera:
+      // cuelga el proceso entero (ver el plugin `apts-env.js` del adaptador).
+      //
+      // Va por el entorno y no por la línea de `--agent-cmd` porque la línea tiene que valer
+      // igual en `cmd.exe` y en un shell POSIX, y el prefijo `VAR=valor comando` sólo existe
+      // en uno de los dos. Ésta es la única forma portátil.
+      env: { ...process.env, [MARCA_DESATENDIDA]: '1' },
     });
 
     // Sólo la cola, y acotada: la salida de una story larga son megabytes y no hay
@@ -2041,6 +2074,20 @@ const describirIntentos = (intentos) => {
 // siempre el objeto `result`, que ya se lee entero por otro camino y aquí sólo sería ruido.
 // Los fallos fatales de una CLI salen por stderr y en prosa, que es justo lo que queda.
 const PISTA_MAX = 200;
+
+// Y se salta el REGISTRO de la CLI, por la misma razón y no por una nueva. Desde que las
+// líneas publicadas piden `--print-logs`, stderr trae también las trazas de la propia CLI
+// —`timestamp=… level=INFO message=…`, decenas por minuto—, y sin esto la pista de una parada
+// sería siempre la última de ellas: algo como «message=loop session.id=ses_…», que no dice
+// nada de por qué paró. Es el mismo caso que las líneas JSON: formato de máquina que ya se
+// lee por otro camino.
+//
+// Las de `level=ERROR` NO se saltan, y ahí está el interés: cuando una CLI escribe su fallo
+// fatal como registro en vez de como prosa, ésa ES la línea que hacía falta. Se reconoce por
+// la forma —clave=valor con `timestamp` y `level` delante—, que es lo que distingue una traza
+// de una frase sin saber de qué CLI viene.
+const REGISTRO_ESTRUCTURADO = /^timestamp=\S+\s+level=(TRACE|DEBUG|INFO|WARN)\b/i;
+
 const ultimaLineaEnProsa = (cola) => {
   const lineas = String(cola || '').split(/\r?\n/);
   for (let i = lineas.length - 1; i >= 0; i -= 1) {
@@ -2048,6 +2095,7 @@ const ultimaLineaEnProsa = (cola) => {
     // igualmente, y un escape ANSI dentro del diario no lo lee nadie.
     const linea = lineas[i].replace(/\u001b\[[0-9;]*m/g, '').trim();
     if (!linea || linea.startsWith('{') || linea.startsWith('[')) continue;
+    if (REGISTRO_ESTRUCTURADO.test(linea)) continue;
     return linea.length > PISTA_MAX ? `${linea.slice(0, PISTA_MAX)}…` : linea;
   }
   return '';

@@ -68,16 +68,16 @@ ciego. Una capa que hereda tu contexto hereda también tus puntos ciegos, y ento
 revisa: te da la razón.
 
 Lánzalas A LA VEZ, en una sola tanda, **si tu runtime lo sostiene**. Si no —si tu
-herramienta de subagentes no admite varios en vuelo, o si ya has visto que una tanda
-paralela se queda sin volver—, lánzalas UNA DETRÁS DE OTRA. Tarda más y da exactamente el
-mismo resultado: las tres capas son independientes por construcción, ninguna lee lo que
-encontró otra, y el paralelismo sólo compraba tiempo de reloj.
+herramienta de subagentes no admite varios en vuelo—, lánzalas UNA DETRÁS DE OTRA. Tarda
+más y da exactamente el mismo resultado: las tres capas son independientes por
+construcción, ninguna lee lo que encontró otra, y el paralelismo sólo compraba tiempo de
+reloj.
 
-Prefiere la vía secuencial si conduces con **opencode**: el 2026-08-15, en una corrida
-real, las tres capas lanzadas en paralelo trabajaron entre cero y cuatro minutos y se
-quedaron mudas, y la sesión principal se bloqueó esperando un retorno que no llegó nunca.
-No sabemos que esté arreglado. Una capa que no vuelve no es una revisión más floja: es una
-unidad que no cierra.
+Si una capa se queda sin volver, **no es el paralelismo**. Se investigó a fondo el
+2026-08-15 sobre dos corridas reales con opencode y la causa era otra: un subagente pedía
+permiso para usar la shell y esa petición no llegaba a nadie, así que esperaba para
+siempre —y esperaba igual lanzada en fila—. Se arregla en la configuración del runtime, no
+en este prompt. Si te pasa, dilo y para: no lo tapes revisando de otra forma.
 
 Y no la esquives: si las tres capas no se pueden lanzar de ninguna de las dos formas,
 declara `HALT`, reporta el bloqueo y para. Revisar en tu propio hilo no cuenta como
