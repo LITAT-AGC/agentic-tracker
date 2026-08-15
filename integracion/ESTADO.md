@@ -10,10 +10,10 @@ llego hasta aqui: eso esta en el historial de git.
 | Superficie de integracion | El endpoint MCP remoto, `POST /mcp` (Streamable HTTP, sin sesion) |
 | Operaciones | 23, derivadas de `apts_skills.json` |
 | Registro | Una URL y cuatro cabeceras; el manifiesto publica el bloque por runtime |
-| Manifiesto | `GET /api/public/integrar`, `schema_version` 1.1.2 |
+| Manifiesto | `GET /api/public/integrar`, `schema_version` 1.1.3 |
 | Guia para personas | `GET /api/public/integrar/guia`, HTML renderizado del manifiesto |
 | Runtimes soportados | Dos: Claude Code y opencode |
-| Artefactos publicados | 8; el conductor en `artifact_version` 1.7.1 y su README en 1.7.0, `adapter_generator` en 1.3.0, `loop_prompt_code_review`, `agent_guidelines` y `surface_spec` en 1.1.1, `skill_markdown` y `skills_json` en 1.1.0 |
+| Artefactos publicados | 8; el conductor en `artifact_version` 1.7.1 y su README en 1.8.0, `adapter_generator` en 1.3.0, `loop_prompt_code_review`, `agent_guidelines` y `surface_spec` en 1.1.1, `skill_markdown` y `skills_json` en 1.1.0 |
 | Descargas necesarias para **llamar** a las operaciones | Ninguna |
 | Descargas necesarias para **conducir** | El spec y el generador (agentes y comandos); el conductor y su README si se quiere el bucle desatendido, y su plantilla de revision si se quiere ademas la compuerta dentro de la sesion del agente |
 
@@ -22,8 +22,9 @@ entorno ni el Git del cliente. Un valor enviado en los argumentos gana a la cabe
 rol un agente— y un `project_url` que contradiga la cabecera se rechaza.
 
 **Conduccion del metodo.** El manifiesto publica `method_conduction`, hermano de `mcp_endpoint`, con
-cinco reglas: `bootstrap_rule`, `identity_switching_rule`, `drive_loop`, `generative_step_rule` y
-`dev_story_completion_rule`. Es la fuente autoritativa; los agentes generados apuntan a el.
+seis reglas: `bootstrap_rule`, `identity_switching_rule`, `drive_loop`, `generative_step_rule`,
+`dev_story_completion_rule` y `loop_conductor_rule`. Es la fuente autoritativa; los agentes generados
+apuntan a el.
 
 **Dos runtimes, no tres.** VS Code salio el 2026-08-08. Era el unico que no registraba el MCP con
 variables de entorno ni tenia comandos, asi que su adaptador era medio adaptador —agentes y una
@@ -56,6 +57,57 @@ cadena. Un cliente que arrancaba desde la URL no podia saber que existia. Ahora 
 `loop_conductor` y `loop_conductor_readme`, y van juntos a proposito: `--agent-cmd` es obligatorio y
 su forma depende del runtime, asi que el script sin su manual no se puede usar. El script es
 autocontenido —CommonJS, solo builtins de Node— asi que descargar ese unico archivo basta.
+
+**Y el manifiesto ya dice como usarlo, y que la configuracion se pregunta.** Publicarlo no basto.
+Un cliente real de opencode lo pidio el 2026-08-15 sobre el proyecto "tickets" y respondio que no
+existe ningun conductor: el conductor solo se nombraba en la ficha de sus dos artefactos y en un
+paso recomendado, y un cliente que mira `bootstrap.agent_runtime_adapters` —que es lo que el propio
+manifiesto le manda instalar— no pasa por ahi. Descubrirlo dependia de leer la lista entera de
+artefactos.
+
+Ahora hay una sexta regla en `method_conduction`, `loop_conductor_rule`, y dice tres cosas que el
+cliente no puede deducir: que se bajan los DOS artefactos (el manual no es opcional, porque
+`--agent-cmd` es obligatorio y su forma es del runtime), que las precondiciones se comprueban antes
+de molestar a nadie (iniciativa en `implementation`, rol dev en el roster, epica con hijos), y sobre
+todo que **la configuracion no se elige: se pregunta al operador**. Runtime, modelo y escalera son
+del proyecto y de la maquina, y el servidor no ve ninguno de los dos.
+
+Va en `method_conduction` y no en un bloque nuevo por una propiedad que ya existia:
+`METHOD_CONDUCTION_FIELDS` se deriva de `Object.keys`, asi que un campo nuevo hereda gratis el
+override por proyecto (`PUT /api/dashboard/projects/:url/method-conduction`). Preguntar es el
+defecto; un proyecto que ya tiene decidido su runtime y su modelo los sirve ahi y no se pregunta
+nada. Esa es exactamente la forma del problema —opencode con un LLM en un repositorio, Claude con
+Opus 5 en otro— y no hizo falta mecanismo nuevo.
+
+Las lineas `--agent-cmd` se publican ademas como DATO, en
+`registration_by_runtime.<runtime>.loop_agent_cmd`, al lado del registro MCP del mismo runtime
+porque son la misma clase de cosa: lo que cambia de un programa cliente a otro. Asi el agente puede
+ofrecer las opciones antes de descargar nada. La fuente unica es
+`backend/scripts/lib/loop_conductor_invocations.js` —vive en `scripts/lib/` para poder comprobarse
+sin levantar el servidor, como `contract_check.mjs`— y el README del conductor conserva su copia
+porque tiene que leerse suelto. Esa copia es lo que ata el **segundo auto-chequeo del arranque**:
+comprueba que cada linea publicada aparece literalmente en el README y aborta con `exit 3` si se
+separan. Vuelve a haber dos, y este existe por la misma razon que el que se retiro con VS Code: una
+segunda copia del mismo texto que nadie vigila se separa en silencio.
+
+La guia HTML dejo de tener la suya. Renderizaba a mano la linea de Claude Code —una tercera copia,
+justo lo que su cabecera prohibe— y ahora saca de `loop_agent_cmd` una tabla por runtime, con la
+variante de Windows y la escalera de ejemplo de cada uno.
+
+Queda una tercera copia con motivo, la del README del repositorio, para quien clona APTS. Esa NO
+entra en el auto-chequeo del arranque —no se sirve a ningun cliente, y negarse a arrancar por una
+doc interna seria un radio equivocado— sino en el test, y al atarla salio un hueco que llevaba ahi
+desde el principio: el README raiz nunca habia dicho la escalera de opencode, la unica que lleva
+`proveedor/modelo`.
+
+De paso, la variante de Windows gana `--permission-mode acceptEdits`, que le faltaba: copiada tal
+cual, la CLI pedia permiso y una corrida desatendida se plantaba esperando a nadie. El README sube a
+`artifact_version` **1.8.0** (solo texto; el conductor se queda en 1.7.1) y `schema_version` a
+**1.1.3**, por las dos claves nuevas —misma regla que 1.1.1 y 1.1.2—.
+
+El coste esta medido, porque el manifiesto lo lee todo cliente en el arranque: **+3.389 caracteres**
+(2.944 la regla, 445 los dos bloques de invocacion) sobre 39.307, un **8,6%**. Es el precio de que
+el bucle deje de ser descubrible solo por casualidad.
 
 **La revision adversaria ya es una compuerta, y de la unidad.** `bmad-code-review` esta sembrado en
 la biblioteca (`bmad:v6.8.0`, fase `implementation`, dueño `bmad-agent-dev`) y describe exactamente
@@ -429,15 +481,18 @@ porque seria un 200 que no escribe nada. Devuelve lo efectivo, no lo enviado.
 De paso, los dos sitios que decian «21 operaciones» dejaron de decir un numero: el manifiesto remite
 a lo que devuelve `tools/list`, que es lo que el cliente va a leer igualmente.
 
-**Una sola fuente por cosa.** Un auto-chequeo corre al arrancar, antes de escuchar, y aborta con
+**Una sola fuente por cosa.** Dos auto-chequeos corren al arrancar, antes de escuchar, y abortan con
 `exit 3` si algo se ha separado: el contrato, contra `apts_skills.json`
-(`backend/scripts/lib/contract_check.mjs`).
+(`backend/scripts/lib/contract_check.mjs`); y las lineas `--agent-cmd` que publica el manifiesto,
+contra el README del conductor (`backend/scripts/lib/loop_conductor_invocations.js`).
 
-Eran dos. El segundo comparaba las cuatro plantillas publicadas —cuerpo y cabecera— contra
-`apts-surface.json`, y existia porque eran una segunda copia del mismo texto que ya se habia
+Hubo antes otro segundo, retirado: comparaba las cuatro plantillas publicadas —cuerpo y cabecera—
+contra `apts-surface.json`, y existia porque eran una segunda copia del mismo texto que ya se habia
 separado del spec sin que nadie lo notara. Al retirarlas con VS Code desaparece la copia, y con la
 copia el cerrojo: ahora el spec tiene un solo consumidor, el generador, y lo que este emite se
-comprueba regenerando.
+comprueba regenerando. El del conductor entra por la misma razon por la que existia aquel, y esta es
+la regla: una copia se admite cuando tiene motivo —el manual tiene que poder leerse suelto— y
+entonces se ata.
 
 El algebra del embedding —`cosineSimilarity`, `parseEmbeddingVector`, `vectorNorm`,
 `buildBugEmbeddingText`— existe una sola vez, en `backend/scripts/lib/semantic_embeddings.js`, y la
@@ -580,6 +635,26 @@ derivado del proyecto en 47421, porque 47301 ya estaba ocupado), con el estado d
   El rechazo no deja residuo: la guardia corre dentro de la transaccion y antes de `ensureProject`.
 - Las 7 rutas de artefacto responden 200, incluidas las dos nuevas del conductor; y las cuatro
   `/agentes/*.agent.md` que se retiraron dan 404.
+- **La regla del conductor y su fuente unica** (`scripts/test_loop_conductor_invocations.js`, nuevo;
+  no necesita servidor ni base). Doce comprobaciones: la constante publica los dos runtimes y solo
+  ellos, cada comando lleva `{prompt_file}` y `{model}` —sin el segundo, la escalera publicada al
+  lado seria una pareja que el propio conductor rechaza—, solo Claude Code declara variante de
+  Windows y esa variante no usa `$(cat …)` y conserva el modo de permisos. El auto-chequeo encuentra
+  las cinco lineas en el README de verdad; con un comando editado en el README y no en la constante
+  aborta nombrando runtime y campo, y lo mismo con un solo caracter cambiado (`--model` contra
+  `--modelo`), porque la comparacion es literal a proposito; un README ilegible sale por su propio
+  codigo y no por el de separacion.
+- **Y el aborto de verdad**: con el README mutilado a mano, el servidor no llega a escuchar —`FATAL
+  Loop conductor self-check failed`, `LOOP_CONDUCTOR_DRIFT`, `exit 3`— y el archivo se restauro con
+  el mismo hash. Con el README intacto arranca y deja `runtimes: 2, invocations: 5`.
+- **Las dos claves nuevas del manifiesto, contra el servidor de prueba**: `schema_version` 1.1.3,
+  `method_conduction` con sus seis campos, y `loop_agent_cmd` dentro de los dos bloques de registro.
+  El override por proyecto funciona **sin infraestructura nueva**: un `PUT` de `loop_conductor_rule`
+  se acepta, `/api/public/integrar?project_url=…` sirve el texto pisado, el manifiesto sin
+  `project_url` sigue dando el defecto que manda preguntar, y un `null` lo borra.
+- **La guia HTML no conserva copia propia de la invocacion**: con una CLI de mentira en el
+  manifiesto, en la pagina salen las dos lineas falsas y no queda rastro de `claude -p` ni de
+  `opencode run` (`scripts/test_integration_guide.js`, ampliado a 6 comprobaciones nuevas).
 - **El manifiesto no menciona VS Code por ninguna parte**, ni en las claves ni en la prosa:
   `vscode`, `VS Code`, `copilot`, `.github/agents` y `agent_template` dan cero coincidencias sobre
   el JSON entero. Y encogio: 8.565 unidades contra 8.766, aun habiendo agregado el conductor.

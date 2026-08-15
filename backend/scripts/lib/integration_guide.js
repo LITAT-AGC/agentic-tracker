@@ -136,6 +136,28 @@ const renderIntegrationGuide = ({ manifest, operations = [] }) => {
     '</tr>',
   ].join('');
 
+  // La invocacion del conductor sale del bloque de registro de cada runtime, que es
+  // donde el manifiesto la publica. La guia no elige ninguna: las muestra todas y dice
+  // que la eleccion es del operador.
+  const conductorPorRuntime = Object.entries(registros)
+    .map(([runtime, bloqueRuntime]) => [runtime, (bloqueRuntime && bloqueRuntime.loop_agent_cmd) || null])
+    .filter(([, invocacion]) => invocacion && invocacion.agent_cmd);
+
+  const primerAgentCmd = conductorPorRuntime.length ? conductorPorRuntime[0][1].agent_cmd : '';
+
+  const filasConductor = conductorPorRuntime.map(([runtime, invocacion]) => {
+    const enWindows = invocacion.agent_cmd_windows
+      ? `<div class="cita">En Windows: <code>${escaparHtml(invocacion.agent_cmd_windows)}</code></div>`
+      : '<div class="cita">Vale igual en Windows: el prompt nunca pasa por la linea de shell.</div>';
+    return [
+      '<tr>',
+      `<td><code>${escaparHtml(runtime)}</code></td>`,
+      `<td><code>${escaparHtml(invocacion.agent_cmd)}</code>${enWindows}</td>`,
+      `<td><code>${escaparHtml(invocacion.model_escalation_example || '')}</code></td>`,
+      '</tr>',
+    ].join('');
+  });
+
   const reglas = manifest.method_conduction || {};
   const filaRegla = ([clave, valor]) => (clave === 'summary' ? '' : [
     '<details>',
@@ -305,12 +327,21 @@ ${bloque([
     '',
     '# Empieza SIEMPRE con --dry-run: resuelve la primera decision sin ejecutar nada.',
     'node apts-loop.js --agent-name mi-dev --dry-run \\',
-    `  --agent-cmd 'claude -p "$(cat {prompt_file})" --model {model} --permission-mode acceptEdits'`,
+    `  --agent-cmd '${primerAgentCmd}'`,
   ].join('\n'))}
 <p>El script es autocontenido (CommonJS, solo builtins de Node), pero <strong>no se puede usar
-sin su manual</strong>: <code>--agent-cmd</code> es obligatorio y su forma depende del runtime
-—en Windows el <code>$(cat …)</code> no existe y hay que usar <code>type</code>—. Por eso los
-dos artefactos van juntos.</p>
+sin su manual</strong>: <code>--agent-cmd</code> es obligatorio y su forma depende del runtime.
+Por eso los dos artefactos van juntos.</p>
+<p>Esa linea es lo unico que hay que cambiar para conducir con otra CLI o con otro modelo, y el
+manifiesto publica la de cada runtime en <code>loop_agent_cmd</code>, al lado de su registro:</p>
+<table>
+  <thead><tr><th>Runtime</th><th><code>--agent-cmd</code></th><th>Escalera de modelo (ejemplo)</th></tr></thead>
+  <tbody>${filasConductor.join('')}</tbody>
+</table>
+<p>Los nombres de modelo son de la CLI, no de APTS: el conductor sustituye <code>{model}</code>
+sin validarlo, y por eso la escalera de opencode lleva <code>proveedor/modelo</code> y la de
+Claude Code no. Un agente que llegue por esta URL tiene esos mismos datos en el manifiesto y
+<strong>debe preguntarte</strong> cual quieres antes de lanzar nada.</p>
 
 <h2>Referencia</h2>
 

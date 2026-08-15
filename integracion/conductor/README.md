@@ -80,8 +80,16 @@ y los sustituye sin validarlos. Por eso la escalera de Opencode lleva `proveedor
 y la de Claude Code no.
 
 **En Windows el `$(cat ...)` no existe**: `shell: true` resuelve a `cmd.exe`, así que la
-forma equivalente es `type {prompt_file} | claude -p --model {model}`. La vía de Opencode
-no tiene ese problema porque nunca mete el prompt en la línea.
+forma equivalente es `type {prompt_file} | claude -p --model {model} --permission-mode acceptEdits`.
+La vía de Opencode no tiene ese problema porque nunca mete el prompt en la línea, así que
+vale igual en los dos sistemas y no necesita variante.
+
+**Estas líneas también las publica el manifiesto**, en
+`mcp_endpoint.registration_by_runtime.<runtime>.loop_agent_cmd`, para que un agente que
+llega por la URL pueda ofrecerte las opciones antes de bajarse este archivo. La fuente es
+la del servidor y esta copia existe sólo para que el manual se lea suelto; un auto-chequeo
+del arranque comprueba que las dos dicen lo mismo y aborta con `exit 3` si se separan. Si
+editas un comando aquí, edítalo también allí.
 
 **El agente hereda el entorno del conductor**, incluido lo que cargó `--dotenv`. De ahí
 saca su identidad APTS (`APTS_MCP_URL`, `APTS_API_KEY`, `APTS_PROJECT_URL`,

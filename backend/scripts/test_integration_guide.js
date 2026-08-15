@@ -35,10 +35,19 @@ const MANIFIESTO = {
       claudecode: {
         config_file: '.mcp.json',
         value_substitution: 'Environment variables expand as ${VAR}.',
+        loop_agent_cmd: {
+          agent_cmd: 'cli-falsa -p "$(cat {prompt_file})" --model {model}',
+          agent_cmd_windows: 'type {prompt_file} | cli-falsa -p --model {model}',
+          model_escalation_example: 'modelo-barato,modelo-caro',
+        },
         config: { mcpServers: { apts: { type: 'http', url: 'https://ejemplo.invalid/mcp' } } },
       },
       opencode: {
         config_file: 'opencode.json',
+        loop_agent_cmd: {
+          agent_cmd: 'otra-cli run -m {model} -f {prompt_file}',
+          model_escalation_example: 'proveedor/barato,proveedor/caro',
+        },
         config: { mcp: { apts: { type: 'remote', url: 'https://ejemplo.invalid/mcp' } } },
       },
     },
@@ -139,12 +148,29 @@ ok(html.includes('drive_loop') && html.includes('la regla del bucle'), 'cada reg
 ok(!html.includes('un resumen que NO debe salir como bloque plegable'),
   'el summary no se repite como regla');
 
-console.log('\n5) autocontenida');
+console.log('\n5) la invocacion del conductor sale del manifiesto, no de la plantilla');
+// La guia tenia su propia copia de la linea de Claude Code. Ahora se renderiza desde
+// `registration_by_runtime.<runtime>.loop_agent_cmd`, que es donde vive la fuente unica:
+// con una CLI de mentira en el manifiesto, en la pagina no puede quedar rastro de la real.
+ok(html.includes('cli-falsa -p') && html.includes('otra-cli run'),
+  'las dos lineas --agent-cmd vienen del manifiesto');
+ok(!html.includes('claude -p') && !html.includes('opencode run'),
+  'y la plantilla no conserva ninguna copia propia');
+ok(html.includes('type {prompt_file} | cli-falsa'), 'la variante de Windows tambien se muestra');
+ok(html.includes('Vale igual en Windows'),
+  'y el runtime que no la declara lo dice, en vez de dejar el hueco');
+ok(html.includes('modelo-barato,modelo-caro') && html.includes('proveedor/barato,proveedor/caro'),
+  'cada runtime muestra su escalera de ejemplo');
+// El bloque de ejemplo usa la primera invocacion publicada, no una escrita a mano.
+// Va dentro de un <pre> escapado, asi que la comilla viaja como &#39;.
+ok(html.includes('--agent-cmd &#39;cli-falsa -p'), 'el ejemplo de --dry-run usa una de ellas');
+
+console.log('\n6) autocontenida');
 ok(!/(src|href)="https?:\/\/(?!ejemplo\.invalid)/.test(html), 'no pide nada a otro host');
 ok(!/<link\b/i.test(html) && !/<script\b/i.test(html), 'ni hoja de estilos externa ni scripts');
 ok(html.includes('<style>'), 'el CSS va embebido');
 
-console.log('\n6) documento bien formado');
+console.log('\n7) documento bien formado');
 ok(html.startsWith('<!doctype html>'), 'declara HTML5');
 ok(html.includes('<html lang="es">'), 'declara el idioma');
 ok(html.includes('name="viewport"'), 'es usable en un telefono');
@@ -153,7 +179,7 @@ const abiertas = (html.match(/<details\b/g) || []).length;
 const cerradas = (html.match(/<\/details>/g) || []).length;
 ok(abiertas === cerradas && abiertas > 0, 'los plegables abren y cierran igual', `${abiertas}/${cerradas}`);
 
-console.log('\n7) aguanta un manifiesto incompleto sin reventar');
+console.log('\n8) aguanta un manifiesto incompleto sin reventar');
 let minimo = null;
 try {
   minimo = renderIntegrationGuide({ manifest: { artifacts: [] }, operations: [] });

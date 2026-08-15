@@ -58,6 +58,10 @@ const {
   DEFAULT_EMBEDDING_MODEL
 } = require('./scripts/lib/semantic_embeddings');
 const { renderIntegrationGuide } = require('./scripts/lib/integration_guide');
+const {
+  LOOP_CONDUCTOR_INVOCATION_BY_RUNTIME,
+  checkLoopConductorInvocations
+} = require('./scripts/lib/loop_conductor_invocations');
 const rootPackage = require('../package.json');
 const db = createKnex(knexConfig[process.env.NODE_ENV || 'development']);
 
@@ -2384,7 +2388,13 @@ const integrationRoot = path.join(__dirname, '..', 'integracion');
 //        1.1.1: clave nueva que no quita ni cambia la forma de nada. Se anuncia en el
 //        manifiesto porque si no, no hay forma de descubrirla: el punto de entrada
 //        publico es este JSON, y una pagina que nadie sabe que existe no ayuda a nadie.
-const integrationManifestSchemaVersion = '1.1.2';
+// 1.1.3: `loop_conductor_rule` en `method_conduction` y `loop_agent_cmd` en cada bloque
+//        de `registration_by_runtime`. Dos claves nuevas que no quitan ni cambian la
+//        forma de nada, asi que es de parche igual que 1.1.1 y 1.1.2. Se anuncian
+//        porque el conductor era descubrible SOLO leyendo la lista de artefactos: un
+//        cliente que miraba los adaptadores de su runtime no se enteraba de que existe,
+//        y se vio en un cliente real de opencode el 2026-08-15.
+const integrationManifestSchemaVersion = '1.1.3';
 const publicIntegrationBasePath = '/api/public/integrar';
 
 const integrationArtifacts = {
@@ -2567,7 +2577,11 @@ const integrationArtifacts = {
     // que las delata, los dos cerrojos contra el falso positivo y el campo `reset`— y que
     // la salida del agente pasa a ser eco y no herencia, con lo que eso implica para una
     // CLI que coloree.
-    artifactVersion: '1.7.0',
+    // 1.8.0: la variante de Windows lleva `--permission-mode acceptEdits`, que le faltaba
+    // —copiada tal cual, la CLI pedia permiso y una corrida desatendida se plantaba—, y el
+    // manual dice que estas lineas las publica tambien el manifiesto y que un auto-chequeo
+    // del arranque las ata. Solo cambia el texto: el conductor se queda en 1.7.1.
+    artifactVersion: '1.8.0',
     kind: 'loop_conductor_manual',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -2624,6 +2638,7 @@ const MCP_IDENTITY_HEADER_SPEC = [
 const buildMcpRuntimeRegistrations = (url) => ({
   claudecode: {
     config_file: '.mcp.json',
+    loop_agent_cmd: LOOP_CONDUCTOR_INVOCATION_BY_RUNTIME.claudecode,
     value_substitution: 'Environment variables expand as ${VAR} inside the config file.',
     config: {
       mcpServers: {
@@ -2642,6 +2657,7 @@ const buildMcpRuntimeRegistrations = (url) => ({
   },
   opencode: {
     config_file: 'opencode.json',
+    loop_agent_cmd: LOOP_CONDUCTOR_INVOCATION_BY_RUNTIME.opencode,
     value_substitution: 'Environment variables expand as {env:VAR} inside the config file. It is a plain text substitution against the PROCESS environment, done while the config is read: a variable that is not set becomes an empty string. Keep the url literal (an empty url makes opencode drop the server with "Invalid MCP URL" before anything else) and note that opencode does not read a .env file on its own — either export the variables before starting it, or install the .opencode/plugin/apts-env.js plugin that the adapter generator emits, which loads the project .env into this registration at startup.',
     config: {
       $schema: 'https://opencode.ai/config.json',
@@ -2743,6 +2759,17 @@ const METHOD_CONDUCTION = {
     'A backlog status update made outside this workflow is not enough: a story left at review is non-terminal, so without the terminal apts_submit_step it is never done.',
     'Once it is closed, re-enter drive_loop: apts_next hands out the next free unit, or advances the phase once every story is done.',
     'If the implementation is blocked, make sure the blocker is reflected in APTS and stop the cycle with a blocker report. Do not submit the story as done.'
+  ].join('\n'),
+  loop_conductor_rule: [
+    'The implementation phase can be ground unattended by the loop conductor: an OPTIONAL downloadable script that mechanises drive_loop by launching ONE agent process per story with clean context, waiting, and asking again, until the engine says done or a brake trips. It drives iterable dev-story units ONLY and stops rather than improvise if the engine recommends anything else; everything before implementation stays interactive.',
+    'To use it, download BOTH artifacts by id from this manifest\'s artifacts list: loop_conductor (the script — self-contained CommonJS, Node builtins only, so the single file is enough) and loop_conductor_readme (its manual). The manual is not optional: the flags, the brakes, the exit codes and the stop notifications are documented only there.',
+    'Do NOT pick the configuration yourself and do NOT invent an --agent-cmd. ASK THE OPERATOR, wait for the answer, and only then launch. The choice is per project and per machine, and the server cannot see either:',
+    '- Which runtime CLI implements the stories. The supported values are the keys of mcp_endpoint.registration_by_runtime, and each key publishes its ready-made line in loop_agent_cmd.agent_cmd, plus agent_cmd_windows where the POSIX form does not survive cmd.exe. Offer those as the options; do not compose a new one.',
+    '- Which model, and whether retries escalate through a ladder. loop_agent_cmd.model_escalation_example shows the shape for that runtime. Model names belong to the CLI, not to APTS: the conductor substitutes {model} as opaque text and validates nothing, so one runtime\'s ladder carries provider/model and the other does not. If a ladder is configured the command MUST contain {model} or the conductor refuses to start.',
+    '- Which agent_name it runs as: the roster identity registered as the dev role (set_agent_role), stable across turns, because it is the pointer that holds the story claim. And the brakes that cap the run (--max-iterations, --max-stalls).',
+    'Check the preconditions BEFORE asking, so the operator is not interrupted for a run that cannot start: apts_status must place the initiative in implementation, the dev role must be in the roster, and the epic must have children — an epic with none comes back from apts_next as blocked naming adopt_backlog_items, which is repaired without asking (drive_loop).',
+    'Always start with --dry-run: it resolves the first decision and reports what it would launch without executing anything. Identity falls through to the environment (APTS_MCP_URL, APTS_API_KEY, APTS_PROJECT_URL, APTS_AGENT_NAME, APTS_AGENT_EMAIL) and the environment falls through to a .env file (--dotenv), which the spawned agent inherits: keep the API key out of the command line and out of the conductor flags.',
+    'This rule is overridable per project, so an operator who has already settled the runtime and the model can serve them here and be asked nothing. Treat what you read as the decision only when it names them; otherwise ask.'
   ].join('\n')
 };
 
@@ -3055,7 +3082,7 @@ const buildIntegrationManifest = (req, methodConductionOverride = null) => {
         'Call the tools with minimal payloads: the integration layer supplies project_url and agent identity through the registration headers.',
         'Ensure the project has AGENTS.md. Create it from apts-agent-guidelines.md if it does not exist, or merge/update one APTS-managed section if it already does.',
         'Install the agents and commands for YOUR runtime, whichever of the supported ones it is: download surface_spec and adapter_generator, run the generator, and copy the directory named in the mapping for your runtime (bootstrap.agent_runtime_adapters.mappings) into the project root. Without this there is no method orchestrator and no slash commands, and the whole lifecycle has to be conducted by hand.',
-        'To grind the implementation phase unattended, download loop_conductor and its README (loop_conductor_readme) and run it: it launches one agent process per story with fresh context and stops on its own when the engine says done or a brake trips. It does NOT conduct the generative phases — those are interactive.',
+        'To grind the implementation phase unattended, follow method_conduction.loop_conductor_rule: download loop_conductor and loop_conductor_readme, and ASK THE OPERATOR for the runtime, the model and the dev agent_name before launching anything. The runtime\'s ready-made command line is published in mcp_endpoint.registration_by_runtime.<runtime>.loop_agent_cmd. It does NOT conduct the generative phases — those are interactive.',
         'Treat interrupted execution as resumable work: call register_task with backlog_item_id so APTS can resume existing stalled/todo/in_progress tasks for that backlog item instead of creating duplicates.',
         'Prepare a local append-only resilience journal, for example at .apts/agent-resilience-log.jsonl, without treating it as a source of truth.',
         'Inspect local files that currently contain backlog, planning, or operational tracking.',
@@ -6908,6 +6935,12 @@ const startServer = async () => {
       process.exit(3);
     });
     logger.info(contractCheckResult, 'Remote MCP contract self-check passed');
+
+    const loopConductorCheckResult = await checkLoopConductorInvocations().catch((error) => {
+      logger.fatal({ err: error, details: error?.details || null }, 'Loop conductor self-check failed');
+      process.exit(3);
+    });
+    logger.info(loopConductorCheckResult, 'Loop conductor invocation self-check passed');
 
     const [batchNo, migrationNames] = await db.migrate.latest();
 

@@ -326,9 +326,14 @@ mecanismo sobre el que cabalga la conmutacion—. Sin roster no hay nada que hac
 | Reglas de conduccion, publicadas como dato | `method_conduction` en `GET /api/public/integrar` |
 
 `method_conduction` es la fuente autoritativa para un cliente: trae `bootstrap_rule`,
-`identity_switching_rule`, `drive_loop`, `generative_step_rule` y
-`dev_story_completion_rule`. Los agentes generados apuntan a el en vez de repetirlo, para
-que no haya una segunda copia que se desincronice.
+`identity_switching_rule`, `drive_loop`, `generative_step_rule`, `dev_story_completion_rule`
+y `loop_conductor_rule`. Los agentes generados apuntan a el en vez de repetirlo, para que no
+haya una segunda copia que se desincronice.
+
+Los seis campos se pisan **por proyecto** (`PUT /api/dashboard/projects/:url/method-conduction`),
+y el manifiesto sirve lo efectivo cuando se le pasa `?project_url=`. Es lo que permite que
+`loop_conductor_rule` mande preguntar al operador por defecto y, en un proyecto que ya tiene
+decidido su runtime y su modelo, se los diga directamente.
 
 **Fuera de alcance, declarado:** editar `workflow_steps` desde el panel. Las instrucciones
 paso a paso del metodo se cambian sembrando el corpus.
@@ -593,9 +598,29 @@ node apts-loop.js \
 ```
 
 **En Windows** el `$(cat ...)` no existe —`shell: true` resuelve a `cmd.exe`—, asi que la
-forma equivalente es `type {prompt_file} | claude -p --model {model}`. Para opencode:
-`opencode run -m {model} -f {prompt_file} "Implementa la unidad descrita en el archivo
-adjunto"`, que ni siquiera mete el prompt en la linea de shell.
+forma equivalente es:
+
+```bash
+type {prompt_file} | claude -p --model {model} --permission-mode acceptEdits
+```
+
+Y para opencode, que ni siquiera mete el prompt en la linea de shell y por eso vale igual en
+los dos sistemas:
+
+```bash
+opencode run -m {model} -f {prompt_file} "Implementa la unidad descrita en el archivo adjunto"
+```
+
+Los nombres de modelo son de la CLI y no de APTS —el conductor sustituye `{model}` como texto
+opaco y no valida nada—, asi que la escalera de opencode lleva proveedor y la de Claude Code
+no: `anthropic/claude-sonnet-5,anthropic/claude-opus-5` contra
+`claude-sonnet-5,claude-opus-5`.
+
+Estas lineas no se eligen a mano leyendo esto: el manifiesto las publica por runtime en
+`registration_by_runtime.<runtime>.loop_agent_cmd`, y la fuente unica es
+`backend/scripts/lib/loop_conductor_invocations.js`. Un auto-chequeo del arranque las ata al
+README del conductor —que es artefacto descargable— y `scripts/test_loop_conductor_invocations.js`
+las ata ademas a este archivo.
 
 Lo que hay que saber antes de lanzarlo:
 
