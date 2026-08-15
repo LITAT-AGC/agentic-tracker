@@ -111,6 +111,110 @@ el bucle deje de ser descubrible solo por casualidad.
 
 En PROD desde el 2026-08-15 (`dee0746`), comprobado contra `apts.informaticos.ar`.
 
+**La sesion del agente ya se ve mientras pasa, y se puede consultar despues.** De una
+ejecucion de media hora APTS guardaba lo que se puede medir DESDE FUERA —modelo, intento,
+duracion, codigo de salida y, desde la lectura del JSON de la CLI, lo que costo—. El detalle
+de lo que el agente hizo vivia solo en el terminal de la maquina que lanzo el bucle y
+desaparecia al cerrarlo. Ahora `--session-stream` lo copia a APTS y el panel lo enseña en
+vivo.
+
+El obstaculo no estaba a la vista: `--output-format json`, que es lo que pedian los comandos
+publicados, imprime **un solo objeto al terminar**. Sirve para la contabilidad y es inutil
+para cualquier cosa en vivo. Las tres copias atadas por el auto-chequeo pasan a
+`--output-format stream-json --verbose`, y eso ademas apaga un coste que el README ya
+documentaba como pagado: la consola dejaba de escribir durante veinte minutos. **El lector
+de coste no se toco**, y no por suerte: la ultima linea de `stream-json` sigue siendo el
+mismo objeto `type:"result"`, comprobado contra la salida capturada de la CLI real, y
+`LECTORES[0]` exige `type === 'result'`, asi que los `assistant` intermedios —que tambien
+llevan `usage`— no lo confunden. Opencode no cambia: su `--format json` ya era NDJSON.
+
+**Tabla nueva y no `agent_logs`** (migracion 025, `conductor_agent_events`). Reusar
+`agent_logs` fue la decision razonada del diario del conductor y sigue siendo la correcta
+alli, pero aqui se rompe por tres sitios: son dos registros distintos —`agent_logs` es el
+del METODO, lo que un agente reporto; esto es el de la EJECUCION, lo que paso dentro de un
+proceso—, el volumen es de dos a tres ordenes de magnitud mayor —unas 400 filas por story
+contra las 5 o 6 del diario, que ahogarian la pestaña Logs y su filtro por `action_type`—, y
+sobre todo la purga: separarlas es lo unico que permite tirar el registro de la ejecucion sin
+tocar el del metodo. La FK va a `tasks` y no a `backlog_items` porque la tarea ES la
+ejecucion (una por unidad y por pasada), con `ON DELETE CASCADE`. El `seq` lo pone el
+conductor y no el servidor: es lo que hace que el cursor del panel no dependa de relojes
+—`created_at` empata entre los veinticinco eventos de un mismo lote— y lo que hace el lote
+idempotente contra `UNIQUE (task_id, seq)`, que es lo que permite que el envio sea
+best-effort sin arriesgarse a duplicar una sesion. Puede tener HUECOS a proposito, y quien lo
+lea no puede suponer que sea denso.
+
+**El filtrado vive en el conductor**, no en el servidor: mandar el stream crudo seria pagar
+el ancho de banda y el parseo de lo que se va a tirar. La mitad del ahorro es una sola
+estructura: cada `tool_result` viaja **dos veces** en el stream de Claude Code —en
+`message.content[]` y otra vez entero en `tool_use_result`, con la ruta absoluta y el archivo
+completo dentro—, y esa segunda copia es la unica que crece con el tamaño del repositorio en
+vez de con lo que el agente hizo. No viaja. Del `init` sobrevive lo que cambia por corrida y
+no las listas de herramientas y comandos, que son estaticas. Un tipo de evento que ningun
+lector reconozca **se conserva** reducido, que es la unica forma de enterarse de que una CLI
+cambio su salida sin sospecharlo antes. De opencode solo se normaliza lo que hay capturado
+—`text` y `step_finish`—: sus eventos de herramienta caen en ese cubo en vez de inventarles
+una forma que nadie ha visto.
+
+**Y va APAGADO por defecto**, unica excepcion a la convencion del repositorio. Esa convencion
+—«una ejecucion sin rastro es el problema, no una preferencia neutral»— cubre el registro de
+las DECISIONES, que ya existe y sigue puesto. Esto añade el CONTENIDO de la sesion: trozos de
+archivos, rutas absolutas de la maquina y lo que a un mensaje de error se le ocurra traer.
+La asimetria decide: olvidarse de encenderlo cuesta la vista de una corrida, y olvidarse de
+apagarlo mete el codigo de un cliente en la base de APTS, que no se despersiste. Hay
+redaccion por patrones (`sk-…`, `ghp_…`, `AKIA…`, `Bearer`, claves privadas, JWT y
+asignaciones tipo `password=`) y se documenta como lo que es: **segunda** linea, porque un
+patron no reconoce el secreto que no conoce. La frase del README del conductor —«el diario no
+contiene secretos»— **no se corrige porque sigue siendo cierta**: el contenido de la sesion no
+pasa por el diario local, que solo anota cuantos eventos se mandaron. Se dice explicitamente
+para que nadie arrastre esa promesa al sitio equivocado.
+
+**Sondeo con cursor y no SSE.** El README del conductor argumenta que para las ORDENES diez
+segundos son indistinguibles de instantaneo, y ese argumento no aplica aqui: ver a un agente
+trabajar si quiere latencia baja, asi que el panel pregunta cada dos segundos con
+`?after_seq=` y solo mientras mira la ejecucion en curso. Lo que no compra un socket es el
+salto que queda —de dos segundos a instantaneo no lo nota nadie mirando pensar a un modelo— a
+cambio de conexion, reconexion, autenticacion por sesion y un intermediario que puede
+bufferear un flujo que nunca cierra.
+
+**El envio es best-effort con una diferencia respecto al diario.** Agrupa (25 eventos o 1,5 s,
+una peticion en vuelo, cola con tope que tira lo mas viejo y lo dice), no reintenta y se traga
+los errores; pero **si mira el codigo de respuesta**, y solo para el cortacircuitos: el
+conductor es un artefacto descargable que va a hablar con APTS anteriores a esta ruta, y sin
+el se comeria un 404 cada segundo y medio durante media hora. A los dos 404 deja de intentarlo
+**durante toda la corrida** —cuenta de la corrida y no de la unidad, para no pagar el
+descubrimiento una vez por story— y lo dice una vez.
+
+**Cuantas filas, que las purga, y que pasa si no.** Unas 400 por story y unas 8.000 por una
+corrida de veinte, con unos 12 MB. Sin purga la respuesta honesta a «que las borra» seria
+«nada»: el `ON DELETE CASCADE` solo se dispara al borrar una tarea, y APTS no borra tareas por
+ningun camino. Asi que se purga por antiguedad de forma perezosa desde la propia ingesta, como
+mucho una vez por hora —el mismo patron de poda que ya usa la presencia del conductor, sin
+cron ni proceso nuevo—: `CONDUCTOR_SESSION_RETENTION_DAYS`, 30 por defecto, `0` la desactiva.
+Si no se purgara, el panel no se enteraria (todas sus consultas van por el indice) y lo
+pagarian el disco y la copia de la base que el despliegue hace antes de migrar.
+
+**El contrato no se toca**, y se comprobo en vez de suponerlo: `contract_check.mjs` compara la
+lista de herramientas MCP contra `apts_skills.json` y nada mas, y las rutas HTTP del conductor
+—diario, buzon y ahora sesion— estan fuera a proposito por la misma razon que las otras dos:
+no son del metodo y no las llama un agente. `schema_version` tampoco sube: cambia el VALOR de
+`loop_agent_cmd`, no aparece ninguna clave nueva, que es la regla con la que subieron 1.1.1,
+1.1.2 y 1.1.3. Los dos artefactos si suben: el conductor a **1.8.0** y su README a **1.9.0**.
+
+Cubierto por dos pruebas, una por lado. `test_conductor_session_stream.js` levanta un APTS de
+mentira en puerto efimero y lanza el conductor de verdad con la salida **capturada** de Claude
+Code 2.1.233: 50 comprobaciones, y las que mas importan son que la contabilidad del coste sale
+identica con `stream-json` (la unica regresion que esto podia causar en algo que ya
+funcionaba), que `tool_use_result` no llega nunca, y que sin la bandera no se manda ni una
+peticion. `test_conductor_session_endpoint.js` prueba las dos rutas contra servidor y base de
+verdad: idempotencia del `seq`, que el cursor ni relee ni se salta, y que el proyecto es
+frontera —sabiendo el UUID de una tarea de otro proyecto, la ruta del panel no la sirve—.
+
+Las dos encontraron fallos reales antes de que llegaran a ninguna parte. El que mas importa
+era ironico: la guarda que apagaba el envio al tocar el tope por unidad tambien impedia
+entregar el evento `recorte` que anuncia ese tope, o sea que el mecanismo puesto para que el
+truncado no fuera silencioso lo volvia silencioso. Son dos estados y no uno: dejar de ACEPTAR
+eventos y dejar de MANDARLOS.
+
 **La revision adversaria ya es una compuerta, y de la unidad.** `bmad-code-review` esta sembrado en
 la biblioteca (`bmad:v6.8.0`, fase `implementation`, dueño `bmad-agent-dev`) y describe exactamente
 lo que hacia falta —tres capas paralelas: Blind Hunter, Edge Case Hunter, Acceptance Auditor— pero

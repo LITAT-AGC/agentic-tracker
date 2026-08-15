@@ -43,6 +43,7 @@ const { spawn, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { StringDecoder } = require('node:string_decoder');
 
 const NOMBRE = 'apts-loop';
 
@@ -162,6 +163,162 @@ const reconocerCondicion = (cola, ms) => {
   return null;
 };
 
+// ---- lo que la sesión del agente costó ----
+//
+// El conductor mide desde fuera, así que hasta ahora la ejecución de una story cabía en
+// «modelo, intento, duración y código de salida»: el techo de una corrida se decía en
+// sesiones, que es lo que se puede contar sin abrir la sesión, y no en dinero, que es lo
+// que se paga. Lo único que faltaba para cerrar esa distancia es que la CLI hable JSON —
+// `--output-format json` en Claude Code, `--format json` en Opencode—, y eso ya lo decide
+// `--agent-cmd`, que sigue siendo la única elección de runtime que hay aquí.
+//
+// Por eso esto NO tiene bandera y NO se configura: se lee lo que venga. Si el comando
+// pide JSON, el resumen aparece en el diario, en la tarea y en el aviso; si no lo pide,
+// no aparece nada y el bucle se comporta exactamente igual que antes. Un conductor que
+// hubiera que avisar de qué formato esperar sería un conductor que sabe qué hay al otro
+// lado, que es justo lo que este diseño no quiere.
+//
+// El buffer es su propio rodante y no la cola de 4 KB: el objeto de Claude Code lleva
+// dentro el texto final de la sesión y desborda esa cola con facilidad. 256 KB es de
+// sobra para el último objeto —o los últimos eventos— y sigue siendo memoria acotada
+// frente a los megabytes que escribe una story larga en texto plano.
+const RESUMEN_MAX_BYTES = 256 * 1024;
+
+const num = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+const vacio = () => ({ entrada: 0, salida: 0, cache_lectura: 0, cache_escritura: 0 });
+
+// Dos formas reales, capturadas de las dos CLIs y no deducidas de su documentación:
+//
+//   claude -p … --output-format json
+//     un ÚNICO objeto al final, con el total de la corrida ya sumado.
+//     {"type":"result","subtype":"success","is_error":false,"num_turns":1,
+//      "session_id":"…","total_cost_usd":0.017,
+//      "usage":{"input_tokens":10,"output_tokens":39,
+//               "cache_creation_input_tokens":7057,"cache_read_input_tokens":21649}}
+//
+//   opencode run --format json
+//     NDJSON de eventos; el coste y los tokens van POR PASO, así que aquí sí se suma.
+//     {"type":"step_finish","sessionID":"ses_…","part":{"reason":"stop","cost":0.0033,
+//      "tokens":{"total":7643,"input":7641,"output":2,"reasoning":0,
+//                "cache":{"write":0,"read":0}}}}
+//
+// La diferencia entre «ya sumado» y «hay que sumar» es la razón por la que esto son dos
+// lectores y no una búsqueda genérica de claves parecidas: acumular el total de Claude
+// Code por cada objeto que lo lleve daría una factura inventada.
+const LECTORES = [
+  {
+    reconoce: (o) => o.type === 'result' && (o.usage || typeof o.total_cost_usd === 'number'),
+    leer: (objetos) => {
+      const o = objetos[objetos.length - 1];
+      const u = o.usage || {};
+      return {
+        runtime: 'claudecode',
+        coste_usd: typeof o.total_cost_usd === 'number' ? o.total_cost_usd : null,
+        tokens: {
+          entrada: num(u.input_tokens),
+          salida: num(u.output_tokens),
+          cache_lectura: num(u.cache_read_input_tokens),
+          cache_escritura: num(u.cache_creation_input_tokens),
+        },
+        turnos: typeof o.num_turns === 'number' ? o.num_turns : null,
+        sesion: o.session_id || null,
+        subtipo: o.subtype || null,
+        // Con `--output-format json`, un fallo dentro de la corrida —autenticación, sobre
+        // todo— se imprime COMO RESULTADO. Quien lo delata es este campo, no el código de
+        // salida, y por eso se lee: ver más abajo qué se hace con él.
+        fallo: o.is_error === true,
+      };
+    },
+  },
+  {
+    reconoce: (o) => o.type === 'step_finish' && o.part && o.part.tokens,
+    leer: (objetos) => {
+      const tokens = vacio();
+      let coste = 0;
+      for (const o of objetos) {
+        const k = o.part.tokens || {};
+        const cache = k.cache || {};
+        tokens.entrada += num(k.input);
+        tokens.salida += num(k.output);
+        tokens.cache_lectura += num(cache.read);
+        tokens.cache_escritura += num(cache.write);
+        coste += num(o.part.cost);
+      }
+      const ultimo = objetos[objetos.length - 1];
+      return {
+        runtime: 'opencode',
+        coste_usd: coste,
+        tokens,
+        turnos: objetos.length,
+        sesion: ultimo.sessionID || null,
+        subtipo: ultimo.part.reason || null,
+        // Opencode no publica un equivalente de `is_error` en estos eventos: su fallo
+        // sigue leyéndose por el código de salida, como siempre.
+        fallo: false,
+      };
+    },
+  },
+];
+
+const leerResumen = (texto) => {
+  const objetos = [];
+  for (const linea of String(texto || '').split('\n')) {
+    const t = linea.trim();
+    // Una línea del buffer rodante puede venir cortada por delante —la primera siempre lo
+    // está si hubo recorte— y entonces no parsea. Se descarta sin ruido: esto es
+    // best-effort, y equivocarse aquí no puede costar una vuelta.
+    if (t.length < 2 || t[0] !== '{' || t[t.length - 1] !== '}') continue;
+    try {
+      const o = JSON.parse(t);
+      if (o && typeof o === 'object' && !Array.isArray(o)) objetos.push(o);
+    } catch (_) { /* no era JSON; también pasa con texto que empieza por llave */ }
+  }
+  if (!objetos.length) return null;
+  for (const lector of LECTORES) {
+    const suyos = objetos.filter((o) => { try { return lector.reconoce(o); } catch (_) { return false; } });
+    if (suyos.length) return lector.leer(suyos);
+  }
+  return null;
+};
+
+const miles = (n) => (n >= 10000 ? `${Math.round(n / 1000)}k` : String(n));
+const dolares = (n) => `$${n < 0.01 ? n.toFixed(5) : n.toFixed(4)}`;
+
+// La línea que lee una persona. Los cuatro números por separado están en el diario; aquí
+// va el total y el reparto, porque de ahí sale la única pregunta que se hace mirando esto:
+// si lo que se pagó fue trabajo o fue releer el repositorio.
+const describirResumen = (r) => {
+  if (!r) return '';
+  const t = r.tokens;
+  const total = t.entrada + t.salida + t.cache_lectura + t.cache_escritura;
+  const partes = [`${miles(total)} tok (in ${miles(t.entrada)} · out ${miles(t.salida)}`
+    + `${t.cache_lectura || t.cache_escritura ? ` · caché ${miles(t.cache_lectura + t.cache_escritura)}` : ''})`];
+  if (r.coste_usd != null) partes.push(dolares(r.coste_usd));
+  if (r.turnos != null) partes.push(`${r.turnos} turno${r.turnos === 1 ? '' : 's'}`);
+  return partes.join(' · ');
+};
+
+// Lo que va gastando la corrida entera. Se anuncia al parar por el mismo motivo por el
+// que el techo de sesiones se anuncia al arrancar: es lo que cuesta dinero.
+const gasto = { coste: 0, tokens: 0, sesiones: 0 };
+
+const acumularGasto = (r) => {
+  if (!r) return;
+  const t = r.tokens;
+  gasto.sesiones += 1;
+  gasto.tokens += t.entrada + t.salida + t.cache_lectura + t.cache_escritura;
+  if (r.coste_usd != null) gasto.coste += r.coste_usd;
+};
+
+const describirGasto = () => {
+  if (!gasto.sesiones) return '';
+  const plural = gasto.sesiones === 1 ? '' : 's';
+  // El coste sólo si lo hubo: una CLI que publique tokens pero no precio dejaría escrito
+  // «$0.00000», que se lee como «salió gratis» y no como «no se midió».
+  return `${miles(gasto.tokens)} tok${gasto.coste > 0 ? ` · ${dolares(gasto.coste)}` : ''}`
+    + ` en ${gasto.sesiones} sesion${plural ? 'es' : ''} medida${plural}`;
+};
+
 const AYUDA = `
 ${NOMBRE} — conduce secuencialmente la implementación de una iniciativa APTS.
 
@@ -212,6 +369,16 @@ Frenos:
   --no-journal-remote     APTS_LOOP_NO_JOURNAL_REMOTE=1
                           no copiar los eventos del diario a APTS. Por defecto SÍ se
                           copian —los que se ven desde fuera— colgados de esa misma tarea.
+  --session-stream        APTS_LOOP_SESSION_STREAM=1
+                          copiar a APTS lo que el agente hace DENTRO de su sesión (texto,
+                          herramientas, resultados) para verlo en vivo desde el panel y
+                          consultarlo después. APAGADO por defecto, al revés que los dos
+                          anteriores: esto lleva contenido de archivos y rutas de esta
+                          máquina, así que encenderlo es decidir que eso puede vivir en la
+                          base de APTS. Hay redacción por patrones, pero es la segunda
+                          línea y no la primera. Necesita que la CLI emita el stream:
+                          --output-format stream-json --verbose en Claude Code; el
+                          --format json de opencode ya lo es.
 
 Modo espera:
   --daemon                no conducir nada todavía: conectarse a APTS y esperar órdenes
@@ -670,6 +837,405 @@ const registrar = (cfg, evento) => {
   }
 };
 
+// ---- la sesión del agente ----
+//
+// Hasta aquí, de media hora de trabajo APTS guardaba lo que se puede medir DESDE FUERA:
+// modelo, intento, duración, código de salida y —desde que la CLI habla JSON— lo que
+// costó. Lo que el agente hizo dentro seguía existiendo sólo en el terminal de la máquina
+// que lanzó el bucle. Esto lo copia a APTS: qué leyó, qué escribió, qué dijo y qué falló,
+// mientras pasa.
+//
+// SE FILTRA AQUÍ Y NO ALLÍ. El stream crudo son cientos o miles de eventos por story, y
+// los `tool_result` de una lectura de archivo son enormes: mandarlo entero para que el
+// servidor lo tire sería pagar el ancho de banda y el parseo de lo que no se va a guardar.
+// Se manda una forma normalizada, la misma para las dos CLIs, con topes por evento y por
+// unidad. Lo que se tira por tope se dice —evento `recorte`—: un truncado silencioso se
+// lee como «esto es todo lo que pasó», que es peor que no guardar nada.
+//
+// VA APAGADO POR DEFECTO, y es la única cosa de este archivo que lo va. La convención del
+// repositorio es que el registro está puesto, porque una ejecución sin rastro es el
+// problema y no una preferencia neutral — pero esa convención cubre el registro de las
+// DECISIONES, que ya existe y sigue puesto (el diario, la tarea, el coste). Esto añade el
+// CONTENIDO de la sesión, que es otra clase de dato: lleva contenido de archivos, rutas
+// absolutas de la máquina y lo que a un mensaje de error se le ocurra traer dentro. La
+// asimetría es lo que decide: olvidarse de encenderlo cuesta la vista de una corrida;
+// olvidarse de apagarlo mete el código de un cliente en la base de APTS, y eso no se
+// despersiste.
+//
+// La redacción por patrones de abajo es la SEGUNDA línea, no la primera. Un patrón no
+// reconoce el secreto que no conoce, así que quien enciende esto está decidiendo que el
+// contenido de esas sesiones puede vivir en APTS.
+//
+// NO se escribe en el diario local. El diario es el registro de las decisiones del bucle y
+// esto lo ahogaría exactamente igual que ahogaría la pestaña Logs — el mismo argumento, un
+// nivel más abajo—; y así la frase «no contiene secretos» que el diario promete sigue
+// siendo cierta. Quien quiera copia local ya la tiene: el conductor hace eco de la salida
+// del agente tal cual, así que basta redirigir la salida estándar.
+const SESION_LOTE = 25;
+const SESION_INTERVALO_MS = entero(process.env.APTS_LOOP_SESSION_FLUSH_MS, 1500);
+// Tope de la cola en memoria. Al desbordar se tira lo MÁS VIEJO: si se desborda es porque
+// el servidor no traga, y lo que quiere quien está mirando es el presente.
+const SESION_COLA_MAX = 500;
+const SESION_EVENTO_MAX_BYTES = 2048;
+const SESION_TEXTO_MAX = 2000;
+const SESION_RESULTADO_MAX = 500;
+// Topes por unidad de trabajo. Ajustables por entorno y sin bandera, como el latido y el
+// sondeo: nadie los toca en una corrida normal, pero una prueba no puede escribir dos mil
+// eventos para ver morder un tope.
+const SESION_MAX_EVENTOS = entero(process.env.APTS_LOOP_SESSION_MAX_EVENTS, 2000);
+const SESION_MAX_BYTES = entero(process.env.APTS_LOOP_SESSION_MAX_BYTES, 1024 * 1024);
+const SESION_TIMEOUT_MS = 5000;
+
+// Segunda línea de defensa, no primera. Sólo formas que se reconocen sin ambigüedad: un
+// patrón demasiado ancho redactaría el código que se está mirando y haría inútil la vista.
+const REDACCIONES = [
+  [/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, '[clave privada redactada]'],
+  [/\bsk-[A-Za-z0-9_-]{20,}/g, '[redactado]'],
+  [/\bgh[pousr]_[A-Za-z0-9]{20,}/g, '[redactado]'],
+  [/\bAKIA[0-9A-Z]{16}\b/g, '[redactado]'],
+  [/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{6,}/g, '[redactado]'],
+  [/(Bearer\s+)[A-Za-z0-9._~+/-]{16,}=*/gi, '$1[redactado]'],
+  [/((?:password|passwd|secret|token|api[_-]?key|access[_-]?key)["'\s]*[:=]\s*["']?)([^\s"',;}]{6,})/gi, '$1[redactado]'],
+];
+
+const redactar = (texto) => {
+  let t = String(texto);
+  for (const [patron, por] of REDACCIONES) t = t.replace(patron, por);
+  return t;
+};
+
+// Redacta y recorta. El recorte dice cuánto se dejó fuera, por lo mismo de siempre: un
+// texto cortado sin marca se lee como un texto completo.
+const recortar = (valor, max) => {
+  const crudo = typeof valor === 'string' ? valor : (JSON.stringify(valor) ?? '');
+  const t = redactar(crudo);
+  return t.length > max ? `${t.slice(0, max)}… [+${t.length - max}]` : t;
+};
+
+const bloques = (o) => {
+  const c = o && o.message && o.message.content;
+  return Array.isArray(c) ? c : [];
+};
+
+// Dos lectores, como en la contabilidad del coste y por la misma razón: las formas están
+// CAPTURADAS de las CLIs de verdad, no deducidas de su documentación.
+//
+// Devuelve un array de eventos (uno de la CLI puede dar varios: un mensaje del asistente
+// trae texto y llamadas a herramienta en el mismo objeto), `[]` si se reconoce y se
+// descarta a propósito, o `null` si este lector no sabe qué es.
+const normalizarClaudeCode = (o) => {
+  // Los deltas de mensaje parcial (`--include-partial-messages`) son ruido puro para
+  // persistir: el texto llega otra vez, entero, en el `assistant` que los cierra.
+  if (o.type === 'stream_event') return [];
+  if (o.type === 'system') {
+    if (o.subtype !== 'init') {
+      // `api_retry` y compañía: pocos, pequeños y justo lo que explica un parón.
+      return [{ kind: 'aviso', payload: { subtipo: o.subtype || 'system', detalle: recortar(o, 400) } }];
+    }
+    // De los 2,4 KB del init sobrevive lo que cambia de una corrida a otra. Las listas de
+    // herramientas, comandos y skills son estáticas: repetirlas por story sería pagar
+    // memoria en la base por un dato que no dice nada de ESTA ejecución.
+    return [{
+      kind: 'init',
+      payload: {
+        runtime: 'claudecode',
+        modelo: o.model || null,
+        sesion: o.session_id || null,
+        cwd: o.cwd || null,
+        permisos: o.permissionMode || null,
+        version: o.claude_code_version || null,
+        herramientas: Array.isArray(o.tools) ? o.tools.length : null,
+        // El estado de los MCP sí viaja: un `needs-auth` en el de APTS explica por sí solo
+        // una story entera que no llegó a ninguna parte.
+        mcp: Array.isArray(o.mcp_servers) ? o.mcp_servers.map((s) => `${s.name}:${s.status}`) : [],
+      },
+    }];
+  }
+  // Llega ANTES de que el límite muerda, y trae la hora de reset. Es la misma información
+  // que hoy sólo se saca leyendo el texto del error cuando ya es tarde (códigos 21-23).
+  if (o.type === 'rate_limit_event') {
+    const i = o.rate_limit_info || {};
+    return [{
+      kind: 'aviso',
+      payload: {
+        subtipo: 'rate_limit',
+        estado: i.status || null,
+        ventana: i.rateLimitType || null,
+        reset: typeof i.resetsAt === 'number' ? new Date(i.resetsAt * 1000).toISOString() : null,
+      },
+    }];
+  }
+  if (o.type === 'assistant') {
+    const eventos = [];
+    for (const b of bloques(o)) {
+      if (b.type === 'text' && b.text) {
+        eventos.push({ kind: 'texto', payload: { texto: recortar(b.text, SESION_TEXTO_MAX) } });
+      } else if (b.type === 'thinking' && b.thinking) {
+        // Más corto que el texto a propósito: es lo más voluminoso y lo menos consultable
+        // después, pero verlo pensar es media respuesta a «¿por qué hizo eso?».
+        eventos.push({ kind: 'texto', payload: { pensando: true, texto: recortar(b.thinking, SESION_RESULTADO_MAX) } });
+      } else if (b.type === 'tool_use') {
+        eventos.push({ kind: 'herramienta', payload: { id: b.id || null, nombre: b.name || null, entrada: recortar(b.input, SESION_RESULTADO_MAX) } });
+      }
+    }
+    return eventos;
+  }
+  if (o.type === 'user') {
+    // `tool_use_result` NO se lee, y es la mitad del ahorro: trae el MISMO resultado por
+    // segunda vez y entero —el archivo completo, con su ruta absoluta— al lado del que sí
+    // se lee. Es la única estructura de todo el stream que crece con el tamaño del
+    // repositorio en vez de con lo que el agente hizo.
+    return bloques(o)
+      .filter((b) => b.type === 'tool_result')
+      .map((b) => ({
+        kind: 'resultado',
+        payload: { id: b.tool_use_id || null, error: b.is_error === true, salida: recortar(b.content, SESION_RESULTADO_MAX) },
+      }));
+  }
+  if (o.type === 'result') {
+    const u = o.usage || {};
+    return [{
+      kind: 'fin',
+      payload: {
+        fallo: o.is_error === true,
+        subtipo: o.subtype || null,
+        turnos: typeof o.num_turns === 'number' ? o.num_turns : null,
+        coste_usd: typeof o.total_cost_usd === 'number' ? o.total_cost_usd : null,
+        ms: typeof o.duration_ms === 'number' ? o.duration_ms : null,
+        tokens: {
+          entrada: num(u.input_tokens),
+          salida: num(u.output_tokens),
+          cache_lectura: num(u.cache_read_input_tokens),
+          cache_escritura: num(u.cache_creation_input_tokens),
+        },
+      },
+    }];
+  }
+  return null;
+};
+
+// De opencode sólo se normaliza lo que hay capturado —`text` y `step_finish`, que son las
+// formas que ya usa la prueba del coste—. Sus eventos de herramienta NO se inventan aquí:
+// llegan como `otro`, con su tipo y una muestra, que es exactamente el mecanismo para que
+// quien capture uno de verdad pueda añadir el lector. Deducir la forma de una salida que
+// no se ha visto es cómo se escriben los lectores que fallan en silencio.
+const normalizarOpencode = (o) => {
+  if (o.type === 'step_start') return [];
+  if (o.type === 'text' && o.part && typeof o.part.text === 'string') {
+    return [{ kind: 'texto', payload: { texto: recortar(o.part.text, SESION_TEXTO_MAX) } }];
+  }
+  if (o.type === 'step_finish' && o.part && o.part.tokens) {
+    const k = o.part.tokens || {};
+    const cache = k.cache || {};
+    return [{
+      kind: 'fin_paso',
+      payload: {
+        motivo: o.part.reason || null,
+        coste_usd: num(o.part.cost),
+        tokens: {
+          entrada: num(k.input), salida: num(k.output), cache_lectura: num(cache.read), cache_escritura: num(cache.write),
+        },
+      },
+    }];
+  }
+  return null;
+};
+
+const normalizar = (o) => normalizarClaudeCode(o) ?? normalizarOpencode(o) ?? [{
+  // Un tipo que ningún lector reconoce se conserva reducido en vez de tirarse. Cuesta
+  // doscientos bytes y es la única forma de enterarse de que una CLI cambió su salida sin
+  // que haya que sospecharlo primero; es la misma razón por la que los fixtures de las
+  // pruebas se capturan en vez de escribirse a mano.
+  kind: 'otro',
+  payload: { tipo: typeof o.type === 'string' ? o.type : null, muestra: recortar(o, 200) },
+}];
+
+let sesionActual = null;
+let avisadoSinStream = false;
+// Cuenta de la CORRIDA y no de la unidad: si este APTS no tiene la ruta, no la va a tener
+// en la story siguiente. Por unidad, un servidor anterior se comería dos peticiones por
+// story para volver a descubrir lo mismo cada vez.
+let sesionSinRuta = 0;
+const SESION_SIN_RUTA_MAX = 2;
+
+const crearSesion = (cfg, taskId) => {
+  if (!cfg.sesionStream || !taskId) return null;
+  if (sesionSinRuta >= SESION_SIN_RUTA_MAX) return null;
+
+  const url = new URL('/api/conductor/session', cfg.mcpUrl).toString();
+  let seq = 0;
+  let cola = [];
+  let enVuelo = Promise.resolve();
+  let eventos = 0;
+  let bytes = 0;
+  let descartados = 0;
+  let apagada = null;
+  // Dos estados y no uno, y la diferencia importa: `apagada` es dejar de ACEPTAR eventos
+  // nuevos, `sinDestino` es dejar de MANDARLOS. Al tocar el tope por unidad se deja de
+  // aceptar pero hay que seguir mandando, porque lo último que se acepta es justamente el
+  // aviso de que se recortó; fundir los dos estados en una bandera hacía que ese aviso se
+  // quedara en la cola y que el tope truncara la sesión en silencio, que es exactamente lo
+  // que el aviso viene a impedir.
+  let sinDestino = false;
+  let resto = '';
+
+  const apagar = (motivo, tirar) => {
+    if (apagada) return;
+    apagada = motivo;
+    if (tirar) { sinDestino = true; cola = []; }
+    log(`sesión del agente: se deja de enviar (${motivo})`);
+    registrar(cfg, { evento: 'sesion', accion: 'apagada', task_id: taskId, motivo, eventos, descartados });
+  };
+
+  // Una sola petición en vuelo, y por construcción: los envíos se encadenan en vez de
+  // comprobar una bandera. Mientras uno viaja la cola sigue creciendo y el lote siguiente
+  // sale más gordo, que es lo que se quiere; lanzar peticiones en paralelo no adelantaría
+  // nada y multiplicaría las conexiones justo cuando el servidor ya va lento. La cadena es
+  // además lo que hace que el vaciado final pueda esperar a lo que ya estaba en camino: con
+  // una bandera, el cierre veía la cola quieta y se iba creyendo que no avanzaba.
+  //
+  // Ningún eslabón rechaza nunca —todo error se traga dentro—, así que la cadena no se puede
+  // envenenar.
+  const enviar = () => {
+    enVuelo = enVuelo.then(async () => {
+      if (!cola.length || sinDestino) return;
+      const lote = cola.splice(0, SESION_LOTE * 4);
+      try {
+        const r = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${cfg.apiKey}`,
+            'X-APTS-Project-Url': cfg.projectUrl,
+            'X-APTS-Agent-Name': cfg.agentName,
+            'X-APTS-Agent-Email': cfg.agentEmail,
+          },
+          body: JSON.stringify({ task_id: taskId, events: lote }),
+          signal: AbortSignal.timeout(SESION_TIMEOUT_MS),
+        });
+        // Aquí SÍ se mira el código, al revés que en el diario remoto, y sólo para esto: el
+        // conductor es un artefacto versionado que se descarga, así que va a hablar con
+        // APTS anteriores a esta ruta. Sin cortacircuitos, un servidor sin el endpoint se
+        // comería un 404 cada segundo y medio durante media hora. Dos seguidos y basta:
+        // uno puede ser un reinicio a mitad, dos es que no está.
+        if (r.status === 404 || r.status === 405 || r.status === 501) {
+          sesionSinRuta += 1;
+          if (sesionSinRuta >= SESION_SIN_RUTA_MAX) apagar('este APTS no tiene el endpoint de sesión', true);
+        } else {
+          sesionSinRuta = 0;
+        }
+      } catch (_) {
+        // Best-effort de verdad: que APTS no vea la sesión no puede ser el motivo de que la
+        // sesión pare. Un error de red no cuenta para el cortacircuitos —no dice nada sobre
+        // si la ruta existe— y el lote perdido se da por perdido, sin reintento.
+      }
+    });
+    return enVuelo;
+  };
+
+  const empujar = (kind, payload) => {
+    if (apagada) return;
+    if (eventos >= SESION_MAX_EVENTOS || bytes >= SESION_MAX_BYTES) {
+      cola.push({
+        seq: (seq += 1),
+        ts: new Date().toISOString(),
+        kind: 'recorte',
+        payload: { motivo: 'tope por unidad', eventos, bytes, descartados },
+      });
+      // Sin tirar la cola: el `recorte` que acaba de entrar es justamente lo que hay que
+      // entregar, y detrás va lo poco que quedara pendiente.
+      apagar(`tope por unidad (${eventos} eventos, ${Math.round(bytes / 1024)} KB)`, false);
+      enviar().catch(() => {});
+      return;
+    }
+
+    // Los normalizadores ya recortan cada campo; esto es el suelo que garantiza el tope
+    // pase lo que pase, incluida una forma nueva que todavía nadie recorta.
+    const cuerpo = JSON.stringify(payload) ?? 'null';
+    const final = cuerpo.length > SESION_EVENTO_MAX_BYTES
+      ? { truncado: `${cuerpo.slice(0, SESION_EVENTO_MAX_BYTES)}…`, bytes: cuerpo.length }
+      : payload;
+
+    eventos += 1;
+    bytes += Math.min(cuerpo.length, SESION_EVENTO_MAX_BYTES + 64);
+    cola.push({ seq: (seq += 1), ts: new Date().toISOString(), kind, payload: final });
+    if (cola.length > SESION_COLA_MAX) { cola.shift(); descartados += 1; }
+    if (cola.length >= SESION_LOTE) enviar().catch(() => {});
+  };
+
+  // El stream llega por trozos que no respetan los saltos de línea, así que hay que
+  // reensamblar: lo que queda sin cerrar se guarda para el trozo siguiente. Sin esto, un
+  // objeto partido a la mitad se perdería, y son justo los grandes los que se parten.
+  //
+  // El reensamblador es de la SESIÓN y no del intento, así que un intento que muera a mitad
+  // de línea deja su cola pegada al primer trozo del intento siguiente y ese objeto no
+  // parsea. Cuesta un evento perdido en el reintento de una story, y arreglarlo pediría que
+  // esta pieza supiera de intentos, que es justo lo que no tiene por qué saber. Se anota
+  // porque un evento que falta sin explicación es peor que uno explicado.
+  const alimentar = (texto) => {
+    if (apagada) { resto = ''; return; }
+    resto += texto;
+    // Una CLI que no escriba NDJSON nunca cerraría línea; el rodante impide que ese caso
+    // se coma la memoria.
+    if (resto.length > RESUMEN_MAX_BYTES) resto = resto.slice(-RESUMEN_MAX_BYTES);
+    const lineas = resto.split('\n');
+    resto = lineas.pop();
+    for (const linea of lineas) {
+      const t = linea.trim();
+      if (t.length < 2 || t[0] !== '{' || t[t.length - 1] !== '}') continue;
+      let o = null;
+      try { o = JSON.parse(t); } catch (_) { continue; }
+      if (!o || typeof o !== 'object' || Array.isArray(o)) continue;
+      for (const ev of normalizar(o)) empujar(ev.kind, ev.payload);
+    }
+  };
+
+  const timer = setInterval(() => { enviar().catch(() => {}); }, SESION_INTERVALO_MS);
+  timer.unref();
+
+  const cerrar = async () => {
+    clearInterval(timer);
+    // Lo que quedó sin salto de línea final. Una CLI que no lo escriba se dejaría su último
+    // evento —y el último es el `result`, justo el que cierra la historia— en el reensamblador.
+    if (resto) { const ultimo = resto; resto = ''; alimentar(`${ultimo}\n`); }
+    if (descartados) {
+      cola.push({
+        seq: (seq += 1),
+        ts: new Date().toISOString(),
+        kind: 'recorte',
+        payload: { motivo: 'la cola se desbordó mientras el servidor no tragaba', descartados },
+      });
+    }
+    // Lo último de la unidad se espera —si no, se perdería el final de la story, que es la
+    // parte que se consulta después—, pero acotado por reloj: contra un servidor colgado,
+    // esto no puede convertirse en un freno del bucle.
+    const limite = Date.now() + SESION_TIMEOUT_MS + 1000;
+    while (cola.length && !sinDestino && Date.now() < limite) {
+      const antes = cola.length;
+      await enviar();
+      if (cola.length >= antes) break; // no avanza: el servidor no está, y no se insiste
+    }
+    registrar(cfg, {
+      evento: 'sesion', accion: 'cerrada', task_id: taskId, eventos, descartados, apagada, pendientes: cola.length,
+    });
+
+    // Pedir el stream y no recibirlo es el fallo silencioso de esta bandera: el panel
+    // enseña una sesión vacía y no hay nada que distinga «el agente no dijo nada» de «tu
+    // --agent-cmd no emite stream». Con `--output-format json` llega UN objeto al final,
+    // que da exactamente un evento; con la CLI callada, ninguno. Se avisa una vez por
+    // corrida y nombrando el arreglo, como hace el motor cuando devuelve `blocked`.
+    if (eventos <= 1 && !avisadoSinStream) {
+      avisadoSinStream = true;
+      log('aviso: --session-stream está puesto pero la CLI no emitió stream'
+        + ' (llegó' + (eventos ? ' sólo el resumen final' : ' nada') + ').'
+        + ' Claude Code lo emite con --output-format stream-json --verbose; opencode, con --format json.');
+    }
+  };
+
+  registrar(cfg, { evento: 'sesion', accion: 'abierta', task_id: taskId });
+  return { alimentar, cerrar };
+};
+
 // ---- registro de la ejecución en APTS ----
 //
 // El conductor es lo único que ve la ejecución entera: el agente vive dentro de su sesión
@@ -738,6 +1304,10 @@ const abrirTarea = (cfg, storyId, iteracion) => {
     if (id) {
       tareaActual = { id, story_id: storyId, ok: false };
       registrar(cfg, { evento: 'tarea', accion: 'abierta', task_id: id, story_id: storyId, iteracion });
+      // La sesión cuelga de la tarea: es lo que le da un `seq` propio por unidad y lo que
+      // permite consultarla después. Sin tarea (`--no-task-log`) no hay dónde colgarla,
+      // igual que pasa con el diario remoto.
+      sesionActual = crearSesion(cfg, id);
       // Un APTS anterior a este campo no lo rechaza: su esquema lo descarta en silencio y
       // liga la tarea, que es exactamente lo que veníamos a evitar. La respuesta es lo
       // único que lo delata, y hay que decirlo: a partir de ahí, el `done` de esta tarea
@@ -788,6 +1358,9 @@ const moverTarea = (cfg, estado) => {
 const cerrarTarea = async (cfg, estado, mensaje) => {
   if (!tareaActual) return;
   const { id, story_id: storyId } = tareaActual;
+  // Antes de nada: lo que quede de la sesión pertenece a esta unidad, y a partir de la
+  // línea siguiente ya no habría a qué tarea colgarlo.
+  if (sesionActual) { await sesionActual.cerrar(); sesionActual = null; }
   if (mensaje) await anotarTarea(cfg, mensaje);
   if (estado) await moverTarea(cfg, estado);
   registrar(cfg, { evento: 'tarea', accion: estado || 'soltada', task_id: id, story_id: storyId });
@@ -887,7 +1460,18 @@ const notificarTelegram = async (cfg, datos) => {
 // sepultados dentro del texto de `detalle`, que es prosa y no se puede consultar.
 const parar = async (cfg, { motivo, detalle, codigo, fase, storyId, iteracion, extra }) => {
   log(`PARADA (${motivo}): ${detalle}`);
-  registrar(cfg, { evento: 'parada', motivo, detalle, fase, story_id: storyId, iteracion, exit_code: codigo, ...(extra || {}) });
+  // El gasto de la corrida se dice en TODAS las paradas, no sólo en la ordenada: la que
+  // más interesa saber lo que costó es precisamente la que se fue por un atasco o un
+  // fallo del agente. Va como campo del diario y como una línea más del aviso, igual que
+  // la hora de reset del límite de uso.
+  const gastado = describirGasto();
+  if (gastado) log(`gasto de la corrida: ${gastado}`);
+  const contabilidad = gasto.sesiones
+    // Ocho decimales: mata el ruido de la suma en coma flotante —0.1 + 0.2 no es 0.3— sin
+    // recortar la precisión que la propia CLI publica, que llega a siete.
+    ? { coste_usd_total: Number(gasto.coste.toFixed(8)), tokens_total: gasto.tokens, sesiones_medidas: gasto.sesiones }
+    : {};
+  registrar(cfg, { evento: 'parada', motivo, detalle, fase, story_id: storyId, iteracion, exit_code: codigo, ...contabilidad, ...(extra || {}) });
 
   // La tarea de la unidad se cierra AQUÍ y no en cada sitio que para: hay siete motivos
   // de parada y sólo uno de ellos es que el trabajo terminó. `done` sólo cuando el ciclo
@@ -899,7 +1483,10 @@ const parar = async (cfg, { motivo, detalle, codigo, fase, storyId, iteracion, e
 
   // Primero el aviso y después el hook: el hook es un proceso del operador que puede
   // colgarse, y el aviso es justo lo que no debe quedarse esperándolo.
-  await notificarTelegram(cfg, { motivo, detalle, codigo, fase, storyId, iteracion, extra });
+  await notificarTelegram(cfg, {
+    motivo, detalle, codigo, fase, storyId, iteracion,
+    extra: { ...(extra || {}), ...(gastado ? { gasto: gastado } : {}) },
+  });
 
   if (cfg.onStop) {
     // El motivo viaja por ENTORNO, no sustituido en la línea de comandos: `detalle`
@@ -917,6 +1504,9 @@ const parar = async (cfg, { motivo, detalle, codigo, fase, storyId, iteracion, e
         APTS_LOOP_ITERATION: String(iteracion == null ? '' : iteracion),
         APTS_LOOP_PROJECT_URL: cfg.projectUrl,
         APTS_LOOP_EXIT_CODE: String(codigo),
+        // Vacías cuando la CLI no habló JSON, que es lo mismo que decir «no se midió».
+        APTS_LOOP_COST_USD: gasto.sesiones ? gasto.coste.toFixed(8) : '',
+        APTS_LOOP_TOKENS: gasto.sesiones ? String(gasto.tokens) : '',
       },
     });
     if (r.status !== 0) log(`aviso: --on-stop terminó con código ${r.status}`);
@@ -1125,19 +1715,53 @@ const lanzarAgente = (cfg, contexto) => {
     // Buffer original, así que el eco es byte a byte; el troceo en UTF-8 sólo puede
     // estropear un carácter del buffer de búsqueda, que se compara contra patrones ASCII.
     let cola = '';
-    const eco = (destino) => (trozo) => {
+    // Buffer aparte y sólo de stdout: es donde las dos CLIs escriben su JSON, y mezclarlo
+    // con stderr metería trazas de la propia CLI entre las líneas que hay que parsear.
+    let salida = '';
+    // El troceo del flujo parte caracteres UTF-8 por la mitad, y un `toString` por trozo
+    // deja un carácter roto en cada frontera. Contra los patrones ASCII de las condiciones
+    // de entorno daba igual; contra `JSON.parse` no, porque tira la línea entera. El
+    // decodificador retiene los bytes incompletos hasta el trozo siguiente. Sólo para
+    // stdout: al terminal se sigue escribiendo el Buffer original, así que el eco es byte
+    // a byte como antes.
+    const decodificador = new StringDecoder('utf8');
+    const eco = (destino, estructurada) => (trozo) => {
       destino.write(trozo);
-      cola = (cola + trozo.toString('utf8')).slice(-COLA_MAX_BYTES);
+      const texto = estructurada ? decodificador.write(trozo) : trozo.toString('utf8');
+      cola = (cola + texto).slice(-COLA_MAX_BYTES);
+      if (estructurada) {
+        salida = (salida + texto).slice(-RESUMEN_MAX_BYTES);
+        // El stream se lee mientras pasa; el resumen de coste, al terminar. Son dos
+        // lecturas del mismo flujo con dos ritmos, y por eso no comparten camino.
+        if (sesionActual) sesionActual.alimentar(texto);
+      }
     };
-    hijo.stdout.on('data', eco(process.stdout));
-    hijo.stderr.on('data', eco(process.stderr));
+    hijo.stdout.on('data', eco(process.stdout, true));
+    hijo.stderr.on('data', eco(process.stderr, false));
     procesoAgente = hijo;
     const parar = vigilarAgente(cfg);
 
-    const terminar = (codigo, error) => {
+    const terminar = (codigoCrudo, errorCrudo) => {
       parar();
       procesoAgente = null;
       const ms = Date.now() - inicio;
+
+      // Si la CLI habló JSON, aquí está lo que costó la sesión. Si no, `null` y nada
+      // cambia: todo lo que hay debajo trata este resumen como opcional.
+      const resumen = leerResumen(salida);
+
+      // Un fallo con código 0. Claude Code con `--output-format json` imprime el fallo de
+      // dentro de la corrida —típicamente la autenticación— COMO RESULTADO, y el código de
+      // salida no siempre lo acompaña. Sin esto, esa sesión pasaría por buena, la unidad se
+      // movería a `review` y la corrida seguiría a la story siguiente con la misma CLI rota.
+      // Se normaliza a un código propio para que los sitios que miran `codigo` sigan
+      // leyendo lo de siempre; y como la cola contiene ahora ese JSON, el reconocimiento
+      // de condiciones de entorno encuentra dentro el texto del error igual que antes.
+      const fallaEnJson = codigoCrudo === 0 && resumen && resumen.fallo;
+      const codigo = fallaEnJson ? -2 : codigoCrudo;
+      const error = errorCrudo || (fallaEnJson
+        ? `la CLI terminó con código 0 pero su resultado dice is_error (${resumen.subtipo || 'sin subtipo'})`
+        : null);
 
       if (codigo === 0) {
         try { fs.unlinkSync(ficheroPrompt); } catch (_) { /* el prompt es desechable */ }
@@ -1148,7 +1772,7 @@ const lanzarAgente = (cfg, contexto) => {
       // La cola viaja con el resultado: quien decide si esto fue un fallo del agente o
       // de su entorno es el bucle, no esta función. Se emite en 'close' y no en 'exit'
       // justo por esto: `close` espera a que los flujos se hayan vaciado.
-      resolve({ codigo, ms, error, cola });
+      resolve({ codigo, ms, error, cola, resumen });
     };
 
     // Un proceso muerto por señal vuelve con `code` null: se normaliza a un código no cero
@@ -1196,6 +1820,11 @@ const construirConfig = (args, { esperando = false } = {}) => {
     // Misma forma que la anterior y por el mismo motivo: el diario en APTS está puesto
     // por defecto porque una ejecución sin rastro es el problema, no la preferencia.
     sinDiarioRemoto: Boolean(args['no-journal-remote']) || String(process.env.APTS_LOOP_NO_JOURNAL_REMOTE || '').trim() === '1',
+    // La única de las tres que va en POSITIVO, o sea apagada por defecto. Las otras dos
+    // copian a APTS las DECISIONES del bucle, que no llevan nada dentro que no sea del
+    // bucle; ésta copia el CONTENIDO de la sesión, que lleva lo que el agente leyó. El
+    // motivo largo está en la cabecera de la sección de la sesión.
+    sesionStream: Boolean(args['session-stream']) || String(process.env.APTS_LOOP_SESSION_STREAM || '').trim() === '1',
     workflows: new Set(String(args.workflows || 'bmad-dev-story').split(',').map((s) => s.trim()).filter(Boolean)),
   };
 
@@ -1278,6 +1907,13 @@ let cfgActual = null;
 
 const conducir = async (cfg, plantillaPrompt) => {
   const envCargado = cfg.envFile;
+
+  // El gasto es de la CORRIDA, no del proceso: en modo espera un mismo conductor conduce
+  // varias, y arrastrar el total de la anterior haría que la factura de la segunda
+  // incluyera la de la primera.
+  gasto.coste = 0;
+  gasto.tokens = 0;
+  gasto.sesiones = 0;
 
   registrar(cfg, {
     evento: 'arranque',
@@ -1440,6 +2076,10 @@ const conducir = async (cfg, plantillaPrompt) => {
 
       ultimo = await lanzarAgente(cfg, { story_id: storyId, iteration: iteracion, intento, modelo, prompt });
       intentos.push({ intento, modelo: modelo || null, exit_code: ultimo.codigo, error: ultimo.error });
+      // Se acumula haya ido bien o mal: un intento que reventó a mitad también se pagó, y
+      // esconderlo del total daría una factura que sólo cuenta lo que salió bien.
+      acumularGasto(ultimo.resumen);
+      const coste = describirResumen(ultimo.resumen);
       registrar(cfg, {
         evento: 'agente',
         iteracion,
@@ -1450,10 +2090,22 @@ const conducir = async (cfg, plantillaPrompt) => {
         exit_code: ultimo.codigo,
         ms: ultimo.ms,
         error: ultimo.error,
+        // Sólo cuando la CLI habló JSON. Se escriben como campos y no dentro de una frase
+        // para que el diario se pueda consultar: la pregunta que esto viene a contestar
+        // —cuánto cuesta una story— es una suma, no una lectura.
+        ...(ultimo.resumen ? {
+          runtime: ultimo.resumen.runtime,
+          coste_usd: ultimo.resumen.coste_usd,
+          tokens: ultimo.resumen.tokens,
+          turnos: ultimo.resumen.turnos,
+          sesion: ultimo.resumen.sesion,
+          subtipo: ultimo.resumen.subtipo,
+        } : {}),
       });
+      if (coste) log(`  ${coste}${ultimo.resumen.sesion ? ` · sesión ${ultimo.resumen.sesion}` : ''}`);
       await anotarTarea(cfg, `intento ${intento}/${cfg.escalera.length}`
         + `${modelo ? ` con ${modelo}` : ''}: salida ${ultimo.codigo}`
-        + ` en ${Math.round(ultimo.ms / 1000)} s${ultimo.error ? ` — ${ultimo.error}` : ''}`);
+        + ` en ${Math.round(ultimo.ms / 1000)} s${coste ? ` — ${coste}` : ''}${ultimo.error ? ` — ${ultimo.error}` : ''}`);
 
       // ¿Falló el agente, o falló su entorno? Se resuelve aquí y se usa más abajo,
       // después de la orden de parada: lo que pida una persona desde el panel gana
@@ -1539,7 +2191,9 @@ const conducir = async (cfg, plantillaPrompt) => {
     await moverTarea(cfg, 'review');
 
     const gastados = intentos.length > 1 ? ` tras ${intentos.length} intentos` : '';
-    log(`vuelta ${iteracion} completada en ${Math.round(ultimo.ms / 1000)}s${gastados}`);
+    const acumulado = describirGasto();
+    log(`vuelta ${iteracion} completada en ${Math.round(ultimo.ms / 1000)}s${gastados}`
+      + `${acumulado ? ` · acumulado ${acumulado}` : ''}`);
   }
 
   await parar(cfg, {

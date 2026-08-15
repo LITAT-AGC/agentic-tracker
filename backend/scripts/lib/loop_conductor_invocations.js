@@ -19,17 +19,31 @@
 const path = require('node:path');
 const fs = require('node:fs/promises');
 
+// Las dos lineas piden a la CLI que hable JSON, y que lo hable MIENTRAS TRABAJA. El
+// conductor no lo exige y no lo configura: lee lo que venga. Es lo unico que le permite
+// anotar lo que costo cada story —tokens, coste y sesion— en vez de solo su duracion y su
+// codigo de salida, porque eso vive dentro de la sesion del agente y desde fuera no se
+// puede medir de ninguna otra forma.
+//
+// `stream-json` y no `json` en Claude Code, desde 2026-08-15. `--output-format json`
+// imprime UN objeto al terminar, que sirve para la contabilidad y es inutil para cualquier
+// cosa en vivo: la consola se quedaba muda veinte minutos —el propio README lo documentaba
+// como precio pagado— y `--session-stream` no tendria nada que enviar. El objeto final
+// sigue siendo el mismo `type:"result"`, asi que el lector del coste no cambia. `--verbose`
+// no es adorno: en modo `-p`, Claude Code lo exige junto con `stream-json`.
+//
+// Opencode no cambia: su `--format json` ya es NDJSON, o sea ya era stream.
 const LOOP_CONDUCTOR_INVOCATION_BY_RUNTIME = {
   claudecode: {
-    agent_cmd: 'claude -p "$(cat {prompt_file})" --model {model} --permission-mode acceptEdits',
+    agent_cmd: 'claude -p "$(cat {prompt_file})" --model {model} --permission-mode acceptEdits --output-format stream-json --verbose',
     // En Windows `shell: true` resuelve a `cmd.exe`, donde `$(cat ...)` no existe.
-    agent_cmd_windows: 'type {prompt_file} | claude -p --model {model} --permission-mode acceptEdits',
+    agent_cmd_windows: 'type {prompt_file} | claude -p --model {model} --permission-mode acceptEdits --output-format stream-json --verbose',
     model_escalation_example: 'claude-sonnet-5,claude-opus-5'
   },
   opencode: {
     // `-f` adjunta el archivo, asi que el prompt nunca pasa por la linea de shell y
     // esta forma vale igual en Windows: no necesita variante.
-    agent_cmd: 'opencode run -m {model} -f {prompt_file} "Implementa la unidad descrita en el archivo adjunto"',
+    agent_cmd: 'opencode run --format json -m {model} -f {prompt_file} "Implementa la unidad descrita en el archivo adjunto"',
     model_escalation_example: 'anthropic/claude-sonnet-5,anthropic/claude-opus-5'
   }
 };

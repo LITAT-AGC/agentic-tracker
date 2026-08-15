@@ -2546,7 +2546,14 @@ const integrationArtifacts = {
     // 1.7.1: el error de una operacion puede venir como objeto y se interpolaba a secas,
     // asi que el aviso decia «[object Object]» y tiraba el mensaje del servidor. Se vio en
     // un update_task_status durante una corrida real.
-    artifactVersion: '1.7.1',
+    // 1.8.0: `--session-stream` copia a APTS lo que el agente hace DENTRO de su sesion, para
+    // verlo en vivo desde el panel y consultarlo despues. Escribe en una ruta nueva
+    // (`POST /api/conductor/session`) que un APTS anterior no tiene: degrada en silencio y a
+    // los dos 404 deja de intentarlo durante toda la corrida. Va APAGADO por defecto —lo
+    // unico de este script que lo va— porque lo que viaja no son las decisiones del bucle
+    // sino el contenido de la sesion. El bump es lo que permite enterarse de que la opcion
+    // existe: quien se quede en 1.7.1 no tiene forma de ver una corrida por dentro.
+    artifactVersion: '1.8.0',
     kind: 'loop_conductor',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -2581,7 +2588,12 @@ const integrationArtifacts = {
     // —copiada tal cual, la CLI pedia permiso y una corrida desatendida se plantaba—, y el
     // manual dice que estas lineas las publica tambien el manifiesto y que un auto-chequeo
     // del arranque las ata. Solo cambia el texto: el conductor se queda en 1.7.1.
-    artifactVersion: '1.8.0',
+    // 1.9.0: documenta `--session-stream` —que va apagado por defecto y por que, que filtra
+    // y que no, como agrupa, y la postura sobre secretos—, y corrige lo que dejo de ser
+    // cierto al pasar a `stream-json`: la consola ya no se queda muda. Deja explicito que la
+    // promesa del diario local («no contiene secretos») sigue en pie porque el contenido de
+    // la sesion no pasa por el.
+    artifactVersion: '1.9.0',
     kind: 'loop_conductor_manual',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -5591,6 +5603,146 @@ app.post('/api/conductor/journal', apiLimiter, authenticateAgent, async (req, re
   }
 });
 
+// ---- La sesión del agente ----
+// El diario de aquí arriba cuenta lo que el conductor DECIDE. Esto guarda lo que el agente
+// hace dentro de su sesión, que es lo que hasta ahora sólo existía en el terminal de la
+// máquina que lanzó el bucle: qué leyó, qué escribió, qué dijo y qué falló.
+//
+// No es operación MCP, por lo mismo que el diario y las órdenes: no es del método y no la
+// llama un agente, la llama el programa que conduce. Y por eso tampoco entra en
+// `apts_skills.json` ni la mira el auto-chequeo del contrato, que compara la lista de
+// herramientas MCP y nada más.
+//
+// El conductor ya filtra, redacta y recorta antes de mandar: aquí no se vuelve a filtrar
+// —sería una segunda política que puede contradecir a la primera— pero sí se ponen suelos,
+// porque esta ruta la puede llamar cualquiera con la clave de agente.
+//
+// `kind` NO es un enum. Es el vocabulario del conductor, que es un artefacto versionado y
+// descargable: pinchándolo aquí, un conductor nuevo que reconozca un tipo de evento nuevo
+// necesitaría un despliegue del servidor ANTES de poder mandarlo, que es exactamente el
+// acoplamiento que el propio conductor evita conservando los tipos que no reconoce. El
+// panel dibuja lo que no conoce como genérico en vez de tirarlo.
+const CONDUCTOR_SESSION_MAX_EVENTS = 200;
+const CONDUCTOR_SESSION_MAX_PAYLOAD_BYTES = 4096;
+const CONDUCTOR_SESSION_MAX_KIND = 40;
+
+// ---- Qué purga esto ----
+// La respuesta honesta, sin esto, sería «nada»: el `ON DELETE CASCADE` de la tabla sólo se
+// dispara al borrar una tarea, y APTS no borra tareas por ningún camino. Una story deja
+// unas 400 filas y una corrida de veinte deja unas ocho mil, así que sin purga esta tabla
+// pasa a ser, con diferencia, la más grande de la base — y quien lo paga primero no es el
+// panel (todas sus consultas van por el índice) sino el disco y la copia que el despliegue
+// hace antes de migrar.
+//
+// Se purga por antigüedad y de forma perezosa, desde la propia ingesta y como mucho una vez
+// por hora: es el mismo patrón de poda que ya usa la presencia del conductor, y evita una
+// pieza nueva —un cron, un proceso, algo que vigilar— para una tarea que se puede colgar de
+// un camino que ya pasa por aquí. `0` la desactiva, para quien quiera conservarlo todo y
+// asuma lo de arriba.
+const CONDUCTOR_SESSION_RETENTION_DAYS = Number.isFinite(Number.parseInt(process.env.CONDUCTOR_SESSION_RETENTION_DAYS, 10))
+  ? Number.parseInt(process.env.CONDUCTOR_SESSION_RETENTION_DAYS, 10)
+  : 30;
+const CONDUCTOR_SESSION_PRUNE_EVERY_MS = 3600000;
+let conductorSessionPrunedAt = 0;
+
+const pruneConductorSessions = async () => {
+  if (CONDUCTOR_SESSION_RETENTION_DAYS <= 0) return;
+  if (Date.now() - conductorSessionPrunedAt < CONDUCTOR_SESSION_PRUNE_EVERY_MS) return;
+  // Se marca ANTES de esperar: si no, veinticinco lotes concurrentes lanzarían veinticinco
+  // borrados a la vez, que es justo el pico que esto viene a no provocar.
+  conductorSessionPrunedAt = Date.now();
+
+  const cutoff = new Date(Date.now() - CONDUCTOR_SESSION_RETENTION_DAYS * 86400000);
+  try {
+    const deleted = await db('conductor_agent_events').where('created_at', '<', cutoff).del();
+    if (deleted) {
+      logger.info({ deleted, older_than: cutoff.toISOString() }, 'conductor session events pruned');
+    }
+  } catch (error) {
+    // No puede tumbar la ingesta: purgar es mantenimiento, no el trabajo de esta ruta.
+    logger.warn({ error: serializeErrorForLog(error) }, 'conductor session prune failed');
+  }
+};
+
+app.post('/api/conductor/session', apiLimiter, authenticateAgent, async (req, res) => {
+  const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? req.body : {};
+  const taskId = typeof body.task_id === 'string' ? body.task_id.trim() : '';
+  const events = Array.isArray(body.events) ? body.events : null;
+
+  if (!taskId) return res.status(400).json({ error: 'task_id is required' });
+  if (!events) return res.status(400).json({ error: 'events must be an array' });
+  if (events.length > CONDUCTOR_SESSION_MAX_EVENTS) {
+    return res.status(400).json({ error: `events must have at most ${CONDUCTOR_SESSION_MAX_EVENTS} items` });
+  }
+
+  markConductorSeen(body.agent_name || req.headers['x-apts-agent-name']);
+
+  // Un lote vacío no es un error —la cola pudo vaciarse entre el temporizador y el envío—
+  // pero tampoco toca la base.
+  if (!events.length) return res.json({ received: 0, stored: 0 });
+
+  // Se valida y se rechaza en vez de descartar lo malo en silencio, que es la regla de este
+  // repositorio: un evento mal formado es un fallo del que lo manda, y tragárselo dejaría
+  // una sesión con huecos que nadie sabría explicar.
+  const rows = [];
+  for (let i = 0; i < events.length; i += 1) {
+    const e = events[i] && typeof events[i] === 'object' && !Array.isArray(events[i]) ? events[i] : null;
+    if (!e) return res.status(400).json({ error: `events[${i}] must be an object` });
+
+    const seq = Number.isInteger(e.seq) ? e.seq : null;
+    if (seq === null || seq < 0) return res.status(400).json({ error: `events[${i}].seq must be a non-negative integer` });
+
+    const kind = typeof e.kind === 'string' ? e.kind.trim() : '';
+    if (!kind) return res.status(400).json({ error: `events[${i}].kind is required` });
+    if (kind.length > CONDUCTOR_SESSION_MAX_KIND) {
+      return res.status(400).json({ error: `events[${i}].kind must be at most ${CONDUCTOR_SESSION_MAX_KIND} characters` });
+    }
+
+    if (e.payload === undefined || e.payload === null) return res.status(400).json({ error: `events[${i}].payload is required` });
+    let serialized;
+    try {
+      serialized = JSON.stringify(e.payload);
+    } catch (_error) {
+      return res.status(400).json({ error: `events[${i}].payload must be valid JSON data` });
+    }
+    if (serialized.length > CONDUCTOR_SESSION_MAX_PAYLOAD_BYTES) {
+      return res.status(400).json({
+        error: `events[${i}].payload is ${serialized.length} bytes; the limit is ${CONDUCTOR_SESSION_MAX_PAYLOAD_BYTES}`
+      });
+    }
+
+    // `ts` es el reloj de la máquina del agente y es opcional: si no viene o no se entiende,
+    // se usa el de aquí, que al menos ordena dentro del lote.
+    const ts = typeof e.ts === 'string' && !Number.isNaN(Date.parse(e.ts)) ? new Date(e.ts) : new Date();
+    rows.push({ task_id: taskId, seq, ts, kind, payload: serialized });
+  }
+
+  try {
+    const task = await db('tasks').where({ id: taskId }).first('id');
+    if (!task) return res.status(404).json({ error: 'Task not found' });
+
+    // `ignore` y no `merge`: un `seq` repetido sólo puede ser un lote reenviado, y el
+    // primero que llegó ya es el bueno. Lo que esto compra es que el envío pueda ser
+    // best-effort sin arriesgarse a duplicar la sesión.
+    const stored = await db('conductor_agent_events')
+      .insert(rows)
+      .onConflict(['task_id', 'seq'])
+      .ignore()
+      .returning('id');
+
+    // Sin await: purgar no es el trabajo de esta ruta y el conductor no debe esperarlo.
+    pruneConductorSessions();
+
+    return res.json({ received: rows.length, stored: stored.length });
+  } catch (routeError) {
+    return sendApiError(res, routeError, {
+      fallbackMessage: 'Failed to record conductor session events',
+      logMessage: 'conductor_session failed',
+      logContext: { task_id: taskId, events: rows.length }
+    });
+  }
+});
+
 // ---- Órdenes para el conductor ----
 // Buzón, no canal en vivo: el conductor pregunta cada diez segundos. Mismas dos razones
 // que el diario para no ser operación MCP —no es del método y no la llama un agente— y
@@ -6369,12 +6521,42 @@ app.get('/api/dashboard/projects/:url/conductor', requireAuth, async (req, res) 
       if (order.status === 'pending' && order.agent_name) presenceNames.add(order.agent_name);
     }
 
+    // Qué ejecuciones tienen sesión guardada, para poder mirar una de ayer y no sólo la de
+    // ahora. Son DOS consultas baratas y no un `group by` sobre la tabla de eventos: ésa
+    // crece sin tope y el panel pregunta cada diez segundos, así que se acotan primero las
+    // diez tareas candidatas —por su propia tabla— y sólo entonces se cuentan sus eventos,
+    // que es una consulta que cae entera dentro del índice `(task_id, seq)`.
+    const recentTasks = await db('tasks')
+      .where({ project_url: url })
+      .orderBy('created_at', 'desc')
+      .limit(10)
+      .select('id', 'title', 'status', 'created_at', 'backlog_item_id');
+
+    const sessionCounts = recentTasks.length
+      ? await db('conductor_agent_events')
+        .whereIn('task_id', recentTasks.map((t) => t.id))
+        .groupBy('task_id')
+        .select('task_id')
+        .count('id as events')
+        .max('seq as last_seq')
+      : [];
+
+    const countByTask = new Map(sessionCounts.map((r) => [r.task_id, r]));
+    const sessionTasks = recentTasks
+      .filter((t) => countByTask.has(t.id))
+      .map((t) => ({
+        ...t,
+        events: Number(countByTask.get(t.id).events) || 0,
+        last_seq: Number(countByTask.get(t.id).last_seq) || 0
+      }));
+
     return res.json({
       project_url: url,
       agent_name: agentName || null,
       orders,
       journal,
       active_task: activeTask || null,
+      session_tasks: sessionTasks,
       presence: [...presenceNames].map(conductorPresenceOf),
       presence_ttl_seconds: Math.round(CONDUCTOR_PRESENCE_TTL_MS / 1000),
       // Lo que aguanta una orden sin recogerse. Viaja para que el panel diga el plazo de
@@ -6391,6 +6573,66 @@ app.get('/api/dashboard/projects/:url/conductor', requireAuth, async (req, res) 
       fallbackMessage: 'Failed to read conductor state',
       logMessage: 'Dashboard conductor state read failed',
       logContext: { project_url: req.params.url }
+    });
+  }
+});
+
+// ---- Leer la sesión de una ejecución ----
+// Sondeo con cursor y no SSE, y no por el argumento que usa el buzón de órdenes. Allí diez
+// segundos son indistinguibles de instantáneo porque al otro lado hay un botón que pulsa
+// una persona; ver a un agente trabajar sí quiere latencia baja, y por eso el panel
+// pregunta cada dos segundos y no cada diez. Lo que no compra un socket es el salto que
+// queda: de dos segundos a instantáneo no lo nota nadie mirando pensar a un modelo, y
+// costaría una pieza entera —conexión, reconexión, autenticación por sesión, y un
+// intermediario que puede bufferear un flujo que nunca cierra— por esa diferencia.
+//
+// El cursor es `after_seq` y no una marca de tiempo: `created_at` empata entre los
+// veinticinco eventos de un mismo lote, así que un cursor por reloj se saltaría eventos o
+// los repetiría. `next_seq` vuelve en la respuesta para que el cliente no tenga que
+// deducirlo, y `has_more` distingue «no hay nada nuevo» de «hay más de lo que cabe».
+//
+// EL PROYECTO ES LA FRONTERA. La tarea se busca por `(id, project_url)` y no sólo por id:
+// el id viaja en la query y sin esa condición cualquier sesión autenticada podría leer la
+// sesión de un proyecto ajeno sabiendo un UUID.
+app.get('/api/dashboard/projects/:url/conductor/session', requireAuth, async (req, res) => {
+  try {
+    const url = normalizeUrl(decodeURIComponent(req.params.url));
+    if (!url) return res.status(400).json({ error: 'Project url is required' });
+
+    const taskId = String(req.query.task_id || '').trim();
+    if (!taskId) return res.status(400).json({ error: 'task_id is required' });
+
+    const parsedAfter = Number.parseInt(req.query.after_seq, 10);
+    const afterSeq = Number.isFinite(parsedAfter) && parsedAfter >= 0 ? parsedAfter : null;
+
+    const parsedLimit = Number.parseInt(req.query.limit, 10);
+    const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 500) : 200;
+
+    const task = await db('tasks')
+      .where({ id: taskId, project_url: url })
+      .first('id', 'title', 'status', 'agent_name', 'backlog_item_id', 'created_at');
+    if (!task) return res.status(404).json({ error: 'Task not found in this project' });
+
+    const events = await db('conductor_agent_events')
+      .where({ task_id: taskId })
+      .modify((q) => { if (afterSeq !== null) q.where('seq', '>', afterSeq); })
+      .orderBy('seq', 'asc')
+      .limit(limit)
+      .select('seq', 'ts', 'kind', 'payload', 'created_at');
+
+    return res.json({
+      task,
+      events,
+      // El cursor no retrocede si la tanda vino vacía: quedarse donde estaba es lo que hace
+      // que sondear en bucle no relea la sesión entera cada dos segundos.
+      next_seq: events.length ? events[events.length - 1].seq : (afterSeq === null ? 0 : afterSeq),
+      has_more: events.length === limit
+    });
+  } catch (error) {
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to read conductor session',
+      logMessage: 'Dashboard conductor session read failed',
+      logContext: { project_url: req.params.url, task_id: req.query.task_id }
     });
   }
 });

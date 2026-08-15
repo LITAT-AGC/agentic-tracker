@@ -584,7 +584,7 @@ ejecutar nada:
 
 ```bash
 node apts-loop.js --agent-name mi-dev --dry-run \
-  --agent-cmd 'claude -p "$(cat {prompt_file})" --model {model} --permission-mode acceptEdits'
+  --agent-cmd 'claude -p "$(cat {prompt_file})" --model {model} --permission-mode acceptEdits --output-format stream-json --verbose'
 ```
 
 Y despues, la corrida real:
@@ -592,7 +592,7 @@ Y despues, la corrida real:
 ```bash
 node apts-loop.js \
   --agent-name mi-dev \
-  --agent-cmd 'claude -p "$(cat {prompt_file})" --model {model} --permission-mode acceptEdits' \
+  --agent-cmd 'claude -p "$(cat {prompt_file})" --model {model} --permission-mode acceptEdits --output-format stream-json --verbose' \
   --model-escalation 'claude-sonnet-5,claude-opus-5' \
   --max-iterations 20
 ```
@@ -601,15 +601,33 @@ node apts-loop.js \
 forma equivalente es:
 
 ```bash
-type {prompt_file} | claude -p --model {model} --permission-mode acceptEdits
+type {prompt_file} | claude -p --model {model} --permission-mode acceptEdits --output-format stream-json --verbose
 ```
 
 Y para opencode, que ni siquiera mete el prompt en la linea de shell y por eso vale igual en
 los dos sistemas:
 
 ```bash
-opencode run -m {model} -f {prompt_file} "Implementa la unidad descrita en el archivo adjunto"
+opencode run --format json -m {model} -f {prompt_file} "Implementa la unidad descrita en el archivo adjunto"
 ```
+
+El JSON no es decoracion: es lo unico que deja al conductor anotar **lo que costo cada
+story** —tokens, coste, turnos y el id de sesion— en vez de solo su duracion y su codigo de
+salida. No hay bandera que lo active; se lee si aparece, y si el comando no lo pide el bucle
+se comporta igual que antes.
+
+Y es **`stream-json`** y no `json` porque con `json` la CLI no escribe nada hasta terminar: la
+contabilidad sale igual con las dos —el objeto final `type:"result"` es el mismo— pero con
+`json` la consola se queda muda veinte minutos y no hay nada que mirar mientras la story se
+implementa. Opencode no necesita variante: su `--format json` ya es NDJSON.
+
+**Ver la sesion por dentro** (`--session-stream`, apagado por defecto). Copia a APTS lo que el
+agente hace dentro de su sesion —lo que dice, las herramientas que usa, lo que le devuelven—
+para verlo **en vivo** en la pestaña Conductor del proyecto y consultarlo despues. Va apagado
+a proposito, al reves que los otros dos rastros del conductor: esos copian las *decisiones*
+del bucle y este copia el *contenido* de la sesion, que lleva trozos de archivos y rutas de la
+maquina. Hay redaccion por patrones, pero es la segunda linea y no la primera. El manual del
+conductor lo explica entero.
 
 Los nombres de modelo son de la CLI y no de APTS —el conductor sustituye `{model}` como texto
 opaco y no valida nada—, asi que la escalera de opencode lleva proveedor y la de Claude Code

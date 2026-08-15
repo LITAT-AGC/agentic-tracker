@@ -26,7 +26,7 @@ reparto natural es: el orquestador (o una persona) lleva la iniciativa hasta
 
 ```bash
 node integracion/conductor/apts-loop.js \
-  --agent-cmd 'claude -p "$(cat {prompt_file})" --model {model} --permission-mode acceptEdits' \
+  --agent-cmd 'claude -p "$(cat {prompt_file})" --model {model} --permission-mode acceptEdits --output-format stream-json --verbose' \
   --model-escalation 'claude-sonnet-5,claude-opus-5' \
   --max-iterations 20
 ```
@@ -67,11 +67,11 @@ fije la suya sin tocar el comando de nadie.
 
 ```bash
 # Claude Code
-APTS_LOOP_AGENT_CMD='claude -p "$(cat {prompt_file})" --model {model} --permission-mode acceptEdits'
+APTS_LOOP_AGENT_CMD='claude -p "$(cat {prompt_file})" --model {model} --permission-mode acceptEdits --output-format stream-json --verbose'
 APTS_LOOP_MODEL_ESCALATION='claude-sonnet-5,claude-opus-5'
 
 # Opencode — `-f` adjunta el archivo, así que el prompt no pasa por el shell
-APTS_LOOP_AGENT_CMD='opencode run -m {model} -f {prompt_file} "Implementa la unidad descrita en el archivo adjunto"'
+APTS_LOOP_AGENT_CMD='opencode run --format json -m {model} -f {prompt_file} "Implementa la unidad descrita en el archivo adjunto"'
 APTS_LOOP_MODEL_ESCALATION='anthropic/claude-sonnet-5,anthropic/claude-opus-5'
 ```
 
@@ -80,9 +80,12 @@ y los sustituye sin validarlos. Por eso la escalera de Opencode lleva `proveedor
 y la de Claude Code no.
 
 **En Windows el `$(cat ...)` no existe**: `shell: true` resuelve a `cmd.exe`, así que la
-forma equivalente es `type {prompt_file} | claude -p --model {model} --permission-mode acceptEdits`.
+forma equivalente es `type {prompt_file} | claude -p --model {model} --permission-mode acceptEdits --output-format stream-json --verbose`.
 La vía de Opencode no tiene ese problema porque nunca mete el prompt en la línea, así que
 vale igual en los dos sistemas y no necesita variante.
+
+Las dos piden a la CLI que **hable JSON**; el apartado siguiente explica qué se saca de ahí
+y por qué no hay ninguna bandera que lo active.
 
 **Estas líneas también las publica el manifiesto**, en
 `mcp_endpoint.registration_by_runtime.<runtime>.loop_agent_cmd`, para que un agente que
@@ -98,6 +101,141 @@ repetirla en el comando ni exponerla en los argumentos del proceso.
 
 Empieza siempre con `--dry-run`: resuelve la primera decisión e informa qué lanzaría,
 sin ejecutar nada.
+
+## Lo que costó cada story
+
+El conductor mide desde fuera, así que de una ejecución sólo podía anotar modelo, intento,
+duración y código de salida: el techo de una corrida se decía en **sesiones**, que es lo
+que se puede contar sin abrir la sesión, y no en dinero, que es lo que se paga. Lo único
+que faltaba era que la CLI hablase JSON, y eso ya lo decide `--agent-cmd`.
+
+**No hay bandera y no se configura: se lee lo que venga.** Si el comando pide JSON, cada
+intento anota tokens, coste, turnos y el id de sesión de la CLI; si no lo pide, no anota
+nada y el bucle se comporta exactamente igual que antes. Un conductor al que hubiera que
+avisarle de qué formato esperar sería un conductor que sabe qué hay al otro lado, que es
+justo lo que `--agent-cmd` evita.
+
+Se reconocen las dos formas reales, no una búsqueda de claves parecidas:
+
+| runtime | qué imprime | cómo se lee |
+|---|---|---|
+| Claude Code (`--output-format stream-json --verbose`) | NDJSON de eventos, y **un único objeto `type:"result"` al final** | el total de la corrida ya viene sumado en ese último objeto |
+| Opencode (`--format json`) | NDJSON de eventos, con `cost` y `tokens` por paso | se **suman** los `step_finish` |
+
+Esa diferencia es la razón de que sean dos lectores: acumular el total de Claude Code una
+vez por objeto daría una factura inventada.
+
+Dónde aparece:
+
+- en consola, bajo cada intento y como acumulado al cerrar la vuelta;
+- en el diario, como campos consultables del evento `agente` (`coste_usd`, `tokens`,
+  `turnos`, `sesion`, `runtime`, `subtipo`) — campos, y no una frase, porque la pregunta
+  que esto viene a contestar es una suma;
+- en la tarea de la unidad, como una línea más del progreso;
+- en la parada, con el total de la corrida (`coste_usd_total`, `tokens_total`,
+  `sesiones_medidas`), en el aviso de Telegram y en `APTS_LOOP_COST_USD` /
+  `APTS_LOOP_TOKENS` para el hook de `--on-stop`. Se dice en **todas** las paradas, no sólo
+  en la ordenada: la corrida que más interesa saber lo que costó es la que se fue por un
+  atasco.
+
+Un intento que falló también suma: se pagó igual, y esconderlo daría un total que sólo
+cuenta lo que salió bien.
+
+**Un fallo con código 0.** Claude Code imprime el fallo de dentro de la corrida —la
+autenticación, sobre todo— *como resultado*, y el código de salida no siempre lo acompaña.
+Cuando el resumen trae `is_error`, el intento se trata como fallido: sin eso esa sesión
+pasaría por buena, la unidad se movería a `review` y la corrida seguiría a la story
+siguiente con la misma CLI rota. Como el JSON queda en la cola que se inspecciona, el texto
+del error sigue disparando los códigos 21–23 igual que antes.
+
+**Por qué `stream-json` y no `json`.** Las dos formas terminan en el mismo objeto
+`type:"result"`, así que la contabilidad sale idéntica con cualquiera de las dos y el lector
+de coste no distingue entre ellas. Lo que cambia es lo que ocurre *antes* de esa última
+línea. Con `--output-format json` la CLI no escribe nada hasta terminar, y eso costaba dos
+cosas: una consola muda durante veinte minutos —tolerable, porque quien mira una corrida
+desatendida mira el diario y el aviso, no el terminal— y, sobre todo, que no hubiera nada
+que enviar a APTS mientras la story se implementa. Con `stream-json` la sesión se ve pasar,
+y de ahí sale el apartado siguiente. `--verbose` no es adorno: en modo `-p`, Claude Code lo
+exige junto a `stream-json`. Opencode no necesita nada de esto porque su `--format json` ya
+era NDJSON.
+
+## Ver la sesión del agente
+
+`--session-stream` (o `APTS_LOOP_SESSION_STREAM=1`) copia a APTS lo que el agente hace
+**dentro** de su sesión: lo que dice, las herramientas que usa, lo que le devuelven y cómo
+termina. Se ve **en vivo** en la pestaña Conductor del proyecto, en el panel *Sesión del
+agente*, y queda guardado para consultarlo después.
+
+Hasta aquí, de media hora de trabajo APTS guardaba lo que se puede medir desde fuera
+—modelo, intento, duración, código de salida y lo que costó—. El detalle vivía sólo en el
+terminal de la máquina que lanzó el bucle, y desaparecía al cerrarlo.
+
+### Va apagado por defecto, y es lo único de este script que lo va
+
+Los otros dos rastros —la tarea de la unidad y el diario remoto— están puestos porque una
+ejecución sin rastro es el problema, no una preferencia neutral. Esa regla cubre el registro
+de las **decisiones** del bucle, que no llevan dentro nada que no sea del bucle. Esto es
+otra cosa: es el **contenido** de la sesión, y ahí viaja lo que el agente leyó —trozos de
+archivos, rutas absolutas de tu máquina, y lo que a un mensaje de error se le ocurra traer
+dentro—.
+
+La asimetría es lo que decide el defecto. Olvidarse de encenderlo cuesta la vista de una
+corrida. Olvidarse de apagarlo mete contenido de tu repositorio en la base de APTS, y eso no
+se despersiste.
+
+**Hay redacción por patrones** —claves `sk-…`, `ghp_…`, `AKIA…`, cabeceras `Bearer`, bloques
+de clave privada, JWT y asignaciones tipo `password=` / `token=` / `api_key=`— y es la
+**segunda** línea, no la primera. Un patrón no reconoce el secreto que no conoce. Encender
+esto es decidir que el contenido de esas sesiones puede vivir en APTS.
+
+### Qué viaja y qué no
+
+El stream crudo son cientos o miles de eventos por story, así que el filtrado ocurre **aquí**
+y no en el servidor:
+
+| llega | no llega |
+|---|---|
+| el texto del asistente (y lo que piensa, más corto) | los deltas de mensaje parcial: el texto llega otra vez, entero, al cerrarse |
+| la herramienta que usa, con su entrada resumida | la lista de herramientas, comandos y skills del arranque: es estática |
+| el resultado, recortado a 500 caracteres | `tool_use_result`, que es el **mismo** resultado por segunda vez y entero, con el archivo completo dentro |
+| el arranque reducido: modelo, sesión, `cwd`, permisos y el estado de los MCP | |
+| los avisos de la CLI, incluido el de límite de uso con su hora de reset | |
+| el cierre, con `is_error`, turnos y coste | |
+
+Un tipo de evento que ningún lector reconozca **se conserva** reducido, con su tipo y una
+muestra: cuesta doscientos bytes y es la única forma de enterarse de que una CLI cambió su
+salida sin tener que sospecharlo antes.
+
+Hay dos topes por unidad —2.000 eventos y 1 MB, ajustables con `APTS_LOOP_SESSION_MAX_EVENTS`
+y `APTS_LOOP_SESSION_MAX_BYTES`— y al tocarlos se deja de enviar **diciéndolo**, con un
+evento `recorte`. Un truncado silencioso se lee como «esto es todo lo que pasó», que es peor
+que no guardar nada.
+
+### Cómo viaja
+
+Agrupado: veinticinco eventos o segundo y medio, lo que llegue antes, en una sola petición en
+vuelo. Es best-effort como el diario —sin reintentos, plazo de cinco segundos, tragándose
+cualquier error—, así que **que APTS no vea la sesión no puede ser el motivo de que la sesión
+pare**. Si la cola se desborda se tira lo más viejo y se dice cuánto.
+
+Con una diferencia respecto al diario: aquí sí se mira el código de respuesta, y sólo para
+una cosa. Este script es un artefacto versionado que se descarga, así que va a hablar con
+APTS anteriores a esta ruta; a los dos 404 deja de intentarlo **durante toda la corrida** y
+lo dice una vez. Sin ese cortacircuitos, un servidor sin el endpoint se comería una petición
+fallida cada segundo y medio durante media hora.
+
+**No se escribe en el diario local.** El diario es el registro de las decisiones del bucle y
+esto lo ahogaría igual que ahogaría la pestaña Logs del panel; y así lo que el diario
+promete —que no contiene secretos— sigue siendo verdad. Del diario sólo sale una línea al
+abrir y otra al cerrar, con la cuenta de eventos. Si quieres copia local, el conductor ya
+hace eco de la salida del agente tal cual: basta redirigir la salida estándar.
+
+Necesita que la CLI **emita** el stream. Los comandos de más arriba ya lo piden; si el tuyo
+no, el conductor lo dice al cerrar la primera unidad en vez de dejarte mirando un panel
+vacío.
+
+**Sin tarea no hay sesión**: cuelga de la tarea de la unidad, igual que el diario remoto, así
+que `--no-task-log` la apaga de paso.
 
 ## Frenos
 
@@ -127,8 +265,9 @@ reclamar: esa llamada sólo persiste el recorrido.
 
 El conductor abre **una tarea por unidad** (`register_task`), titulada con el nombre de la
 historia —cuesta una llamada de más y es la diferencia entre una lista legible y una
-columna de UUIDs—, y la va moviendo con lo único que se puede medir desde fuera de la
-sesión del agente: modelo, intento, duración y código de salida. `--no-task-log` lo apaga.
+columna de UUIDs—, y la va moviendo con lo que se puede medir desde fuera de la sesión del
+agente: modelo, intento, duración, código de salida y —si la CLI habla JSON— lo que costó
+(ver *Lo que costó cada story*). `--no-task-log` lo apaga.
 
 Esa tarea viaja al agente en el prompt (`{task_id}`) para que use ésa y no registre otra.
 Sin eso salen dos filas por historia, y la segunda es peor que redundante: la que registra
@@ -482,12 +621,19 @@ adelantado.
 ## Diario
 
 `.apts/apts-loop.jsonl` por defecto (`--journal off` lo apaga). Una línea por evento:
-arranque, estado de cada vuelta, resultado de **cada intento** del agente y parada. No
-contiene secretos.
+arranque, estado de cada vuelta, resultado de **cada intento** del agente y parada.
+
+**No contiene secretos, y sigue sin contenerlos** aunque exista `--session-stream`: lo que
+el diario anota son las decisiones del bucle, nunca el contenido de la sesión del agente.
+De la sesión sólo deja la cuenta —un evento `sesion` al abrirla y otro al cerrarla, con
+cuántos eventos se mandaron y cuántos se descartaron—. El contenido va a APTS y no pasa por
+aquí, que es lo que permite que esta frase siga siendo cierta.
 
 El evento `arranque` lleva la política resuelta (`modelos`, `politica_fuente`,
 `politica_ignorado`, `env_file`); cada evento `agente` lleva `intento`,
-`intentos_totales` y el `modelo` con el que corrió; un reintento que no llegó a
+`intentos_totales`, el `modelo` con el que corrió y, cuando la CLI habló JSON, lo que
+costó (`coste_usd`, `tokens`, `turnos`, `sesion`, `runtime`); la `parada` lleva el total de
+la corrida (`coste_usd_total`, `tokens_total`, `sesiones_medidas`); un reintento que no llegó a
 gastarse deja un `reintento_innecesario` con lo que el motor respondió en su lugar; cada
 reintento de red deja un `reintento_red` con la herramienta, el intento, la espera y el
 motivo; y la tarea de cada unidad deja un `tarea` al abrirse y otro al cerrarse —o un

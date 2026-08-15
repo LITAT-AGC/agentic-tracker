@@ -542,6 +542,65 @@
         </div>
 
         <div>
+          <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+            <div class="flex items-center gap-2">
+              <div class="w-1 h-5 bg-violet-500 rounded-full"></div>
+              <h4 class="text-base font-bold">Sesión del agente</h4>
+              <Tag v-if="sessionLive" value="en vivo" severity="success" />
+            </div>
+            <Select
+              v-if="sessionTaskOptions.length"
+              v-model="sessionTaskId"
+              :options="sessionTaskOptions"
+              option-label="label"
+              option-value="value"
+              class="text-sm"
+              placeholder="Elegir ejecución"
+            />
+          </div>
+          <Card class="border border-surface-200" :pt="{ body: { class: 'p-0' }, content: { class: 'p-0' } }">
+            <template #content>
+              <div v-if="!sessionTaskId" class="p-6 text-sm text-surface-500 space-y-2">
+                <p>Ninguna ejecución con sesión guardada.</p>
+                <p class="text-xs">
+                  El conductor sólo la manda con <code class="px-1 bg-surface-100 rounded">--session-stream</code>,
+                  y va apagado por defecto: lo que viaja aquí no son las decisiones del bucle
+                  sino el contenido de la sesión —lo que el agente leyó y escribió—, así que
+                  encenderlo es decidir que eso puede vivir en esta base.
+                </p>
+              </div>
+              <template v-else>
+                <div
+                  ref="sessionFeed"
+                  class="max-h-[28rem] overflow-y-auto divide-y divide-surface-100"
+                  @scroll="onSessionScroll"
+                >
+                  <div
+                    v-for="e in sessionEvents"
+                    :key="e.seq"
+                    class="px-4 py-2 flex gap-3 text-sm items-baseline"
+                  >
+                    <span class="text-[11px] text-surface-400 tabular-nums w-14 shrink-0">{{ formatClock(e.ts) }}</span>
+                    <span
+                      class="text-[10px] uppercase tracking-wider w-20 shrink-0"
+                      :class="sessionKindClass(e.kind)"
+                    >{{ sessionKindLabel(e.kind) }}</span>
+                    <span class="min-w-0 flex-1 whitespace-pre-wrap break-words">{{ sessionEventText(e) }}</span>
+                  </div>
+                  <div v-if="!sessionEvents.length" class="p-6 text-center text-surface-500 text-sm">
+                    Esta ejecución todavía no dejó ningún evento.
+                  </div>
+                </div>
+                <div class="px-4 py-2 border-t border-surface-100 flex flex-wrap items-center justify-between gap-2 text-[11px] text-surface-400">
+                  <span>{{ sessionEvents.length }} evento{{ sessionEvents.length === 1 ? '' : 's' }}</span>
+                  <span v-if="sessionError" class="text-amber-600">{{ sessionError }}</span>
+                </div>
+              </template>
+            </template>
+          </Card>
+        </div>
+
+        <div>
           <div class="flex items-center gap-2 mb-4">
             <div class="w-1 h-5 bg-emerald-500 rounded-full"></div>
             <h4 class="text-base font-bold">Diario reciente</h4>
@@ -1232,7 +1291,7 @@
 </template>
 
 <script setup>
-import { computed, ref, onMounted, onUnmounted, watch } from 'vue';
+import { computed, ref, onMounted, onUnmounted, watch, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { apiFetchJson, getApiErrorMessage } from '../config/api';
 
@@ -1409,6 +1468,12 @@ const resetDetails = () => {
   conductorError.value = null;
   conductorMessage.value = null;
   conductorMessageTone.value = 'ok';
+  // La sesion cuelga de una tarea de ESTE proyecto: al cambiar de proyecto, el cursor que
+  // quedara apuntaria a una ejecucion que ya no se esta mirando.
+  sessionTaskId.value = null;
+  sessionEvents.value = [];
+  sessionCursor.value = null;
+  sessionError.value = null;
   projectAgents.value = [];
   selectedAgentKey.value = null;
   agentForm.value = {};
@@ -1760,6 +1825,182 @@ const pendingOrderNote = (order) => {
   if (presence.state === 'silent') return { severity: 'warn', text: `sin señal desde hace ${formatSecondsAgo(conductorPresenceByName.value.get(order.agent_name)?.seconds_ago)}; caduca a los ${conductorOrderTtlLabel.value}` };
   if (presence.state === 'absent') return { severity: 'danger', text: `no hay nadie al otro lado; caduca a los ${conductorOrderTtlLabel.value}` };
   return { severity: 'secondary', text: 'sin datos del destinatario' };
+};
+
+// ---- La sesion del agente ----
+//
+// Sondeo con CURSOR y cada dos segundos, no cada diez. El argumento del buzon de ordenes
+// —que para un boton que pulsa una persona diez segundos son indistinguibles de
+// instantaneo— no vale aqui: ver a un agente trabajar si quiere latencia baja. Lo que no
+// compra un socket es el salto que queda, de dos segundos a instantaneo, que no lo nota
+// nadie mirando pensar a un modelo.
+//
+// El cursor es `after_seq` y no una hora: los veinticinco eventos de un mismo lote entran
+// con el mismo `created_at`, asi que un cursor por reloj se saltaria eventos.
+const SESSION_REFRESH_MS = 2000;
+// Cuantos se conservan en pantalla. Una story larga deja cientos y el navegador no tiene por
+// que dibujarlos todos: lo que se mira en vivo es la cola, y lo de mas atras sigue en la base.
+const SESSION_MAX_EN_PANTALLA = 800;
+// Paginas por carga inicial. Con 200 por pagina cubre una sesion de 2.000 eventos, que es el
+// tope que el propio conductor se pone por unidad.
+const SESSION_MAX_PAGINAS = 10;
+
+const sessionTaskId = ref(null);
+const sessionEvents = ref([]);
+const sessionCursor = ref(null);
+const sessionError = ref(null);
+const sessionLoading = ref(false);
+const sessionFeed = ref(null);
+// Si quien mira ha subido a leer algo, el scroll NO se le mueve bajo los pies. Se vuelve a
+// enganchar solo cuando baja del todo, que es como se comporta cualquier terminal.
+let sessionPegadoAbajo = true;
+let sessionTimer = null;
+
+const sessionTaskOptions = computed(() => (conductorState.value?.session_tasks || []).map((t) => ({
+  value: t.id,
+  label: `${t.title || t.id.slice(0, 8)} · ${t.events} ev · ${formatDateTime(t.created_at)}`
+})));
+
+// «En vivo» es que lo que se esta mirando es la ejecucion en curso, no que haya llegado algo
+// hace poco: un agente puede tardar minutos entre dos eventos y eso no es que se haya muerto.
+const sessionLive = computed(() => Boolean(
+  sessionTaskId.value && conductorState.value?.active_task?.id === sessionTaskId.value
+));
+
+const SESSION_KINDS = {
+  init: { label: 'inicio', clase: 'text-violet-500' },
+  texto: { label: 'dice', clase: 'text-surface-400' },
+  herramienta: { label: 'usa', clase: 'text-sky-600' },
+  resultado: { label: 'recibe', clase: 'text-emerald-600' },
+  aviso: { label: 'aviso', clase: 'text-amber-600' },
+  fin: { label: 'fin', clase: 'text-violet-500' },
+  fin_paso: { label: 'paso', clase: 'text-violet-400' },
+  recorte: { label: 'recorte', clase: 'text-red-500' },
+  otro: { label: 'otro', clase: 'text-surface-400' }
+};
+
+// Un `kind` que este panel no conozca se dibuja como generico en vez de tirarse. El
+// vocabulario lo pone el conductor, que es un artefacto que se descarga y se actualiza por
+// su cuenta: si el panel tuviera que conocerlo primero, un conductor nuevo dejaria de verse.
+const sessionKindLabel = (kind) => (SESSION_KINDS[kind]?.label ?? kind);
+const sessionKindClass = (kind) => (SESSION_KINDS[kind]?.clase ?? 'text-surface-400');
+
+const sessionEventText = (e) => {
+  const p = e?.payload || {};
+  if (p.truncado) return p.truncado;
+  switch (e.kind) {
+    case 'init':
+      return [p.modelo, p.cwd, p.permisos, (p.mcp || []).join(', ')].filter(Boolean).join(' · ');
+    case 'texto':
+      return p.pensando ? `(pensando) ${p.texto}` : p.texto;
+    case 'herramienta':
+      return `${p.nombre}(${p.entrada || ''})`;
+    case 'resultado':
+      return `${p.error ? '✗ ' : ''}${p.salida}`;
+    case 'aviso':
+      return [p.subtipo, p.estado, p.ventana, p.reset && `reset ${formatDateTime(p.reset)}`, p.detalle]
+        .filter(Boolean).join(' · ');
+    case 'fin':
+      return [
+        p.fallo ? 'terminó con error' : 'terminó bien',
+        p.subtipo,
+        p.turnos != null && `${p.turnos} turnos`,
+        p.coste_usd != null && `$${Number(p.coste_usd).toFixed(4)}`
+      ].filter(Boolean).join(' · ');
+    case 'fin_paso':
+      return [p.motivo, p.coste_usd != null && `$${Number(p.coste_usd).toFixed(4)}`].filter(Boolean).join(' · ');
+    case 'recorte':
+      return `${p.motivo}${p.eventos != null ? ` (${p.eventos} eventos)` : ''}`
+        + `${p.descartados ? `; ${p.descartados} descartados` : ''}`;
+    case 'otro':
+      return `${p.tipo}: ${p.muestra}`;
+    default:
+      return JSON.stringify(p);
+  }
+};
+
+const formatClock = (value) => {
+  if (!value) return '';
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? '' : d.toTimeString().slice(0, 8);
+};
+
+const sessionScrollAlFinal = () => {
+  const el = sessionFeed.value;
+  if (!el || !sessionPegadoAbajo) return;
+  nextTick(() => { el.scrollTop = el.scrollHeight; });
+};
+
+const onSessionScroll = () => {
+  const el = sessionFeed.value;
+  if (!el) return;
+  sessionPegadoAbajo = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+};
+
+const loadSessionEvents = async ({ reset = false } = {}) => {
+  const url = selectedProject.value?.url || String(route.params.projectId || '').trim();
+  const taskId = sessionTaskId.value;
+  if (!url || !taskId || sessionLoading.value) return;
+
+  sessionLoading.value = true;
+  try {
+    if (reset) {
+      sessionEvents.value = [];
+      sessionCursor.value = null;
+      sessionPegadoAbajo = true;
+    }
+
+    // Se pagina hasta agotar en la carga inicial; en el sondeo, `has_more` casi nunca viene
+    // puesto porque dos segundos no dan para doscientos eventos.
+    for (let pagina = 0; pagina < SESSION_MAX_PAGINAS; pagina += 1) {
+      const cursor = sessionCursor.value;
+      const query = `?task_id=${encodeURIComponent(taskId)}&limit=200`
+        + (cursor === null || cursor === undefined ? '' : `&after_seq=${cursor}`);
+      const { data } = await apiFetchJson(
+        `/dashboard/projects/${encodeURIComponent(url)}/conductor/session${query}`,
+        { credentials: 'include' },
+        'No se pudo leer la sesión del agente.'
+      );
+
+      // La tarea pudo cambiar mientras viajaba la respuesta; lo que llega ya no es de lo que
+      // se esta mirando.
+      if (sessionTaskId.value !== taskId) return;
+
+      sessionEvents.value.push(...(data.events || []));
+      sessionCursor.value = data.next_seq;
+      if (!data.has_more) break;
+    }
+
+    const sobran = sessionEvents.value.length - SESSION_MAX_EN_PANTALLA;
+    if (sobran > 0) sessionEvents.value.splice(0, sobran);
+    sessionError.value = null;
+    sessionScrollAlFinal();
+  } catch (error) {
+    sessionError.value = getApiErrorMessage(error, 'No se pudo leer la sesión del agente.');
+  } finally {
+    sessionLoading.value = false;
+  }
+};
+
+// Elegir ejecucion es empezar de cero: el cursor pertenece a una tarea y arrastrarlo daria
+// una sesion que empieza por la mitad.
+watch(sessionTaskId, () => { loadSessionEvents({ reset: true }); });
+
+// La ejecucion se elige sola la primera vez —la que esta corriendo, o la mas reciente con
+// sesion— porque el caso normal es abrir la pestana para ver lo que pasa AHORA. En cuanto
+// alguien elige otra a mano, esto no vuelve a tocarla.
+watch(() => conductorState.value?.session_tasks, (tareas) => {
+  if (sessionTaskId.value || !Array.isArray(tareas) || !tareas.length) return;
+  const activa = conductorState.value?.active_task?.id;
+  sessionTaskId.value = tareas.some((t) => t.id === activa) ? activa : tareas[0].id;
+});
+
+const sessionAutoRefresh = () => {
+  if (activeTab.value !== 'conductor' || !sessionTaskId.value) return;
+  if (typeof document !== 'undefined' && document.hidden) return;
+  // Sondear una ejecucion terminada seria releer para siempre algo que ya no cambia.
+  if (!sessionLive.value) return;
+  loadSessionEvents();
 };
 
 // El auto-refresco solo tiene sentido con la pestana delante y la ventana visible: una
@@ -2365,10 +2606,16 @@ watch(activeTab, (tab) => {
 onMounted(() => {
   loadProject();
   conductorTimer = window.setInterval(conductorAutoRefresh, CONDUCTOR_REFRESH_MS);
+  // Dos temporizadores y no uno: el estado del conductor cambia al ritmo de las ordenes
+  // —diez segundos— y la sesion al ritmo de un agente trabajando. Fundirlos obligaria a
+  // elegir entre pedir el estado cinco veces de mas o ver la sesion con ocho de retraso.
+  sessionTimer = window.setInterval(sessionAutoRefresh, SESSION_REFRESH_MS);
 });
 
 onUnmounted(() => {
   if (conductorTimer) window.clearInterval(conductorTimer);
   conductorTimer = null;
+  if (sessionTimer) window.clearInterval(sessionTimer);
+  sessionTimer = null;
 });
 </script>
