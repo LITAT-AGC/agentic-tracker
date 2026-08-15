@@ -73,10 +73,12 @@ unico que demuestra que el frontend desplegado es el nuevo.
 
 Dos cosas que hay que saber leer:
 
-- **Reinicios en bucle.** Los dos auto-chequeos de arranque (contrato contra
-  `apts_skills.json`, y plantillas contra `apts-surface.json`) abortan con
-  `exit 3` antes de escuchar. pm2 reintenta, asi que el sintoma es el contador de
-  reinicios subiendo. El script lo detecta y te enseña el log de error.
+- **Reinicios en bucle.** Los dos auto-chequeos de arranque abortan con `exit 3`
+  antes de escuchar: el contrato contra `apts_skills.json`, y las lineas
+  `--agent-cmd` que publica el manifiesto contra el README del conductor. pm2
+  reintenta, asi que el sintoma es el contador de reinicios subiendo. El script lo
+  detecta y te enseña el log de error. (El segundo fue durante un tiempo el de las
+  plantillas contra `apts-surface.json`, retirado con VS Code el 2026-08-08.)
 - **El aviso de `/mcp`.** nginx no tiene `location /mcp`, asi que
   `https://apts.informaticos.ar/mcp` cae en `try_files` y la sirve como estatico
   (un POST recibe 405 de nginx). El manifiesto publica esa URL como punto de
