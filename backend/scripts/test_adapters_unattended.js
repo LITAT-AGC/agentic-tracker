@@ -122,6 +122,43 @@ const main = async () => {
     assert.equal(marcada.edit, 'allow');
   });
 
+  // --- Los `ask` que opencode trae incorporados -----------------------------
+  //
+  // No viven en `config.permission`, asi que aplanar lo declarado no los alcanza: costo una
+  // tercera corrida el 2026-08-15, con un subagente colgado leyendo un `.env.test`. Se
+  // siembran, y tienen que quedar DELANTE de lo que declare el proyecto, porque el evaluador
+  // de opencode es `findLast` y lo ultimo gana.
+  comprobar('con la marca, se siembran los `ask` incorporados de opencode', () => {
+    assert.equal(marcada.read['*.env'], 'allow');
+    assert.equal(marcada.read['*.env.*'], 'allow');
+    assert.equal(marcada.external_directory['*'], 'allow');
+    assert.equal(marcada.doom_loop, 'allow');
+  });
+
+  comprobar('y van delante de lo que declara el proyecto, no detras', () => {
+    const claves = Object.keys(marcada);
+    assert.ok(claves.indexOf('read') < claves.indexOf('bash'),
+      `las semillas tienen que preceder a lo declarado: ${claves.join(', ')}`);
+  });
+
+  // Lo que hace que sembrar no sea imponer: un proyecto que declara SU regla sobre la misma
+  // capacidad tiene que seguir ganando. Sin la fusion por patrones, declarar `read` en el
+  // proyecto reemplazaria la semilla entera y devolveria el `.env` a su `ask` sin que nadie
+  // lo notara.
+  const conReadPropio = await conMarca('1', { read: { '*.env.local': 'deny' } });
+  comprobar('un `read` del proyecto se fusiona con la semilla y su deny gana', () => {
+    assert.equal(conReadPropio.read['*.env.*'], 'allow');
+    assert.equal(conReadPropio.read['*.env.local'], 'deny');
+    const patrones = Object.keys(conReadPropio.read);
+    assert.ok(patrones.indexOf('*.env.*') < patrones.indexOf('*.env.local'),
+      `el patron del proyecto tiene que ir el ultimo: ${patrones.join(', ')}`);
+  });
+
+  comprobar('sin la marca no se siembra nada', () => {
+    assert.equal(sinMarca.read, undefined);
+    assert.equal(sinMarca.doom_loop, undefined);
+  });
+
   const apagada = await conMarca('0', permisosDeEjemplo());
   comprobar('`0` no cuenta como marca puesta', () => {
     assert.equal(apagada.bash['*'], 'ask');

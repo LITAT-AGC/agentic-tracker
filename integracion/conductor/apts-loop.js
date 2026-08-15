@@ -2088,6 +2088,28 @@ const PISTA_MAX = 200;
 // de una frase sin saber de qué CLI viene.
 const REGISTRO_ESTRUCTURADO = /^timestamp=\S+\s+level=(TRACE|DEBUG|INFO|WARN)\b/i;
 
+// Qué estaba esperando un agente que se quedó mudo. Un `agente_mudo` a secas manda a
+// investigar de cero, y el caso real ha salido tres veces seguidas —2026-08-15, en tres
+// corridas del mismo cliente— con la misma forma: un subagente pide un permiso, nadie se lo
+// contesta porque el contestador de la CLI filtra por sesión, y el proceso entero se para.
+// La causa estaba escrita en la salida y nadie la miraba.
+//
+// Se dice como PISTA y no como motivo, y con esa prudencia a propósito: la CLI no registra
+// las respuestas, sólo las preguntas, así que desde fuera no se puede distinguir una petición
+// contestada de una que no. Lo que sí es cierto es que el que se quedó mudo pidió permiso, y
+// eso es exactamente lo que hay que ir a mirar primero.
+//
+// Es conocimiento de la salida de una CLI, como los patrones de `reconocerCondicion`, y vive
+// aquí por lo mismo: es lo único que convierte «no sé por qué paró» en un sitio donde mirar.
+const PETICION_DE_PERMISO = /\basking\b[^\n]*?\bpermission=([A-Za-z_][\w.-]*)/g;
+const permisosSinContestar = (cola) => {
+  const vistos = [];
+  for (const encaje of String(cola || '').matchAll(PETICION_DE_PERMISO)) {
+    if (!vistos.includes(encaje[1])) vistos.push(encaje[1]);
+  }
+  return vistos;
+};
+
 const ultimaLineaEnProsa = (cola) => {
   const lineas = String(cola || '').split(/\r?\n/);
   for (let i = lineas.length - 1; i >= 0; i -= 1) {
@@ -2391,10 +2413,21 @@ const conducir = async (cfg, plantillaPrompt) => {
       // La última línea en prosa del agente. Con un motivo reconocido no hace falta —el
       // detalle ya nombra la causa— pero aquí es lo único que separa «el agente falló» de
       // por qué, y hasta ahora se quedaba en la consola de esta máquina.
+      //
+      // Y si murió mudo, la última línea no dice nada: la sesión lleva veinte minutos sin
+      // escribir, así que lo último es de antes de pararse. Lo que sí sirve ahí es otra cosa
+      // —qué estaba esperando—, y eso lo cuenta `permisosSinContestar`.
       const pista = mudoAlFinal ? '' : ultimaLineaEnProsa(ultimo.cola);
+      const esperando = mudoAlFinal ? permisosSinContestar(ultimo.cola) : [];
       await parar(cfg, {
         motivo: mudoAlFinal ? 'agente_mudo' : 'agente_fallo',
-        detalle: describirIntentos(intentos) + (pista ? ` Última línea del agente: «${pista}»` : ''),
+        detalle: describirIntentos(intentos)
+          + (pista ? ` Última línea del agente: «${pista}»` : '')
+          + (esperando.length
+            ? ` Su salida trae ${esperando.length === 1 ? 'una petición' : `${esperando.length} peticiones`}`
+              + ` de permiso (${esperando.join(', ')}) sin respuesta a la vista: mira si se quedó`
+              + ' esperando una aprobación que nadie iba a dar.'
+            : ''),
         codigo: mudoAlFinal ? SALIDA.agente_mudo : SALIDA.agente_fallo,
         fase,
         storyId,

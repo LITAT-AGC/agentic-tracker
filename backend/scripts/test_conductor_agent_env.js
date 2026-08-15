@@ -112,6 +112,9 @@ const AGENTE_FALSO = `
 const mudo = Number(process.env.FALSO_MUDO_MS || 0);
 if (mudo) {
   process.stdout.write('marca-de-eco-del-agente\\n');
+  // Lo ultimo que dijo antes de callarse. Es la forma real del caso: la CLI escribe que
+  // esta pidiendo un permiso y a partir de ahi no vuelve a escribir nada.
+  if (process.env.FALSO_SALIDA) process.stderr.write(process.env.FALSO_SALIDA.split('\\\\n').join('\\n') + '\\n');
   setTimeout(() => { process.stdout.write('desperte\\n'); process.exit(0); }, mudo);
 } else {
   const dormir = Number(process.env.FALSO_DORMIR_MS || 0);
@@ -380,6 +383,33 @@ const intentos = (r) => r.eventos.filter((e) => e.evento === 'agente');
     ok((parada(r).detalle || '').includes('level=ERROR'),
       'pero un ERROR del registro SI es la pista: ahi es donde una CLI escribe su fallo',
       parada(r).detalle);
+    console.log();
+
+    console.log('16) un agente mudo dice QUE estaba esperando');
+    // Las lineas son las de la corrida real del 2026-08-15: un subagente pidiendo permiso de
+    // lectura sobre un `.env.test` que nadie iba a contestar. Un `agente_mudo` a secas manda a
+    // investigar de cero; con esto, la parada nombra el sitio donde mirar.
+    r = await correr(puerto, {
+      escalera: 'modelo-a', mudoMs: 60000, silencioMs: 700, codigo: 0,
+      salida: [
+        'timestamp=2026-08-15T20:16:42.084Z level=INFO message=asking id=per_00711cc64 permission=read patterns=[".env.test"]',
+        'timestamp=2026-08-15T20:16:42.452Z level=INFO message=asking id=per_00711cdd3 permission=read patterns=[".env.test.example"]',
+      ].join('\\n'),
+    });
+    ok(r.codigoSalida === 24, 'sigue saliendo con 24', `salio ${r.codigoSalida}`);
+    ok(/petici[oó]n(es)? de permiso \(read\)/.test(parada(r).detalle || ''),
+      'la parada nombra el permiso que quedo pendiente', parada(r).detalle);
+    // Se dice una vez por clase de permiso y no una por linea: dos peticiones de `read`
+    // seguidas son el mismo sitio donde mirar, no dos.
+    ok(!/read, read/.test(parada(r).detalle || ''),
+      'y no repite la misma clase de permiso', parada(r).detalle);
+
+    r = await correr(puerto, {
+      escalera: 'modelo-a', mudoMs: 60000, silencioMs: 700, codigo: 0,
+      salida: 'trabajando tan tranquilo',
+    });
+    ok(!/petici[oó]n/.test(parada(r).detalle || ''),
+      'un mudo sin peticiones de permiso no se inventa ninguna', parada(r).detalle);
   } finally {
     servidor.close();
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) { /* da igual */ }

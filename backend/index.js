@@ -2498,7 +2498,15 @@ const integrationArtifacts = {
     // `opencode.json` comiteado conserva su `ask` para la sesion con persona delante. Quien se
     // quede en 1.3.0 tiene un adaptador con el que ningun subagente puede tocar la shell en una
     // corrida desatendida.
-    artifactVersion: '1.4.0',
+    // 1.5.0: el plugin siembra ademas los `ask` INCORPORADOS de opencode, que no viven en
+    // `config.permission` y por eso el aplanado de 1.4.0 no los alcanzaba: `read` sobre
+    // `*.env` y `*.env.*`, `external_directory` y `doom_loop`. Con 1.4.0 el subagente ya
+    // podia usar la shell pero seguia colgandose al abrir un `.env.test` —le paso a la capa
+    // Acceptance Auditor con las otras dos ya terminadas—, asi que quien se quede en 1.4.0
+    // tiene medio arreglo y el mismo sintoma. Se les gana porque el evaluador de opencode es
+    // `findLast` y las reglas del proyecto se apilan despues de las suyas; las semillas van
+    // DELANTE de lo declarado para que el proyecto siga ganandoles.
+    artifactVersion: '1.5.0',
     kind: 'adapter_generator',
     recommended: true,
     usagePriority: 'primary',
@@ -2583,7 +2591,14 @@ const integrationArtifacts = {
     // lineas publicadas pidan ahora `--print-logs`, sin el cual el freno de silencio no oye a
     // un subagente trabajar. Quien se quede en 1.9.0 y regenere el adaptador no arregla nada:
     // el plugin espera esa marca y este conductor es quien la pone.
-    artifactVersion: '1.10.0',
+    // 1.11.0: al parar por mudo, el detalle nombra las peticiones de permiso que hay en la
+    // salida del agente. Tres corridas seguidas del mismo cliente pararon por lo mismo —un
+    // subagente esperando una aprobacion que nadie iba a dar— y las tres veces la causa
+    // estaba escrita en la salida sin que nadie la mirara. Va como pista y no como motivo:
+    // la CLI registra las preguntas y no las respuestas, asi que desde fuera no se puede
+    // afirmar que quedara sin contestar. Quien se quede en 1.10.0 sigue leyendo un
+    // `agente_mudo` que no dice donde mirar.
+    artifactVersion: '1.11.0',
     kind: 'loop_conductor',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -2633,7 +2648,11 @@ const integrationArtifacts = {
     // eso lo cierra el plugin del adaptador con `APTS_UNATTENDED`. Corrige ademas la premisa
     // del freno de silencio: que una CLI hable NDJSON no basta, porque el stream de opencode
     // calla durante toda herramienta larga, y por eso la linea publicada gana `--print-logs`.
-    artifactVersion: '1.11.0',
+    // 1.12.0: documenta los `ask` incorporados de opencode —los que no viven en el
+    // `opencode.json` y por eso el aplanado no alcanzaba—, por que se siembran en vez de
+    // aplastarlos con un comodin, y que la parada por mudo nombra ahora las peticiones de
+    // permiso que encuentre en la salida.
+    artifactVersion: '1.12.0',
     kind: 'loop_conductor_manual',
     recommended: false,
     usagePriority: 'optional_entrypoint',

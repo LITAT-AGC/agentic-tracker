@@ -13,7 +13,7 @@ llego hasta aqui: eso esta en el historial de git.
 | Manifiesto | `GET /api/public/integrar`, `schema_version` 1.1.3 |
 | Guia para personas | `GET /api/public/integrar/guia`, HTML renderizado del manifiesto |
 | Runtimes soportados | Dos: Claude Code y opencode |
-| Artefactos publicados | 8; el conductor en `artifact_version` 1.10.0 y su README en 1.11.0, `adapter_generator` en 1.4.0, `loop_prompt_code_review` en 1.3.0, `agent_guidelines` y `surface_spec` en 1.1.1, `skill_markdown` y `skills_json` en 1.1.0 |
+| Artefactos publicados | 8; el conductor en `artifact_version` 1.11.0 y su README en 1.12.0, `adapter_generator` en 1.5.0, `loop_prompt_code_review` en 1.3.0, `agent_guidelines` y `surface_spec` en 1.1.1, `skill_markdown` y `skills_json` en 1.1.0 |
 | Descargas necesarias para **llamar** a las operaciones | Ninguna |
 | Descargas necesarias para **conducir** | El spec y el generador (agentes y comandos); el conductor y su README si se quiere el bucle desatendido, y su plantilla de revision si se quiere ademas la compuerta dentro de la sesion del agente |
 
@@ -195,6 +195,47 @@ En PROD desde el 2026-08-15 (`6eb50a5`), sin migraciones, comprobado contra
 1.3.0 con la linea de opencode ya con `--print-logs` dentro de `registration_by_runtime`, y las
 cuatro descargas coinciden byte a byte con el repositorio —normalizando CRLF a LF, que es lo que
 checkoutea el servidor—.
+
+**Y aplanar lo declarado era medio arreglo.** El mismo cliente aplico eso y la corrida llego
+mucho mas lejos —los subagentes usaron la shell sin un solo `ask` sin contestar y la revision
+completo una pasada entera, con hallazgos, correcciones y re-test—, pero la pasada 2 se colgo
+otra vez: Acceptance Auditor abrio un `.env.test` para comprobar un limite y se quedo con dos
+`read` en estado `running` para siempre, con las otras dos capas ya terminadas.
+
+opencode trae `ask` **INCORPORADOS** que no viven en `config.permission`, asi que recorrer lo
+declarado no los ve. Son tres: `read` sobre `*.env` y `*.env.*`, `external_directory` fuera del
+proyecto y `doom_loop`. El plugin los siembra bajo la misma marca, y se les puede ganar porque
+el evaluador de opencode es literalmente `findLast` —`K.flat().findLast(z => match(permiso,
+z.permission) && match(patron, z.pattern)) ?? {action:"ask"}`— y las reglas del proyecto se
+apilan DESPUES de las suyas. Comprobado tambien desde fuera con `opencode debug agent general`:
+sin la marca, `read *.env.*` resuelve `ask` y con ella `allow`.
+
+Las semillas van **delante** de lo declarado, no detras, y una capacidad que este en los dos
+sitios se fusiona por patrones en vez de reemplazarse: si el proyecto declarara `read`, un
+reemplazo devolveria el `.env` a su `ask` sin que nadie lo notara.
+
+Y no se aplasta con un `"*": "allow"`, que habria cubierto ademas los `ask` que opencode incorpore
+en el futuro. Puesto detras de sus reglas ganaria tambien a sus `deny`, y `question` denegado es
+lo que impide que un agente desatendido se pare a preguntarle a nadie: medido con `debug agent
+general`, la marca deja `question` en `deny` y un comodin lo habria puesto en `allow`. Cambiar un
+cuelgue por otro no es arreglarlo. El precio es que esa lista hay que revisarla si opencode añade
+un `ask` nuevo.
+
+**Lo que hace que ese precio no vuelva a costar una tarde** es la otra mitad, y esta no depende
+de conocer la lista: al parar por mudo, el conductor nombra las peticiones de permiso que
+encuentre en la salida del agente. Tres corridas seguidas pararon por lo mismo y las tres veces
+la causa estaba escrita y nadie la miraba. Va como PISTA y no como motivo, porque opencode
+registra las preguntas y no las respuestas: desde fuera no se puede afirmar que quedara sin
+contestar, solo que el que se quedo mudo habia pedido permiso. La ultima linea en prosa no sirve
+en ese caso —la sesion lleva veinte minutos sin escribir, asi que lo ultimo es de antes de
+pararse—, y por eso son dos pistas distintas y no una.
+
+Del mismo caso sale la confirmacion de que `--print-logs` cumplio: el vigilante corto a los 20,1
+minutos de silencio y la ultima señal coincide con el final de las otras dos capas
+(20:19:49Z), o sea que midio inactividad real y no ceguera del stream.
+
+Las lineas `--agent-cmd` no cambian. Artefactos: el conductor a **1.11.0**, su README a
+**1.12.0** y `adapter_generator` a **1.5.0**.
 
 **Un agente que ni falla ni termina ya no deja el ciclo plantado.** Todos los frenos del
 conductor median ENTRE vueltas —`--max-stalls` compara el estado del motor de una vuelta con

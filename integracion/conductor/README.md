@@ -120,6 +120,23 @@ conduces opencode con un adaptador que no salió de APTS, o con uno anterior al 
 regenéralo: sin ese plugin, cualquier subagente que necesite la shell cuelga la vuelta
 hasta que el freno de silencio la corte.
 
+**Y aplanar lo declarado no basta**, que es la segunda mitad y costó una tercera corrida el
+mismo día. opencode trae `ask` **incorporados** que no viven en el `opencode.json`: `read`
+sobre `*.env` y `*.env.*`, `external_directory` fuera del proyecto y `doom_loop`. Un
+subagente que abra un `.env.test` para comprobar un valor cuelga exactamente igual, y le
+pasó a la capa Acceptance Auditor con las otras dos ya terminadas. El plugin los siembra
+explícitamente bajo la misma marca; se les puede ganar porque el evaluador de opencode es
+`findLast` —de todas las reglas que casan gana la última— y las del proyecto se apilan
+después de las suyas. Lo que declare tu `opencode.json` sigue ganando a la semilla, `deny`
+incluido.
+
+No se aplasta con un `"*": "allow"`, que habría cubierto también los `ask` que opencode
+añada en el futuro: puesto detrás de sus reglas ganaría además a sus `deny`, y `question`
+denegado es justo lo que impide que un agente desatendido se pare a preguntarle a nadie.
+Cambiar un cuelgue por otro no es arreglarlo. El precio es que esa lista hay que revisarla
+si opencode añade un `ask` nuevo, y lo que evita que eso vuelva a costar una tarde está
+abajo: al cortar por silencio, el conductor dice si había una petición de permiso pendiente.
+
 **`--print-logs` no está para leerlo**: es lo que le da oído al freno de silencio. El
 stream `--format json` de opencode descarta todo evento cuya sesión no sea la principal y
 sólo emite una herramienta cuando ya terminó, de modo que el proceso calla durante **toda**
@@ -329,6 +346,14 @@ Cortado así, el intento cuenta como **fallido** y la escalera sigue: a diferenc
 códigos 21–23, aquí reintentar sí puede salir distinto. Si el último intento también queda
 mudo, se para con el **código 24** (`agente_mudo`) y no con el 20, que manda a buscar el
 problema en la story. El diario deja un evento `agente_mudo` con `silencio_ms`.
+
+**Y la parada dice qué estaba esperando.** Si en la salida del agente hay peticiones de
+permiso, el detalle las nombra por su clase (`read`, `bash`…). Va como pista y no como
+motivo a propósito: opencode registra las preguntas pero no las respuestas, así que desde
+fuera no se puede distinguir una petición contestada de una que no. Lo que sí es cierto es
+que el que se quedó mudo pidió permiso, y ése es el primer sitio donde mirar — tres veces
+seguidas ha sido la causa. La última línea en prosa no se usa aquí: la sesión lleva veinte
+minutos sin escribir, así que lo último que dijo es de antes de pararse.
 
 Va **puesto por defecto**, único freno que se estrena encendido, por la asimetría de
 siempre: olvidarse de encenderlo cuesta una corrida desatendida plantada hasta que una

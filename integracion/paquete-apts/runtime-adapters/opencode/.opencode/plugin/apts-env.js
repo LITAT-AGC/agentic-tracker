@@ -86,6 +86,47 @@ function allowAsks(node) {
   return out;
 }
 
+// Y aplanar lo DECLARADO no basta, que es la segunda mitad de lo mismo y costo una tercera
+// corrida el 2026-08-15. opencode trae `ask` INCORPORADOS que no viven en este archivo:
+// `read` sobre `*.env` y `*.env.*`, `external_directory` fuera del proyecto y `doom_loop`.
+// Recorrer `config.permission` no los ve —no estan ahi—, asi que un subagente que lea un
+// `.env.test` para comprobar un limite se queda colgado igual que antes. Le paso a Acceptance
+// Auditor en la segunda pasada de una revision, con las otras dos capas ya terminadas.
+//
+// Se pueden ganar porque el evaluador de opencode es `findLast` —de todas las reglas que
+// casan gana la ULTIMA— y las de este archivo se apilan DESPUES de las suyas. Asi que una
+// regla explicita con el mismo patron les gana. Comprobado leyendo el evaluador de 1.18.18 y
+// el orden resuelto con `opencode debug agent build`.
+//
+// Van SEMBRADAS y no como un `"*": "allow"` que lo aplaste todo, aunque eso habria cubierto
+// tambien los `ask` que opencode incorpore en el futuro: un comodin puesto despues de sus
+// reglas ganaria tambien a sus `deny` —`question`, `plan_enter`, `plan_exit`—, y `question`
+// denegado es justo lo que impide que un agente desatendido se pare a preguntarle a nadie.
+// Cambiar un cuelgue por otro no es arreglarlo. El precio de sembrar es que esta lista hay
+// que revisarla si opencode añade un `ask` nuevo; el freno de silencio del conductor es lo
+// que evita que eso vuelva a costar una tarde, porque al cortar dice que habia una peticion
+// de permiso sin contestar.
+const ASKS_INCORPORADOS = {
+  read: { '*.env': 'allow', '*.env.*': 'allow' },
+  external_directory: { '*': 'allow' },
+  doom_loop: 'allow',
+};
+
+// Las semillas van DELANTE de lo declarado, no detras: `findLast` hace que lo ultimo gane, y
+// lo que el proyecto declare —sus `deny` sobre todo— tiene que seguir ganandole a esto. Una
+// capacidad que este en los dos sitios se fusiona por patrones en vez de reemplazarse, o
+// declarar `read` en el proyecto devolveria el `.env` a su `ask` sin que nadie lo notara.
+function conAsksIncorporados(permission) {
+  const out = { ...ASKS_INCORPORADOS };
+  for (const [capacidad, reglas] of Object.entries(permission)) {
+    const semilla = out[capacidad];
+    const fusionable = semilla && typeof semilla === 'object' && !Array.isArray(semilla)
+      && reglas && typeof reglas === 'object' && !Array.isArray(reglas);
+    out[capacidad] = fusionable ? { ...semilla, ...reglas } : reglas;
+  }
+  return out;
+}
+
 // `.env` minimalista: un `CLAVE=valor` por linea, `export ` opcional, comillas opcionales y
 // `#` de comentario. No expande variables dentro del valor: una clave no deberia depender de
 // eso, y expandir a medias confunde mas que no expandir.
@@ -138,7 +179,9 @@ export const AptsEnv = async ({ directory, worktree }) => {
       // Antes que nada y con su propia salida: esto no depende del registro MCP, y colgarlo
       // debajo de la guarda de abajo lo dejaria sin aplicar en cuanto alguien tocara el
       // servidor. Son dos arreglos independientes que comparten gancho.
-      if (config.permission && unattended()) config.permission = allowAsks(config.permission);
+      if (config.permission && unattended()) {
+        config.permission = allowAsks(conAsksIncorporados(config.permission));
+      }
 
       const server = config.mcp && config.mcp[SERVER];
       if (!server || server.type !== 'remote') return;
