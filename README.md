@@ -689,9 +689,10 @@ Frenos y codigos de salida, resumidos (el detalle esta en el README del conducto
 | escalera de modelo | 1 intento | el proceso del agente termino distinto de 0 |
 
 `0` done · `1` configuracion · `2` red · `10` blocked · `11` wait · `12` fuera de alcance ·
-`13` estancado · `14` tope de iteraciones · `15` detenido desde el panel · `20` el agente
-fallo · `21` la CLI del agente agoto su limite de uso · `22` el `--agent-cmd` no existe ·
-`23` la CLI del agente no tiene credenciales.
+`13` estancado · `14` tope de iteraciones · `15` detenido desde el panel · `16` hay otro
+conductor vivo sobre este diario · `20` el agente fallo · `21` la CLI del agente agoto su
+limite de uso · `22` el `--agent-cmd` no existe · `23` la CLI del agente no tiene
+credenciales · `24` el agente se quedo mudo.
 
 Del 21 al 23 el que fallo no es el agente sino su entorno, y por eso no se gasta la escalera
 de modelos: un limite de uso es de la CUENTA y no del modelo, asi que reintentar con otro no
@@ -701,6 +702,33 @@ Ademas late cada cinco minutos mientras el agente trabaja, copia su diario a `ag
 sondea un buzon de ordenes cada diez segundos para que el panel pueda pausarlo, reanudarlo o
 detenerlo. Sin `--project-url` ni `--agent-cmd` no falla: se queda esperando ordenes
 (`--daemon`).
+
+### Cuando al conductor lo matan desde fuera (opcional)
+
+A un conductor lo pueden matar sin que lo decida el: el 2026-08-16 una sesion de otra
+ventana cerro un servidor Vite matando por nombre de imagen (`Stop-Process -Name node`) y se
+llevo los catorce procesos `node` de la maquina. El agente no es `node` y sobrevivio, asi
+que la corrida *parecia* viva. Nadie se entero durante 48 minutos.
+
+El supervisor relanza al conductor cuando pasa eso, y **solo** cuando pasa eso. La señal no
+es el codigo de salida —aquel dia fue 255, que no significa nada— sino el diario: un
+conductor que decide escribe siempre una `parada`, y uno al que matan deja su `arranque` sin
+ella.
+
+```bash
+curl -O https://APTS/api/public/integrar/conductor/apts-supervisor.ps1   # Windows
+curl -O https://APTS/api/public/integrar/conductor/apts-supervisor.sh    # Linux / macOS
+```
+
+Son dos archivos de shell y no un programa de Node **por la misma razon por la que la
+defensa no vive dentro de `apts-loop.js`**: en Node moriria en el mismo barrido. Llevan
+dentro lo minimo —lanzar, leer el diario, decidir, avisar por Telegram y un cerrojo para que
+no haya dos—; el problema dificil, el agente que sobrevive al conductor y seguiria
+escribiendo en el repositorio mientras el relanzado escribe tambien, lo resuelve el propio
+conductor al arrancar: lo espera (`--huerfano-espera`, 60 min) y solo entonces le corta el
+arbol, y nunca toca lo que no ha podido identificar. El README del conductor lo explica
+entero, incluidos los dos detalles que hay que conservar al editarlos (BOM UTF-8 en el
+`.ps1`, finales de linea LF en el `.sh`).
 
 Importante: si APTS cambia endpoints, payloads o manejo de errores, el ajuste debe reflejarse primero en `integracion/paquete-apts/apts_skills.json`. El auto-chequeo del arranque aborta si la superficie remota se separa del contrato.
 

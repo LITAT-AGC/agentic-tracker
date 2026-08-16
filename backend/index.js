@@ -2614,7 +2614,21 @@ const integrationArtifacts = {
     // (`get_task`, solo en el camino de fallo) y trata lo terminal como exito. Quien se
     // quede en 1.12.0 vera un `tarea_fallo` que no es un fallo cada vez que su agente
     // cierre por su cuenta la tarea prestada.
-    artifactVersion: '1.13.0',
+    // 1.14.0: al arrancar reclama el terreno. A un conductor lo pueden matar desde fuera y no
+    // se lleva a su agente: el 2026-08-16 un `Stop-Process -Name node` de otra ventana se
+    // llevo los catorce `node` de la maquina —incluido el conductor de una corrida de 25
+    // unidades— y `opencode`, que no es `node`, siguio trabajando 48 minutos sin nadie
+    // detras. Relanzar encima de ese huerfano pone DOS agentes en el mismo repositorio, con
+    // dos tandas de commits, que es peor que la parada. Ahora el conductor apunta en el
+    // diario el pid de su agente (`agente_lanzado`) y el suyo propio, y el conductor
+    // siguiente lo espera —60 min por defecto, `--huerfano-espera`— antes de cortarle el
+    // arbol; si quien lo lanzo sigue vivo no es un huerfano y para con codigo nuevo, 16.
+    // Identificar es la parte delicada y no es la misma en los dos sistemas: en POSIX
+    // `sh -c` hace exec y el agente hereda el pid del shell (se comprueba pgid == pid), y en
+    // Windows el `cmd.exe` intermedio muere con el conductor y sobrevive el NIETO, que se
+    // busca por el enlace de paternidad. Quien se quede en 1.13.0 no tiene con que
+    // supervisar: un relanzamiento a ciegas es exactamente el escenario de los dos agentes.
+    artifactVersion: '1.14.0',
     kind: 'loop_conductor',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -2675,13 +2689,62 @@ const integrationArtifacts = {
     // 1.14.0: dice que la reanimacion de una tarea `stalled` es solo para ese caso, que
     // una transicion fallida pregunta antes por el estado real, y que una tarea ya cerrada
     // no deja `tarea_fallo` en el diario.
-    artifactVersion: '1.14.0',
+    // 1.15.0: documenta el supervisor —que existe, que son dos scripts de shell y no un
+    // programa de Node, cual es su regla y sus codigos— y el agente huerfano: el evento
+    // `agente_lanzado`, `--huerfano-espera`, el codigo 16 y como se identifica lo que se va
+    // a cortar en cada sistema. Sin esto, los dos artefactos nuevos llegan sin manual.
+    artifactVersion: '1.15.0',
     kind: 'loop_conductor_manual',
     recommended: false,
     usagePriority: 'optional_entrypoint',
     optional: true,
     selection_rule: 'Manual for the loop conductor: the --agent-cmd line for each runtime (Claude Code and opencode, plus the Windows variant), the brakes and their exit codes, the retry/model-escalation policy, and the stop notifications. The conductor is unusable without it: --agent-cmd is mandatory and its shape is runtime-specific.',
     description: 'Manual for the loop conductor: invocation per runtime, brakes, exit codes and notifications.'
+  },
+  // --- El supervisor, en dos archivos porque tiene que serlo ---------------------
+  //
+  // Se publica como artefacto y no se deja como script local por lo mismo que el conductor:
+  // TODO cliente que corra una corrida desatendida tiene este problema, y la unica forma de
+  // que se entere es que exista aqui. Lo que si obligo a decidir es cuantos archivos: un
+  // supervisor escrito en Node moriria en el mismo barrido que mata al conductor —el caso
+  // real fue matar por NOMBRE DE IMAGEN `node`—, asi que no puede ser un programa portatil.
+  // De ahi dos artefactos, uno por sistema, y de ahi que lleven dentro lo minimo: la parte
+  // dificil —el agente huerfano— vive en el conductor, en Node, escrita y probada una vez.
+  //
+  // No estrenan ninguna regla en `method_conduction` y por tanto no cuestan un solo caracter
+  // del manifiesto que lee todo cliente en el arranque: cuelgan del README del conductor,
+  // que NO es opcional (`--agent-cmd` es obligatorio y su forma es del runtime), asi que
+  // quien llega al bucle pasa por el sitio donde se nombran. Es la diferencia con el propio
+  // conductor, que se hizo invisible por publicarse sin nombrarse en ninguna cadena.
+  loop_supervisor_windows: {
+    route: `${publicIntegrationBasePath}/conductor/apts-supervisor.ps1`,
+    filePath: path.join(integrationRoot, 'conductor', 'apts-supervisor.ps1'),
+    fileName: 'apts-supervisor.ps1',
+    // Se sirve como texto plano y no como `application/x-powershell`: lo que hace el cliente
+    // con el es guardarlo, y un tipo raro invita a los navegadores a hacer cosas raras.
+    contentType: 'text/plain; charset=utf-8',
+    artifactVersion: '1.0.0',
+    kind: 'loop_supervisor',
+    recommended: false,
+    usagePriority: 'optional_entrypoint',
+    optional: true,
+    dependsOnArtifactIds: ['loop_conductor', 'loop_conductor_readme'],
+    selection_rule: 'Windows supervisor for the loop conductor: relaunches it when it is killed from outside, and does NOT relaunch when the conductor itself decided to stop. The rule is the journal, not the exit code: a conductor that decided always writes a `parada` event, while a killed one leaves an `arranque` with no `parada` (and an exit code that means nothing). Requires loop_conductor 1.14.0+, which is what handles the agent orphaned by the kill. Keep its UTF-8 BOM: Windows PowerShell 5.1 will not parse the file without it. Does not supervise --daemon. Own exit codes: 40 config, 41 another supervisor holds the lock, 42 relaunch limit reached.',
+    description: 'Windows supervisor that relaunches the loop conductor when it is killed, and only then.'
+  },
+  loop_supervisor_posix: {
+    route: `${publicIntegrationBasePath}/conductor/apts-supervisor.sh`,
+    filePath: path.join(integrationRoot, 'conductor', 'apts-supervisor.sh'),
+    fileName: 'apts-supervisor.sh',
+    contentType: 'text/plain; charset=utf-8',
+    artifactVersion: '1.0.0',
+    kind: 'loop_supervisor',
+    recommended: false,
+    usagePriority: 'optional_entrypoint',
+    optional: true,
+    dependsOnArtifactIds: ['loop_conductor', 'loop_conductor_readme'],
+    selection_rule: 'POSIX twin of the Windows supervisor, same rule and same exit codes: relaunches the loop conductor when it is killed from outside, never when it decided to stop. POSIX sh, no jq and no dependencies beyond curl for the optional Telegram notice. Requires loop_conductor 1.14.0+ and LF line endings (a CRLF shebang is not executable). Does not supervise --daemon.',
+    description: 'POSIX supervisor that relaunches the loop conductor when it is killed, and only then.'
   },
   // Se publica porque el README —que sí es artefacto— la nombra: un cliente que sólo
   // descarga desde esta URL leía sobre un archivo que no podía bajarse. El conductor
@@ -3385,6 +3448,8 @@ app.get(`${publicIntegrationBasePath}/runtime-adapters/spec/apts-surface.json`, 
 app.get(`${publicIntegrationBasePath}/scripts/generate-adapters.js`, async (req, res) => sendIntegrationArtifact(req, res, 'adapter_generator'));
 app.get(`${publicIntegrationBasePath}/conductor/apts-loop.js`, async (req, res) => sendIntegrationArtifact(req, res, 'loop_conductor'));
 app.get(`${publicIntegrationBasePath}/conductor/README.md`, async (req, res) => sendIntegrationArtifact(req, res, 'loop_conductor_readme'));
+app.get(`${publicIntegrationBasePath}/conductor/apts-supervisor.ps1`, async (req, res) => sendIntegrationArtifact(req, res, 'loop_supervisor_windows'));
+app.get(`${publicIntegrationBasePath}/conductor/apts-supervisor.sh`, async (req, res) => sendIntegrationArtifact(req, res, 'loop_supervisor_posix'));
 app.get(`${publicIntegrationBasePath}/conductor/prompts/dev-story-revision-adversaria.md`, async (req, res) => sendIntegrationArtifact(req, res, 'loop_prompt_code_review'));
 
 // Las cuatro rutas `/agentes/*.agent.md` se retiraron con VS Code el 2026-08-08:

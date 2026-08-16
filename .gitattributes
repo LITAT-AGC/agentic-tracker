@@ -1,0 +1,12 @@
+# El repositorio mezcla CRLF y LF a proposito y `core.autocrlf` decide en cada maquina. Aqui
+# solo se fija lo que NO puede depender de eso.
+#
+# Un `.sh` con finales CRLF no es ejecutable: el shebang queda `#!/bin/sh\r` y el sistema
+# busca un interprete llamado "sh\r". `apts-supervisor.sh` es ademas un artefacto que se
+# descarga desde el manifiesto, asi que se sirve tal cual esta en el checkout del servidor.
+*.sh text eol=lf
+
+# El `.ps1` es el caso contrario y por otro motivo: lleva BOM UTF-8 obligatorio —Windows
+# PowerShell 5.1 lee un `.ps1` sin BOM como ANSI y ni siquiera lo parsea— y eso lo conserva
+# git por su cuenta. Se marca como texto para que la normalizacion no lo trate como binario.
+*.ps1 text

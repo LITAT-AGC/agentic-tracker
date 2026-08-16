@@ -13,7 +13,7 @@ llego hasta aqui: eso esta en el historial de git.
 | Manifiesto | `GET /api/public/integrar`, `schema_version` 1.1.3 |
 | Guia para personas | `GET /api/public/integrar/guia`, HTML renderizado del manifiesto |
 | Runtimes soportados | Dos: Claude Code y opencode |
-| Artefactos publicados | 8; el conductor en `artifact_version` 1.12.0 y su README en 1.13.0, `adapter_generator` en 1.5.0, `loop_prompt_code_review` en 1.3.0, `agent_guidelines` y `surface_spec` en 1.1.1, `skill_markdown` y `skills_json` en 1.1.0 |
+| Artefactos publicados | 10; el conductor en `artifact_version` 1.14.0 y su README en 1.15.0, los dos supervisores (`.ps1` y `.sh`) en 1.0.0, `adapter_generator` en 1.5.0, `loop_prompt_code_review` en 1.3.0, `agent_guidelines` y `surface_spec` en 1.1.1, `skill_markdown` y `skills_json` en 1.1.0 |
 | Descargas necesarias para **llamar** a las operaciones | Ninguna |
 | Descargas necesarias para **conducir** | El spec y el generador (agentes y comandos); el conductor y su README si se quiere el bucle desatendido, y su plantilla de revision si se quiere ademas la compuerta dentro de la sesion del agente |
 
@@ -1959,6 +1959,112 @@ sino decidir el reparto, y ahora hay numeros para decidirlo. Aparece ademas una 
 sola en esa misma cuenta: `apts_get_backlog_item`, dos llamadas, que **no es una operacion que
 exista**. Un agente inventandose una herramienta, que es justo lo que el contador viene a hacer
 visible.
+
+**Una corrida que alguien mata desde fuera ya se relanza sola, y solo esa.** El 2026-08-16, a mitad
+de una corrida de 25 unidades sobre `tickets`, una sesion de agente **de otra ventana** cerro un
+servidor Vite matando por nombre de imagen (`Stop-Process -Name node`) y se llevo por delante **los
+catorce procesos `node` de la maquina**, incluido el conductor. La firma es la que engaña: `opencode`
+no es `node`, asi que sobrevivio y siguio escribiendo en `run.log` —la corrida *parecia* viva—, el
+codigo de salida fue 255 (que no es ninguno de los del conductor y no significa nada) y no hubo error
+en ningun log. Nadie se entero durante 48 minutos.
+
+La señal que si decide **ya existia y nadie la leia**: el conductor escribe SIEMPRE una `parada` en
+su diario cuando decide parar. De ahi la unica regla del supervisor, sin adivinar por el codigo:
+`arranque` con `parada` detras es una decision y se respeta; `arranque` sin `parada` es una muerte y
+se relanza; sin `arranque` no llego a conducir —un error de configuracion— y relanzarlo solo lo
+repetiria cinco veces.
+
+**Por que son dos scripts de shell y no un programa de Node.** Es la decision que manda sobre todas
+las demas, y sale del propio caso: lo que mato al conductor fue un barrido por NOMBRE DE IMAGEN
+`node`. Un supervisor escrito en Node se habria ido en el mismo barrido — inutil por construccion,
+exactamente igual que meter la defensa dentro de `apts-loop.js`, que es el proceso al que matan. El
+precio de sobrevivir a la escoba es depender del sistema operativo, y por eso hay `apts-supervisor.ps1`
+y `apts-supervisor.sh`, dos artefactos hermanos. Se publican en vez de quedarse como script local
+porque el problema lo tiene TODO cliente que corra desatendido; y **no estrenan ninguna regla en
+`method_conduction`**, asi que no cuestan un caracter del manifiesto que lee todo cliente al arrancar:
+cuelgan del README del conductor, que no es opcional —`--agent-cmd` es obligatorio y su forma es del
+runtime—, de modo que quien llega al bucle pasa por donde se nombran. Es justo la diferencia con el
+conductor, que en su dia se hizo invisible por publicarse sin nombrarse en ninguna cadena.
+
+**Y por eso los scripts llevan dentro lo minimo.** El problema dificil no es relanzar: es que el
+agente **sobrevive a su conductor**, sigue trabajando sobre el repositorio y puede tardar otra hora
+—el 2026-08-16 el huerfano termino su unidad y la cerro el solo, correctamente—. Relanzar encima
+pondria DOS agentes en el mismo arbol de trabajo, con dos tandas de commits y conflictos de git: peor
+que la parada que se viene a arreglar. Eso se resuelve en el CONDUCTOR, en Node, una sola vez y
+probado con el resto, y no duplicado en dos dialectos de shell. Al arrancar, antes de la primera
+vuelta, lee su diario, busca el ultimo `agente_lanzado` sin su `agente` detras, y espera a ese
+proceso —`--huerfano-espera`, 60 min por defecto— antes de cortarle el arbol. Esperar es preferible a
+matar porque su trabajo ya esta pagado; pero la espera tiene tope, y decide la asimetria de siempre:
+cortar de mas cuesta un intento que la escalera vuelve a lanzar, y esperar de mas cuesta la corrida
+entera, que es el problema original.
+
+**Identificar era la parte delicada, y no es la misma en los dos sistemas.** Un pid suelto no
+identifica nada —el sistema los recicla— y esperar una hora a un desconocido para acabar matandolo es
+el falso positivo que mata el trabajo de una persona. Las dos formas estan MEDIDAS, no deducidas:
+
+- **POSIX** sale gratis por un accidente: `/bin/sh -c "una orden simple"` hace `exec`, asi que el
+  shell desaparece y el agente **hereda su pid**. Lo que se comprueba es que sea lider de su propio
+  grupo (`pgid == pid`), que es lo que le puso `detached`. Y `ps -o comm=` **no sirve** para nada de
+  esto en Linux: devuelve el nombre del HILO, y Node bautiza el suyo «MainThread», asi que ningun
+  proceso de Node parece Node. Se usa `args=`.
+- **Windows** obliga a trabajar, y aqui se cayo la suposicion inicial: `shell: true` interpone un
+  `cmd.exe`, pero al matar al conductor **el `cmd.exe` se va con el** y sobrevive el NIETO. O sea que
+  justo en el caso que esto cierra, el pid apuntado ya no existe. Se busca por el enlace de
+  paternidad, que Windows no borra al morir el padre, filtrando por hora de creacion; hace falta CIM
+  para eso —`tasklist` no da el padre y `wmic` esta retirado— asi que se paga un `powershell` de una
+  vez y solo cuando el diario dejo un lanzamiento sin cerrar.
+
+Tres respuestas y no dos: si la herramienta del sistema no contesta, ni se espera ni se corta — se
+dice en voz alta y se sigue. Y si el conductor que lanzo aquel agente **sigue vivo**, esto no es un
+huerfano sino el trabajo de otro: se para con codigo nuevo, **16**, en vez de arrancar encima.
+
+**Lo que se descarto.** El Job Object de Windows era la respuesta limpia a nivel de sistema —los
+hijos mueren con el padre— pero exige P/Invoke o modulo nativo y, sobre todo, MATA al huerfano en vez
+de esperarlo, que es lo contrario de lo que interesa. Descubrir al huerfano por su cuenta desde el
+supervisor (buscar un `opencode` cuyo directorio de trabajo sea el del proyecto) confunde una sesion
+interactiva de una persona con un agente desatendido, y ese falso positivo es exactamente el que no se
+puede permitir. Y un archivo de runtime con el pid, aparte del diario, serian dos copias del mismo
+hecho igual de rancias las dos: el diario ya se escribe, ya lo lee un operador y ya es donde vive la
+evidencia. Que se lea de ahi no lo convierte en fuente de verdad: lo que se saca no es estado del
+METODO —ese vive en el servidor y se pregunta— sino un hecho sobre esta maquina que el servidor no
+puede conocer.
+
+**Lo que el supervisor si tiene que decidir.** Un tope de relanzamientos con espera creciente (30 s,
+2 min, 5 min, 15 min; cinco por defecto, y una corrida de mas de 20 min devuelve el contador a cero),
+porque si a un conductor lo matan cinco veces seguidas no es un accidente y seguir solo quema credito.
+Un cerrojo con el pid dentro, comprobado contra el proceso vivo, porque tiene que sobrevivir a que
+maten tambien al supervisor: un archivo que solo existe o no existe dejaria la corrida bloqueada para
+siempre despues del primer barrido. Y el aviso por Telegram, que es lo unico que un conductor muerto
+no puede hacer por si mismo. **No supervisa `--daemon`**, declarado: alli un mismo proceso encadena
+corridas y cada `parada` termina una sin terminar el proceso, asi que la regla deja de decidir.
+
+**Se descarto anotarlo en APTS como `deviation`.** Habia sitio —el contador de
+`agent_logs.action_type = 'deviation'`— y no es el sitio: ese registro es del METODO, un agente que se
+sale del proceso, y a este conductor lo mato la maquina. Ademas obligaria al supervisor a hablar MCP
+con identidad y clave desde PowerShell, o sea a ser un segundo cliente de la superficie escrito dos
+veces. El rastro va al mismo diario que el conductor, que es donde se lee la muerte, la espera al
+huerfano y el arranque siguiente en orden.
+
+Dos detalles de codificacion que hay que conservar y que se pagaron descubriendo: el `.ps1` lleva
+**BOM UTF-8** porque Windows PowerShell 5.1 lee un `.ps1` sin BOM como ANSI y el archivo ni siquiera
+llega a parsear —falla con un «falta la llave de cierre» que no dice nada de la causa—, y el `.sh`
+lleva **LF**, porque un shebang con `\r` no es ejecutable. Y el comando del conductor va al final del
+`.ps1` **sin `--` delante**: PowerShell lee `--` como un nombre de parametro vacio y aborta antes de
+entrar al script.
+
+Cubierto por dos pruebas nuevas, una por lado, las dos corridas en Windows y en WSL.
+`test_conductor_huerfano.js` (19 comprobaciones) mata al conductor **sin `/t`**, que es lo que hace un
+barrido por imagen, y comprueba las cuatro salidas: el huerfano que se corta tras esperar de verdad,
+el que termina solo, el numero reciclado que no se toca y el conductor vivo al que no se le pisa el
+agente. `test_supervisor.js` (22) corre el script de la plataforma con un conductor de mentira y ata
+la regla en los dos sentidos —relanza y no relanza—, incluido que una `parada` **citada** dentro de
+otro evento no cuente: `JSON.stringify` escapa las comillas anidadas, asi que el filtro por texto no
+puede confundirse.
+
+`schema_version` no cambia: los dos artefactos nuevos son entradas de una lista que ya existia, no
+una clave nueva. El conductor sube a **1.14.0** y su README a **1.15.0**, asi que quien conduzca
+tiene que volver a bajarselos: un supervisor contra un conductor 1.13.0 relanzaria a ciegas, que es
+exactamente el escenario de los dos agentes.
 
 ## Abierto
 

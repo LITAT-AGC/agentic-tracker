@@ -602,6 +602,7 @@ operador que puede colgarse.
 | 13 | estancado — la huella no cambió en N vueltas |
 | 14 | tope de iteraciones — el diario dice si la última unidad cerró |
 | 15 | detenido — alguien lo paró desde el panel |
+| 16 | hay otro conductor vivo sobre este diario, con su agente trabajando |
 | 20 | el agente terminó con error en todos sus intentos |
 | 21 | la CLI del agente agotó su límite de uso |
 | 22 | el comando de `--agent-cmd` no se pudo ejecutar |
@@ -812,6 +813,18 @@ reintento de red deja un `reintento_red` con la herramienta, el intento, la espe
 motivo; y la tarea de cada unidad deja un `tarea` al abrirse y otro al cerrarse —o un
 `tarea_fallo` si APTS no aceptó la llamada, que no detiene el bucle.
 
+Y cada intento del agente deja además un **`agente_lanzado`** al arrancar, con el pid del
+proceso, el del propio conductor y la plataforma. Es el único evento del diario cuyo lector
+no es una persona: lo lee el conductor SIGUIENTE para saber si aquella corrida dejó un
+agente vivo (ver «Cuando al conductor lo matan desde fuera»). Se escribe antes de esperar
+nada, porque si a este proceso lo matan, ese número es el único rastro de que el agente
+existe. No se copia a APTS: es un número de esta máquina y allí no significa nada.
+
+Eso no convierte el diario en fuente de verdad, que sigue sin serlo: lo que se lee de ahí no
+es estado del método —ése vive en el servidor y se pregunta— sino un hecho sobre esta
+máquina que el servidor no puede conocer. Por lo mismo no hay un archivo de runtime aparte:
+serían dos copias del mismo hecho, igual de rancias las dos.
+
 ### El diario también se ve en APTS
 
 El archivo local es la fuente de verdad y no cambia. Además, mientras haya una tarea
@@ -870,6 +883,131 @@ paga la espera.
 Cortar a mitad de una story no rompe nada: se comporta igual que un agente que muere. El
 claim es idempotente y el motor vuelve a servir el mismo paso mientras el puntero siga
 corriendo, así que la corrida siguiente retoma esa misma historia.
+
+## Cuando al conductor lo matan desde fuera
+
+Esto no es una hipótesis. El 2026-08-16, a mitad de una corrida de 25 unidades, una sesión
+de agente **de otra ventana** cerró un servidor Vite matando por nombre de imagen
+(`Stop-Process -Name node`) y se llevó por delante **los catorce procesos `node` de la
+máquina**, incluido este conductor. La firma conviene reconocerla:
+
+- muere el `node` del conductor, pero **el agente sobrevive** —`opencode` no es `node`— y
+  sigue trabajando y escribiendo en la salida, así que *parece* que la corrida sigue viva;
+- código de salida `-1` / 255, que no es ninguno de los de aquí abajo;
+- **no hay evento `parada` en el diario**;
+- ningún error en ninguna parte, porque no lo hubo.
+
+Nadie se enteró durante 48 minutos.
+
+### La señal: el diario, no el código de salida
+
+**El conductor siempre escribe una `parada` en su diario cuando decide parar**, con su
+motivo y su código. Eso es lo que separa las dos cosas que un código de salida no separa:
+
+| el diario de esa corrida dice… | qué fue | qué hacer |
+|---|---|---|
+| `arranque` y detrás `parada` | decidió él | respetar el código; relanzar es desobedecerlo |
+| `arranque` y ninguna `parada` | lo mataron | relanzar: sigue donde iba |
+| ni siquiera `arranque` | no llegó a conducir | respetar el código (típicamente, configuración) |
+
+### El agente huérfano, que es la parte difícil
+
+Cuando matan al conductor, el agente que había lanzado **no muere**: queda huérfano,
+sigue trabajando sobre el repositorio y puede tardar otra hora. El 2026-08-16 el huérfano
+terminó su unidad y la cerró él solo, correctamente.
+
+Así que relanzar de inmediato es peor que la parada: habría **dos agentes escribiendo en el
+mismo repositorio**, con dos árboles de trabajo, dos tandas de commits y conflictos de git.
+
+Por eso el conductor **reclama el terreno al arrancar**, antes de la primera vuelta:
+
+1. Lee su diario y busca el último `agente_lanzado` sin su `agente` detrás. Ese evento lleva
+   el pid del agente y el del conductor que lo lanzó.
+2. Si **el conductor anterior sigue vivo**, esto no es un huérfano: es el trabajo de otro.
+   Para con código **16** en vez de arrancar encima.
+3. Si el agente sigue vivo, **lo espera** —`--huerfano-espera`, 60 minutos por defecto—
+   antes de cortarle el árbol de procesos. Esperar es preferible a matar: puede estar a
+   punto de cerrar la unidad y su trabajo ya está pagado. Pero la espera tiene tope, y la
+   asimetría es la de siempre: cortar de más cuesta un intento que la escalera vuelve a
+   lanzar, y esperar de más cuesta la corrida entera.
+4. Si no lo puede **identificar**, no lo toca. Un pid suelto no identifica nada —el sistema
+   los recicla— y esperar una hora a un desconocido para acabar matándolo mataría el trabajo
+   de una persona.
+
+Identificar no es lo mismo en los dos sistemas, y las dos formas están medidas:
+
+- **POSIX** es el fácil, por accidente: `/bin/sh -c "una orden simple"` hace `exec`, así que
+  el shell desaparece y el agente **hereda su pid**. Lo que se comprueba de él es que sea
+  líder de su propio grupo (`pgid == pid`), que es lo que le puso `detached`.
+- **Windows** obliga a trabajar. Ahí `shell: true` interpone un `cmd.exe`… que **se va con
+  su padre**: al matar el conductor, el `cmd.exe` muere y sobrevive el **nieto**, o sea la
+  CLI. Se le busca por el enlace de paternidad, que Windows no borra al morir el padre, y se
+  filtra por hora de creación. Eso cuesta un `powershell` de una vez, y sólo cuando el
+  diario dejó un lanzamiento sin cerrar.
+
+Todo esto queda en el diario como eventos `agente_huerfano` con su `accion`: `detectado`,
+`terminado` (se fue solo), `cortado`, `ignorado` (número reciclado), `sin_verificar` (no se
+pudo preguntar) y `otro_conductor`.
+
+### El supervisor
+
+Relanzar no puede hacerlo el conductor: **es el proceso al que matan**, y cualquier defensa
+que viva ahí es inútil por construcción. Se publican dos artefactos hermanos:
+
+| | |
+|---|---|
+| `conductor/apts-supervisor.ps1` | Windows (Windows PowerShell 5.1 o `pwsh`) |
+| `conductor/apts-supervisor.sh` | Linux y macOS (`sh` de POSIX) |
+
+**Son dos y no uno, y ninguno es de Node, por la misma razón**: lo que mató al conductor fue
+un barrido por nombre de imagen `node`. Un supervisor escrito en Node se habría ido en el
+mismo barrido. El precio de sobrevivir a la escoba es depender del sistema operativo.
+
+```bash
+# Windows — el comando del conductor va al final y SIN `--` delante: PowerShell lee `--`
+# como un nombre de parámetro vacío y aborta antes de entrar al script.
+pwsh -File apts-supervisor.ps1 -Diario .apts\apts-loop.jsonl `
+  node apts-loop.js --agent-name mi-dev --agent-cmd "..." --max-iterations 20
+
+# POSIX
+sh apts-supervisor.sh --diario .apts/apts-loop.jsonl -- \
+  node apts-loop.js --agent-name mi-dev --agent-cmd '...' --max-iterations 20
+```
+
+Lo que hace y lo que no:
+
+- Aplica la tabla de arriba y **nada más**. No mira el código de salida para decidir.
+- **No mata nada.** Cortar al huérfano es del conductor, que sabe identificarlo.
+- Relanza con espera creciente (30 s, 2 min, 5 min, 15 min) hasta `-MaxRelanzamientos` /
+  `--max-relanzamientos` (5 por defecto), y entonces **se rinde y avisa**: si a un conductor
+  lo matan cinco veces seguidas no es un accidente y seguir sólo quema crédito. Una corrida
+  que duró más de `-CorridaSanaMin` / `--corrida-sana` (20 min) devuelve el contador a cero.
+- **Avisa por Telegram** cuando relanza y cuando se rinde, leyendo `APTS_LOOP_TELEGRAM_TOKEN`
+  y `APTS_LOOP_TELEGRAM_CHAT_ID` del entorno o del mismo `.env` que el conductor. Es lo único
+  que un conductor muerto no puede hacer por sí mismo.
+- **Un cerrojo** (`<diario>.lock`) impide dos supervisores sobre la misma corrida. Lleva el
+  pid dentro y se comprueba contra el proceso vivo, porque tiene que sobrevivir a que maten
+  también al supervisor: un archivo que sólo existe o no existe dejaría la corrida bloqueada
+  para siempre después del primer barrido.
+- Escribe en **el mismo diario** que el conductor (`supervisor_arranque`,
+  `supervisor_muerte`, `supervisor_relanza`, `supervisor_rendicion`, `supervisor_parada`),
+  para que la muerte, la espera al huérfano y el arranque siguiente se lean en orden.
+- **No supervisa `--daemon`.** Allí un mismo proceso encadena corridas y cada `parada`
+  termina una sin terminar el proceso, así que la regla deja de decidir; y su resiliencia es
+  otro problema, porque lo arranca y lo para el panel.
+- Códigos propios, en una banda que no se pisa con la del conductor: **40** configuración,
+  **41** el cerrojo está tomado, **42** se agotaron los relanzamientos. Cuando el conductor
+  decide, el supervisor sale con **el código del conductor**.
+
+Dos cosas que hay que conservar al editarlos, y las dos están medidas:
+
+- **El `.ps1` lleva BOM UTF-8.** Windows PowerShell 5.1 —el que viene con el sistema— lee un
+  `.ps1` sin BOM como ANSI, y el archivo ni siquiera llega a parsear.
+- **El `.sh` lleva finales de línea LF.** Un shebang con `\r` no es ejecutable.
+
+El tope de vueltas es **de la corrida**, y un relanzamiento empieza una corrida nueva: si
+lanzas con `--max-iterations 20` y lo matan en la quinta, el conductor relanzado tiene otras
+veinte. Lo que acota el total es `--max-relanzamientos`.
 
 ## Modo espera
 

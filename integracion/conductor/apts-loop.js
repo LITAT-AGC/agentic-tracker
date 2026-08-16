@@ -68,6 +68,12 @@ const SALIDA = {
   // Alguien lo paró desde el panel. No es un fallo: es la salida que pidió una persona,
   // y por eso no comparte código con `agente_fallo` ni con `estancado`.
   detenido: 15,
+  // Hay OTRO conductor vivo sobre este mismo diario, con su agente trabajando. No es un
+  // fallo de nada: es la única situación en la que arrancar sería peor que no arrancar,
+  // porque dos agentes sobre el mismo repositorio se pisan los commits. Código propio
+  // porque lo que hay que hacer con él —mirar qué proceso es y decidir cuál sobra— no se
+  // parece a ninguna de las otras paradas.
+  otro_conductor: 16,
   agente_fallo: 20,
   // Los tres de abajo también son el agente terminando mal, pero NO por la story: su
   // CLI se quedó sin crédito, el comando no existe, o sus credenciales no valen.
@@ -435,6 +441,15 @@ Frenos:
                           emiten NDJSON mientras trabajan—. Cortado así, el intento cuenta
                           como fallido y la escalera sigue; si el último también queda
                           mudo, se para con el código 24.
+  --huerfano-espera MIN   APTS_LOOP_ORPHAN_WAIT_MIN
+                          minutos que se espera, AL ARRANCAR, a que termine el agente que
+                          dejó viva una corrida anterior (por defecto 60; 0 = cortarlo sin
+                          esperar). Un conductor al que matan desde fuera no se lleva a su
+                          agente: queda huérfano trabajando sobre el mismo repositorio, y
+                          arrancar encima pondría a dos a la vez. Se espera antes que
+                          cortar porque su trabajo ya está pagado y puede estar a punto de
+                          cerrar la unidad. Sólo se corta lo que se ha podido identificar
+                          como propio; lo que no, se deja en paz y se dice.
   --dry-run               resuelve e informa la primera decisión sin lanzar nada
   --no-task-log           APTS_LOOP_NO_TASK_LOG=1
                           no abrir una tarea por unidad en APTS. Por defecto SÍ se abre:
@@ -484,6 +499,7 @@ no vuelve a pagar los pasos que ya cerraron.
 
 Códigos de salida: 0 done · 1 configuración · 2 red · 10 blocked · 11 wait ·
 12 fuera de alcance · 13 estancado · 14 tope de iteraciones · 15 detenido ·
+16 hay otro conductor vivo sobre este diario ·
 20 el agente falló · 21 la CLI del agente agotó su límite de uso ·
 22 el comando de --agent-cmd no existe · 23 la CLI del agente no tiene credenciales ·
 24 el agente se quedó mudo.
@@ -1521,6 +1537,7 @@ const TELEGRAM_REINTENTOS = 2; // misma política que el resto: sólo red, 429 y
 const MARCA = {
   done: '✅', blocked: '⛔', wait: '⏸', fuera_de_alcance: '🚧',
   estancado: '🔁', tope_iteraciones: '⏱', agente_fallo: '❌', desconocido: '❓',
+  otro_conductor: '👥',
   red: '📡',
   limite_de_uso: '🪫', agente_no_ejecutable: '🔧', agente_sin_credenciales: '🔑',
   agente_mudo: '🔇',
@@ -1737,10 +1754,12 @@ const grupoVivo = (pgid) => {
 // deja al agente vivo, escribiendo en APTS, mientras el conductor cree que lo detuvo. Hace
 // falta el árbol entero, y sin dependencias nuevas: `taskkill /t` en Windows, y en POSIX el
 // grupo de procesos, que existe porque se lanza con `detached`.
-const matarArbol = async (hijo) => {
-  if (!hijo || hijo.exitCode !== null || hijo.killed) return;
-  const pid = hijo.pid;
-
+//
+// Se corta POR PID y no por el objeto del hijo porque hay dos clientes y sólo uno tiene el
+// objeto: el corte de una orden del panel mata al hijo de ESTE proceso, y el del agente
+// huérfano —el que dejó viva una corrida a la que mataron— mata a un proceso que este
+// conductor no lanzó y del que sólo sabe el número que apuntó su antecesor en el diario.
+const cortarArbolDePid = async (pid) => {
   if (process.platform === 'win32') {
     // Se espera a que `taskkill` termine en vez de lanzarlo y olvidarlo: el conductor para
     // inmediatamente después, y un corte que no se espera es un corte que puede no ocurrir.
@@ -1773,6 +1792,289 @@ const matarArbol = async (hijo) => {
 
   log(`el árbol del agente sigue vivo tras ${Math.round(GRACIA_CORTE_MS / 1000)} s; forzando`);
   try { process.kill(-pid, 'SIGKILL'); } catch (_error) { /* se fue entre la pregunta y el disparo */ }
+};
+
+const matarArbol = async (hijo) => {
+  if (!hijo || hijo.exitCode !== null || hijo.killed) return;
+  await cortarArbolDePid(hijo.pid);
+};
+
+// ---- el agente que sobrevive al conductor ----
+//
+// A este proceso lo pueden matar desde fuera, y cuando pasa NO se lleva a su agente: el
+// hijo queda huérfano, sigue trabajando sobre el mismo repositorio y puede tardar otra
+// hora. Ocurrió el 2026-08-16 a mitad de una corrida de 25 unidades sobre "tickets": una
+// sesión de otra ventana cerró un servidor Vite matando por NOMBRE DE IMAGEN
+// (`Stop-Process -Name node`) y se llevó por delante los catorce `node` de la máquina,
+// incluido este conductor. `opencode` no es `node`, así que sobrevivió, terminó su unidad
+// y la cerró él solo — bien, pero sin nadie detrás.
+//
+// Lo que hay que impedir es lo de después: relanzar el conductor mientras ese huérfano
+// sigue vivo pone DOS agentes a escribir en el mismo árbol de trabajo, con dos tandas de
+// commits y conflictos de git. Eso es peor que la parada que se viene a arreglar.
+//
+// POR QUÉ VIVE AQUÍ Y NO EN EL SUPERVISOR. El supervisor no puede ser un proceso de Node
+// —moriría en el mismo barrido que el conductor, que es justo el caso—, así que es un
+// script de shell por sistema operativo. Todo lo que se pueda escribir una vez, en Node y
+// probado con el resto, no debe duplicarse en dos dialectos de shell. Y esto no es una
+// defensa que viva en el proceso al que matan: corre AL ARRANCAR, o sea en el proceso
+// siguiente, que es el único momento en que la pregunta tiene respuesta.
+//
+// LA IDENTIFICACIÓN ES LA PARTE DELICADA. Un PID suelto no identifica nada: el sistema los
+// recicla, y esperar a un desconocido durante una hora para acabar matándolo sería peor
+// que no hacer nada — ese falso positivo mata el trabajo de una persona. Así que el número
+// se contrasta contra un rasgo que este conductor conoce sin saber nada de la CLI que
+// conduce: cómo lanza él a sus hijos.
+//
+// Y ese rasgo NO es el mismo en los dos sistemas. Los dos casos se midieron, porque los dos
+// se habrían escrito mal a ojo:
+//
+// POSIX es el fácil, y por un accidente afortunado: `/bin/sh -c "una orden simple"` hace
+// `exec` de esa orden, así que el shell no se queda de intermediario — DESAPARECE, y el
+// proceso del agente HEREDA SU PID. El número apuntado es el del agente de verdad. Lo que
+// se comprueba de él es que sea líder de su propio grupo (pgid == pid), que es lo que le
+// puso `detached` y lo que un PID reciclado por cualquier otro programa no tendría.
+//
+// Windows es el que obliga a trabajar. Ahí `shell: true` interpone un `cmd.exe` que sí se
+// queda esperando… mientras su padre viva: medido el 2026-08-16 matando al conductor con
+// `taskkill /F /PID`, el `cmd.exe` se va con él y el NIETO —la CLI del agente— sobrevive
+// solo. O sea que justo en el caso que esto viene a cerrar, el pid apuntado ya no existe y
+// el que sigue trabajando es otro. Se busca por el enlace de paternidad, que en Windows no
+// se borra al morir el padre: los procesos cuyo `ParentProcessId` sea aquel `cmd.exe`, y
+// creados después de que se lanzara. Hace falta CIM para eso —`tasklist` no da el padre y
+// `wmic` está retirado en Windows 11—, así que se paga un `powershell` de una vez, y sólo
+// en el camino raro: cuando el diario dejó un lanzamiento sin cerrar.
+//
+// Tres respuestas y no dos, porque «no se pudo preguntar» no es «no es nuestro». Cuando la
+// herramienta del sistema no contesta no se espera ni se corta: se dice en voz alta y se
+// sigue. Esperar una hora por algo que igual de bien podría ser un número reciclado gasta
+// la corrida entera sin comprar nada, y cortarlo sería matar lo que no se ha identificado.
+const HUERFANO_SONDEO_MS = entero(process.env.APTS_LOOP_ORPHAN_POLL_MS, 15000);
+const HUERFANO_ESPERA_MIN = 60;
+// Cuánto diario se lee para buscar al huérfano. El archivo crece con cada corrida y lo que
+// se busca está siempre al final; leerlo entero sería pagar el histórico de meses para
+// contestar una pregunta sobre los últimos minutos.
+const DIARIO_LECTURA_MAX = 512 * 1024;
+
+// La señal 0 no manda nada: sólo pregunta si el proceso existe. `EPERM` es un sí —existe y
+// no es nuestro—, que es lo que devuelve un proceso de otro usuario.
+const procesoVivo = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === 'EPERM';
+  }
+};
+
+// En POSIX el agente se lanza con grupo propio, así que el grupo puede seguir vivo con su
+// líder ya muerto: preguntar sólo por el PID daría por terminado lo que no lo está.
+const restosVivos = (pid) => (process.platform === 'win32'
+  ? procesoVivo(pid)
+  : (grupoVivo(pid) || procesoVivo(pid)));
+
+// El nombre de imagen del proceso, en minúsculas, o `null` si no se pudo preguntar. Se
+// usan `tasklist` y `ps` —presentes en cualquier instalación— y no un módulo: este archivo
+// no tiene dependencias y no va a estrenarlas por esto.
+const imagenDePid = (pid) => {
+  try {
+    if (process.platform === 'win32') {
+      const r = spawnSync('tasklist', ['/FI', `PID eq ${pid}`, '/NH', '/FO', 'CSV'], { encoding: 'utf8', windowsHide: true });
+      // Cuando no hay nada que enseñar, `tasklist` sale con 0 y escribe una frase en prosa
+      // («INFO: No tasks are running…»), así que lo que decide es que haya una fila CSV.
+      const m = r && typeof r.stdout === 'string' ? r.stdout.match(/^"([^"]+)"/m) : null;
+      return m ? m[1].toLowerCase() : null;
+    }
+    // `args=` y no `comm=`: en Linux `comm` es el nombre del HILO, y Node bautiza el suyo
+    // «MainThread», así que preguntando por ahí ningún proceso de Node parece Node. Medido
+    // en WSL con Node 24. De `args` interesa sólo el primer token, que es el ejecutable.
+    const r = spawnSync('ps', ['-p', String(pid), '-o', 'args='], { encoding: 'utf8' });
+    const linea = r && typeof r.stdout === 'string' ? r.stdout.trim() : '';
+    return linea ? linea.split(/\s+/)[0].split('/').pop().toLowerCase() : null;
+  } catch (_error) {
+    return null;
+  }
+};
+
+// Los hijos vivos de un pid en Windows, con su nombre y su hora de creación. `null` si no
+// se pudo preguntar, que no es lo mismo que «no tiene».
+const hijosWin = (pid) => {
+  const guion = `Get-CimInstance Win32_Process -Filter "ParentProcessId=${pid}" `
+    + '| ForEach-Object { "$($_.ProcessId)|$($_.Name)|$($_.CreationDate.ToUniversalTime().ToString(\'o\'))" }';
+  for (const exe of ['powershell', 'pwsh']) {
+    try {
+      const r = spawnSync(exe, ['-NoProfile', '-NonInteractive', '-Command', guion], { encoding: 'utf8', windowsHide: true });
+      if (!r || r.error || typeof r.stdout !== 'string') continue;
+      return r.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map((l) => {
+        const [p, nombre, creado] = l.split('|');
+        return { pid: Number.parseInt(p, 10), nombre: (nombre || '').toLowerCase(), creado: Date.parse(creado) };
+      }).filter((h) => Number.isFinite(h.pid));
+    } catch (_error) { /* se prueba el siguiente */ }
+  }
+  return null;
+};
+
+// Qué queda vivo de aquel lanzamiento. `estado`: `'ninguno'` (se fue con su conductor),
+// `'si'` (identificado, y `pids` dice a quién esperar o cortar), `'no'` (número reciclado)
+// o `'no_se'` (la herramienta del sistema no contestó).
+const localizarRestos = (abierto) => {
+  const pid = abierto.pid;
+  const desde = Date.parse(abierto.ts || '') || 0;
+
+  if (process.platform !== 'win32') {
+    if (!restosVivos(pid)) return { estado: 'ninguno', pids: [] };
+    try {
+      const r = spawnSync('ps', ['-p', String(pid), '-o', 'pgid='], { encoding: 'utf8' });
+      const pgid = Number.parseInt(String((r && r.stdout) || '').trim(), 10);
+      if (!Number.isFinite(pgid)) return { estado: 'no_se', pids: [pid] };
+      return pgid === pid ? { estado: 'si', pids: [pid] } : { estado: 'no', pids: [pid] };
+    } catch (_error) {
+      return { estado: 'no_se', pids: [pid] };
+    }
+  }
+
+  // El shell sigue en pie: es el caso de un conductor que murió sin arrastrarlo (una
+  // excepción sin manejar, por ejemplo). Su árbol entero cuelga de él.
+  if (procesoVivo(pid)) {
+    const imagen = imagenDePid(pid);
+    if (!imagen) return { estado: 'no_se', pids: [pid] };
+    if (imagen === 'cmd.exe') return { estado: 'si', pids: [pid] };
+    return { estado: 'no', pids: [pid] };
+  }
+
+  // El shell ya no está: o no queda nada, o queda el nieto. Se pregunta por el enlace de
+  // paternidad, que Windows no borra al morir el padre.
+  const hijos = hijosWin(pid);
+  if (hijos === null) return { estado: 'no_se', pids: [] };
+  // La hora de creación es lo que separa a un nieto de verdad de un proceso cualquiera que
+  // heredó aquel número de padre. Dos segundos de holgura por el redondeo de los relojes.
+  const nuestros = hijos.filter((h) => !desde || !Number.isFinite(h.creado) || h.creado >= desde - 2000);
+  if (!nuestros.length) return { estado: hijos.length ? 'no' : 'ninguno', pids: [] };
+  return { estado: 'si', pids: nuestros.map((h) => h.pid), nombres: nuestros.map((h) => h.nombre) };
+};
+
+const algunoVivo = (pids) => pids.some((p) => restosVivos(p));
+
+const ES_NODE = process.platform === 'win32' ? /^node\.exe$/ : /^node$/;
+
+// El diario es evidencia y no fuente de verdad, y eso no cambia: lo que se lee de aquí no
+// es estado del MÉTODO —ése vive en el servidor y se pregunta— sino un hecho sobre ESTA
+// máquina, qué proceso dejó corriendo el conductor anterior. El servidor no puede saberlo
+// y no hay a quién más preguntárselo. Por eso tampoco hay un archivo de runtime aparte:
+// serían dos copias del mismo hecho, igual de rancias las dos, que alguien tendría que
+// mantener de acuerdo.
+const leerDiario = (ruta) => {
+  try {
+    const tam = fs.statSync(ruta).size;
+    const desde = Math.max(0, tam - DIARIO_LECTURA_MAX);
+    const fd = fs.openSync(ruta, 'r');
+    const buf = Buffer.alloc(tam - desde);
+    try { fs.readSync(fd, buf, 0, buf.length, desde); } finally { fs.closeSync(fd); }
+    let texto = buf.toString('utf8');
+    // Si se leyó por el medio, la primera línea está partida y no es JSON: se tira.
+    if (desde > 0) texto = texto.slice(texto.indexOf('\n') + 1);
+    return texto.split('\n').map((l) => {
+      try { return JSON.parse(l); } catch (_error) { return null; }
+    }).filter(Boolean);
+  } catch (_error) {
+    // Que no haya diario, o que no se pueda leer, no es un error: es no saber. Quien llama
+    // lo trata como «no hay huérfano», que es lo que decía el conductor hasta hoy.
+    return [];
+  }
+};
+
+// El último `agente_lanzado` sin su `agente` detrás. El par lo cierra el evento que ya
+// existía —se escribe siempre, haya salido bien o mal el intento—, así que no hace falta
+// ningún estado nuevo para saber si aquel proceso llegó a terminar.
+const agenteSinCerrar = (eventos) => {
+  let abierto = null;
+  for (const e of eventos) {
+    if (e.evento === 'agente_lanzado') abierto = e;
+    else if (e.evento === 'agente') abierto = null;
+  }
+  return abierto && abierto.pid ? abierto : null;
+};
+
+const reclamarTerreno = async (cfg) => {
+  if (!cfg.journal) {
+    log('sin diario: no hay forma de saber si una corrida anterior dejó un agente vivo');
+    return;
+  }
+  const abierto = agenteSinCerrar(leerDiario(cfg.journal));
+  if (!abierto) return;
+
+  const anotar = (accion, extra) => registrar(cfg, {
+    evento: 'agente_huerfano', accion, pid: abierto.pid, story_id: abierto.story_id || null, desde: abierto.ts || null, ...(extra || {}),
+  });
+
+  // Antes que nada: ¿esto es un huérfano o el agente de un conductor que sigue vivo? Son
+  // dos cosas muy distintas y la segunda no se toca. Se comprueba también la imagen porque
+  // un PID reciclado por cualquier otro programa haría abortar una corrida legítima.
+  const otro = abierto.conductor_pid;
+  if (otro && otro !== process.pid && procesoVivo(otro) && ES_NODE.test(imagenDePid(otro) || '')) {
+    anotar('otro_conductor', { conductor_pid: otro });
+    await parar(cfg, {
+      motivo: 'otro_conductor',
+      detalle: `hay otro conductor vivo sobre este diario (pid ${otro}) con su agente trabajando (pid ${abierto.pid}).`
+        + ' Arrancar encima pondría dos agentes en el mismo repositorio: mira cuál de los dos sobra y para ése.',
+      codigo: SALIDA.otro_conductor,
+      storyId: abierto.story_id,
+      extra: { conductor_pid: otro, agente_pid: abierto.pid },
+    });
+  }
+
+  const restos = localizarRestos(abierto);
+  if (restos.estado === 'ninguno') return; // se fue con su conductor: nada que reclamar
+  if (restos.estado === 'no') {
+    anotar('ignorado', { vivos: restos.pids });
+    log(`del pid ${abierto.pid} de la corrida anterior no queda nada identificable: número reciclado, no lo toco`);
+    return;
+  }
+  if (restos.estado === 'no_se') {
+    // No se pudo preguntar. Se avisa y se sigue: pararse aquí convertiría un `tasklist` que
+    // no contesta en una corrida que no arranca, y eso es peor que el riesgo que cubre.
+    anotar('sin_verificar', { vivos: restos.pids });
+    log(`no se ha podido averiguar si el agente de la corrida anterior (pid ${abierto.pid}) sigue vivo; sigo, pero míralo`);
+    return;
+  }
+
+  const vivos = restos.pids;
+  if (cfg.dryRun) {
+    anotar('detectado', { dry_run: true, vivos });
+    log(`quedó vivo el agente de la corrida anterior (${vivos.join(', ')}); en --dry-run no se espera ni se corta`);
+    return;
+  }
+
+  const espera = cfg.esperaHuerfanoMs;
+  anotar('detectado', { espera_max_ms: espera, vivos, ...(restos.nombres ? { imagenes: restos.nombres } : {}) });
+  log(`quedó vivo el agente de la corrida anterior (${vivos.join(', ')}${restos.nombres ? `: ${restos.nombres.join(', ')}` : ''},`
+    + ` unidad ${abierto.story_id || 'desconocida'});`
+    + ` ${espera > 0 ? `esperando hasta ${Math.round(espera / 60000)} min a que termine` : 'cortándolo sin esperar'}`);
+
+  const inicio = Date.now();
+  const limite = inicio + espera;
+  const seFue = () => {
+    if (algunoVivo(vivos)) return false;
+    anotar('terminado', { esperado_ms: Date.now() - inicio, vivos });
+    log('el agente de la corrida anterior terminó por su cuenta; sigo');
+    return true;
+  };
+  while (Date.now() < limite) {
+    if (seFue()) return;
+    await dormir(Math.max(200, Math.min(HUERFANO_SONDEO_MS, limite - Date.now())));
+  }
+  if (seFue()) return;
+
+  // Se acabó la espera. Cortar no es la primera opción y por eso llega la última: a esta
+  // altura la probabilidad de que estuviera «a punto de cerrar» es ya baja, y la
+  // alternativa —no arrancar— deja la corrida muerta hasta que alguien la mire, que es
+  // exactamente el problema que este arreglo viene a cerrar. La asimetría decide: cortar de
+  // más cuesta un intento que la escalera vuelve a lanzar, y esperar de más cuesta la
+  // corrida entera. Lo que ya hizo el huérfano no se pierde: commitea según avanza y el
+  // puntero del motor sigue sosteniendo la unidad.
+  log(`el agente de la corrida anterior sigue vivo tras ${Math.round(espera / 60000)} min; le corto el árbol`);
+  for (const p of vivos) await cortarArbolDePid(p);
+  anotar('cortado', { esperado_ms: Date.now() - inicio, vivos });
 };
 
 // Mientras el agente trabaja, el conductor ya no está bloqueado: puede latir y puede
@@ -1906,6 +2208,30 @@ const lanzarAgente = (cfg, contexto) => {
     hijo.stdout.on('data', eco(process.stdout, true));
     hijo.stderr.on('data', eco(process.stderr, false));
     procesoAgente = hijo;
+
+    // Se apunta el pid ANTES de esperar nada, porque el lector de este evento es el
+    // conductor SIGUIENTE: si a éste lo matan desde fuera, el agente le sobrevive y el
+    // único rastro de que existe es este número. El par lo cierra el evento `agente` de
+    // más abajo, que se escribe termine como termine el intento, así que «lanzado sin
+    // cerrar» significa exactamente «quedó vivo o lo mataron con su conductor».
+    //
+    // El pid es el del SHELL y no el de la CLI: `shell: true` interpone `cmd.exe` o
+    // `/bin/sh`, y es el mismo número que se le pasa a `taskkill /t` o al grupo de
+    // procesos. Quien lo lea para matarlo a mano tiene que hacer lo mismo.
+    //
+    // Y viaja el pid del conductor al lado porque son dos preguntas distintas y hacen
+    // falta las dos: si el agente sigue vivo, y si sigue vivo QUIEN LO LANZÓ — un agente
+    // con su conductor detrás no es un huérfano, es el trabajo de otro. No va a APTS: es
+    // un número de esta máquina y no significa nada en el servidor.
+    registrar(cfg, {
+      evento: 'agente_lanzado',
+      iteracion: contexto.iteration,
+      intento: contexto.intento,
+      story_id: contexto.story_id,
+      pid: hijo.pid || null,
+      conductor_pid: process.pid,
+      plataforma: process.platform,
+    });
     const parar = vigilarAgente(cfg);
 
     // El vigilante del silencio. Mira a menudo y mide poco: lo caro sería el reloj de
@@ -2015,6 +2341,14 @@ const construirConfig = (args, { esperando = false } = {}) => {
     // En minutos por bandera y en milisegundos aquí dentro, para que no circulen dos
     // unidades. `0` lo apaga.
     silencioMs: resolverSilencioMs(args),
+    // Igual que el silencio: minutos por bandera, milisegundos aquí dentro, y un atajo en
+    // milisegundos por entorno que no es bandera —nadie lo toca en una corrida normal,
+    // pero una prueba no puede esperar una hora para ver cortar a un huérfano—.
+    esperaHuerfanoMs: (() => {
+      const crudo = entero(process.env.APTS_LOOP_ORPHAN_WAIT_MS, -1);
+      if (crudo >= 0) return crudo;
+      return entero(args['huerfano-espera'], entero(process.env.APTS_LOOP_ORPHAN_WAIT_MIN, HUERFANO_ESPERA_MIN)) * 60000;
+    })(),
     dryRun: Boolean(args['dry-run']),
     // Escape para quien no quiera que el conductor escriba tareas en su proyecto. Va en
     // negativo —el registro está puesto por defecto— porque una ejecución sin rastro es
@@ -2196,6 +2530,12 @@ const conducir = async (cfg, plantillaPrompt) => {
   log(`conduciendo ${cfg.projectUrl} como '${cfg.agentName}' (alcance: ${[...cfg.workflows].join(', ')})`);
   if (envCargado) log(`entorno cargado de ${envCargado}`);
   log(`política de modelo: ${describirPolitica(cfg.politica, cfg.maxIterations)}`);
+
+  // Antes de la primera vuelta y no dentro de ella: si la corrida anterior dejó un agente
+  // vivo, lanzar otro pondría dos en el mismo repositorio. Va detrás del `arranque` para
+  // que el diario cuente la corrida en orden, y no cuesta nada cuando no hay nada que
+  // reclamar — que es el caso normal.
+  await reclamarTerreno(cfg);
 
   let huellaPrevia = null;
   let estancadas = 0;
