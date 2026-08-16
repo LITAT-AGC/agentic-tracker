@@ -44,6 +44,9 @@ const comprobarAcoplamiento = () => {
   const indice = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
   ok(indice.includes(`'${MARCA}'`), `report_blocker sigue escribiendo el prefijo ${MARCA.trim()}`,
     'si falla, actualiza MARCA_BLOQUEO en method_resolver.js y aqui');
+  ok(indice.includes('backlog_item_ids: objetivos'),
+    'y sigue anotando en technical_details que unidades marca',
+    'sin esa anotacion el motor no puede llegar del bloqueo a su motivo');
 };
 
 (async () => {
@@ -101,14 +104,18 @@ const comprobarAcoplamiento = () => {
     // ---- 2. se bloquea la unidad reclamada, como hace report_blocker ----
     // Los tres efectos que importan, y NINGUNO toca el puntero de metodo: esa es
     // exactamente la condicion que cerraba el ciclo.
+    // Ojo con `active_task_id`: se deja en NULL A PROPOSITO, que es como queda de verdad.
+    // El conductor suelta la tarea al terminar la corrida, asi que cuando alguien pregunta
+    // por el bloqueo ese vinculo ya no existe. Fijarlo aqui era la trampa de la primera
+    // version de esta prueba: pasaba en verde mientras el caso real no encontraba el motivo.
     const [tarea] = await trx('tasks').insert({
       project_url: PROYECTO, title: 'implementar la primera', agent_name: AGENTE, status: 'stalled',
     }).returning(['id']);
     const MOTIVO = 'tope de reintentos de step:5 agotado en la pasada 4 de revision adversaria';
-    await trx('backlog_items').where({ id: ID_PRIMERA })
-      .update({ status: 'blocked', active_task_id: tarea.id });
+    await trx('backlog_items').where({ id: ID_PRIMERA }).update({ status: 'blocked' });
     await trx('agent_logs').insert({
       task_id: tarea.id, agent_name: AGENTE, action_type: 'error', message: MARCA + MOTIVO,
+      technical_details: JSON.stringify({ backlog_item_ids: [ID_PRIMERA] }),
     });
 
     const puntero = await trx('project_state').where({ project_url: PROYECTO, agent_name: AGENTE })
@@ -123,8 +130,34 @@ const comprobarAcoplamiento = () => {
     ok(parado.target_id === ID_PRIMERA, 'y nombra cual es la bloqueada',
       String(parado.target_id).slice(0, 8));
     ok(/la primera del plan/.test(parado.why || ''), 'el porque trae el titulo de la unidad', parado.why || '');
-    ok(parado.why.includes(MOTIVO), 'y el motivo que dejo report_blocker');
+    ok(parado.why.includes(MOTIVO),
+      'y el motivo que dejo report_blocker, con la tarea ya soltada (active_task_id en NULL)');
     ok(/update_backlog_item/.test(parado.why || ''), 'y nombra como reponerla');
+
+    // El camino viejo sigue valiendo: un bloqueo escrito antes de que se anotara la unidad
+    // se alcanza por `active_task_id` mientras la tarea siga abierta.
+    const [tareaVieja] = await trx('tasks').insert({
+      project_url: PROYECTO, title: 'bloqueo a la antigua', agent_name: AGENTE, status: 'stalled',
+    }).returning(['id']);
+    const MOTIVO_VIEJO = 'bloqueo sin anotacion de unidad';
+    await trx('backlog_items').where({ id: ID_SEGUNDA })
+      .update({ status: 'blocked', active_task_id: tareaVieja.id });
+    await trx('agent_logs').insert({
+      task_id: tareaVieja.id, agent_name: AGENTE, action_type: 'error', message: MARCA + MOTIVO_VIEJO,
+    });
+    const dosBloqueos = await aptsNext(trx, { project_url: PROYECTO, agent_name: AGENTE });
+    ok(dosBloqueos.target_id === ID_PRIMERA,
+      'con dos bloqueadas nombra la primera del plan', String(dosBloqueos.target_id).slice(0, 8));
+    await trx('backlog_items').where({ id: ID_PRIMERA }).update({ status: 'ready_for_dev' });
+    const soloVieja = await aptsNext(trx, { project_url: PROYECTO, agent_name: AGENTE });
+    ok(soloVieja.next === 'blocked' && soloVieja.why.includes(MOTIVO_VIEJO),
+      'y el motivo se alcanza tambien por active_task_id, para los bloqueos ya escritos',
+      soloVieja.why || '');
+    await trx('backlog_items').where({ id: ID_SEGUNDA })
+      .update({ status: 'ready_for_dev', active_task_id: null });
+    await trx('backlog_items').where({ id: ID_PRIMERA }).update({ status: 'blocked' });
+    await trx('project_state').where({ project_url: PROYECTO, agent_name: AGENTE })
+      .update({ cursor: JSON.stringify({ story_id: ID_PRIMERA }), step_status: 'running' });
 
     // ---- 4. el ciclo NO se cierra sobre si mismo: repetir no vuelve a repartirla ----
     const repetido = await aptsNext(trx, { project_url: PROYECTO, agent_name: AGENTE });

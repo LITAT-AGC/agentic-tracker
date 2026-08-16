@@ -3835,11 +3835,19 @@ const reportBlockerInternal = async (payload, { connection = db, deferredWebhook
     () => stageBacklogCoverageDocuments(connection, blockedBacklogItems.map((item) => item.id)),
     { action: 'report_blocker.semantic_sync', task_id: taskId, project_url: url }
   );
+  // Las unidades que este bloqueo marca van en `technical_details`, y no es adorno: es el
+  // UNICO vinculo que sobrevive. La fila se ata al proyecto a traves de `task_id`, y la
+  // vuelta —de la unidad a la tarea— era `backlog_items.active_task_id`, que se borra en
+  // cuanto el conductor suelta la tarea al terminar la corrida. Sin esto, el motor puede
+  // decir que una unidad esta bloqueada pero no por que, que es justo lo que se necesita
+  // saber para reponerla (visto en `tickets` el 2026-08-16: unidad bloqueada, motivo
+  // escrito, y ningun camino para ir de una al otro).
   await connection('agent_logs').insert({
     task_id: taskId,
     agent_name: agentName || null,
     message: 'BLOCKER REPORTED: ' + errorMessage,
-    action_type: 'error'
+    action_type: 'error',
+    technical_details: JSON.stringify({ backlog_item_ids: objetivos })
   });
   await queueWebhookNotification(url, {
     event: 'project_blocked',

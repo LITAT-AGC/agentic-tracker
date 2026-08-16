@@ -370,9 +370,19 @@ const resolveEntityProfile = async (db, key, projectUrl, { requireOverride = fal
 
 // ---- El porqué de un bloqueo ----
 // Para que la parada lo diga en vez de obligar a abrir el panel. `report_blocker` deja el
-// mensaje en `agent_logs` contra la tarea que lo reportó, y la unidad guarda esa tarea en
-// `active_task_id`. Si no hay rastro —bloqueo puesto a mano con `update_backlog_item`, o
-// tarea ya borrada— devuelve null y el aviso se queda con el título, que siempre está.
+// mensaje en `agent_logs` y anota ahí, en `technical_details`, las unidades que marca.
+//
+// Se busca por esa anotación y no por `backlog_items.active_task_id`, que era el camino
+// evidente y no sirve: el conductor SUELTA la tarea al terminar la corrida y con ella
+// desaparece el vínculo, así que en el caso real —bloqueo reportado, corrida terminada— la
+// unidad quedaba bloqueada sin ningún camino hasta su motivo. Se vio en `tickets` el
+// 2026-08-16, con el motivo escrito en la base y el aviso incapaz de alcanzarlo.
+// `active_task_id` se conserva como segundo intento: cubre los bloqueos escritos antes de
+// que se anotara la unidad, y mientras la tarea siga abierta es igual de bueno.
+//
+// Sin rastro por ninguno de los dos —bloqueo puesto a mano con `update_backlog_item`, o el
+// del vigilante de latidos caducados, que no escribe mensaje— devuelve null y el aviso se
+// queda con el título, que siempre está.
 const MARCA_BLOQUEO = 'BLOCKER REPORTED:';
 
 // La primera unidad bloqueada de la épica, en el orden del plan, o null. El orden importa
@@ -387,12 +397,15 @@ const unidadBloqueada = (db, ctx) => db('backlog_items')
   .first();
 
 const motivoDelBloqueo = async (db, story) => {
-  if (!story.active_task_id) return null;
-  const fila = await db('agent_logs')
-    .where({ task_id: story.active_task_id, action_type: 'error' })
+  const base = () => db('agent_logs')
+    .where({ action_type: 'error' })
     .where('message', 'like', `${MARCA_BLOQUEO}%`)
     .orderBy('created_at', 'desc')
     .first('message');
+
+  let fila = await base()
+    .whereRaw("technical_details->'backlog_item_ids' @> ?::jsonb", [JSON.stringify([story.id])]);
+  if (!fila && story.active_task_id) fila = await base().where({ task_id: story.active_task_id });
   if (!fila) return null;
   return fila.message.slice(MARCA_BLOQUEO.length).trim() || null;
 };

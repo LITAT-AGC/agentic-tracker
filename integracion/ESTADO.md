@@ -1786,6 +1786,16 @@ repartir y devuelve `blocked` nombrando la unidad, su motivo —el que dejo `rep
 codigo propio para eso (10), asi que no hubo que tocarlo: la parada nombra la unidad en vez de decir
 «tope de vueltas», que era lo unico que se leia antes en el aviso de Telegram.
 
+**El motivo se ata a la unidad al escribirlo, no se busca despues.** El camino evidente —de la
+unidad a su tarea por `backlog_items.active_task_id`, y de ahi al `agent_logs`— no sirve: el conductor
+SUELTA la tarea al terminar la corrida y con ella desaparece el vinculo, asi que en el unico caso que
+importa —bloqueo reportado, corrida terminada, alguien preguntando que paso— la unidad quedaba
+bloqueada sin ningun camino hasta su motivo. Se vio en PROD el 2026-08-16 con la primera version del
+arreglo ya desplegada: `apts_status` decia que US-AUTH-01 estaba bloqueada y no por que, con el motivo
+escrito en la base y fuera de alcance. Ahora `report_blocker` anota en `technical_details` que unidades
+marca, que es un vinculo que no lo borra nadie; `active_task_id` se conserva como segundo intento, para
+los bloqueos ya escritos y para mientras la tarea siga abierta.
+
 Se descarto **saltarla y seguir con las listas**, que era la otra salida y la que mas trabajo
 aprovechaba. Un bloqueo es exactamente la condicion que pide una persona: enterrarlo bajo horas de
 trabajo posterior solo retrasa el aviso hasta el final del backlog, cuando ya nadie mira. Y se
@@ -1809,12 +1819,16 @@ El tope existe para cortar bucles que no avanzan, no revisiones que si; con tres
 paralelo, tres reintentos se gastan antes de que se agote el hallazgo. Se sube el defecto, no se quita
 el tope: el ciclo sigue acotado y el valor viejo sigue estando en la variable de entorno.
 
-Comprobado con `backend/scripts/test_blocked_unit_halts.js`, 22 aserciones contra la base de prueba
+Comprobado con `backend/scripts/test_blocked_unit_halts.js`, 25 aserciones contra la base de prueba
 dentro de una transaccion que se revierte. Las que importan: preguntar dos veces sigue dando `blocked`
 —que es el ciclo que se cerraba—, un segundo agente tampoco recibe la historia de al lado, reponer la
-unidad devuelve el trabajo, y el cuarto salto atras ya no muere mientras el sexto si. Lleva ademas una
-guarda de acoplamiento: si `report_blocker` deja de escribir su prefijo en `agent_logs`, la prueba se
-pone en rojo en vez de quedarse en verde con el aviso real sin motivo.
+unidad devuelve el trabajo, y el cuarto salto atras ya no muere mientras el sexto si. La prueba deja
+`active_task_id` en NULL **a proposito**, que es como queda de verdad: fijarlo fue el error de su
+primera version, que pasaba en verde mientras el caso real no encontraba el motivo. Lleva ademas una
+guarda de acoplamiento: si `report_blocker` deja de escribir su prefijo o de anotar las unidades en
+`technical_details`, la prueba se pone en rojo en vez de quedarse en verde con el aviso real mudo.
+Corridas tambien `test_blocker_scope_and_release.js` y `test_project_blocked_derivation.js`, que son
+las que ejercitan `report_blocker` por HTTP y piden servidor de prueba levantado.
 
 **No cambia ningun artefacto descargable**: el arreglo es del servidor, asi que ningun cliente tiene
 que volver a bajarse nada y `schema_version` no se mueve. Lo unico que cambia para quien ya integra es
