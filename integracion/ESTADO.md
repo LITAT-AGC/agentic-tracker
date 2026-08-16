@@ -13,7 +13,7 @@ llego hasta aqui: eso esta en el historial de git.
 | Manifiesto | `GET /api/public/integrar`, `schema_version` 1.1.3 |
 | Guia para personas | `GET /api/public/integrar/guia`, HTML renderizado del manifiesto |
 | Runtimes soportados | Dos: Claude Code y opencode |
-| Artefactos publicados | 10; el conductor en `artifact_version` 1.14.0 y su README en 1.15.0, los dos supervisores (`.ps1` y `.sh`) en 1.0.0, `adapter_generator` en 1.5.0, `loop_prompt_code_review` en 1.3.0, `agent_guidelines` y `surface_spec` en 1.1.1, `skill_markdown` y `skills_json` en 1.1.0 |
+| Artefactos publicados | 10; el conductor en `artifact_version` 1.15.0 y su README en 1.16.0, los dos supervisores (`.ps1` y `.sh`) en 1.0.0, `adapter_generator` en 1.5.0, `loop_prompt_code_review` en 1.3.0, `agent_guidelines` y `surface_spec` en 1.1.1, `skill_markdown` y `skills_json` en 1.1.0 |
 | Descargas necesarias para **llamar** a las operaciones | Ninguna |
 | Descargas necesarias para **conducir** | El spec y el generador (agentes y comandos); el conductor y su README si se quiere el bucle desatendido, y su plantilla de revision si se quiere ademas la compuerta dentro de la sesion del agente |
 
@@ -2086,6 +2086,35 @@ reinicio a las 21:16:48Z y las llamadas del agente de `tickets` a un lado y otro
 completaron todas (`apts_submit_step` a las 21:17:01Z, doce segundos despues), con `run.err.log` en
 cero bytes. Sale bien porque las llamadas del agente son cortas y espaciadas, no porque la practica
 sea segura: sigue desaconsejada en la skill de despliegue.
+
+**Quedarse sin saldo ya no se lee como un fallo de la story.** La primera corrida supervisable
+—la misma tarde del 2026-08-16, sobre `tickets`— paro a las 8 unidades de 25 con un
+`error="Insufficient Balance"` de DeepSeek, y salio con el codigo **20**, que manda a buscar el
+problema en la story. Los tres patrones de condiciones del entorno no conocian esa frase: el 21
+esperaba «hit your session limit» y compañia, y el 23 «credit balance is too low». Ahora el 21 la
+reconoce, con la escalera intacta y sin el cerrojo de duracion, como corresponde a un limite que
+llega despues de horas de trabajo.
+
+El 21 pasa a cubrir dos cosas que se hacen igual y se cuentan distinto: el TOPE, que se restablece
+solo y cuya hora imprime la CLI, y el SALDO, donde no hay nada que esperar. Comparten codigo porque
+comparten lo unico que decide que hacer con ellas —reintentar no puede salir distinto, el limite es
+de la CUENTA— y no comparten el `detalle`, que es lo que una persona lee en Telegram: decirle «se
+restablece» a quien se quedo sin credito lo manda a esperar algo que no va a pasar solo. De las
+cuatro frases del patron, la de DeepSeek es la **medida**; las de OpenAI y OpenRouter se escriben
+de sus mensajes publicados y se dicen como no verificadas aqui. El coste de que falte una es otra
+corrida perdida con el motivo equivocado; el de que sobre una es ninguno, porque ningun patron se
+consulta si el intento no fallo.
+
+Lo que si funciono, y es lo que sostuvo el diagnostico: la **ultima linea en prosa** que el 20 se
+lleva desde la 1.9.0 trajo la causa literal hasta el diario y hasta el aviso de Telegram. Sin ella
+esto habria sido un escueto «codigo 20» y el rato se habria ido mirando la story. Y la parada quedo
+escrita como tal, asi que un supervisor NO la habria relanzado — que es exactamente lo correcto:
+relanzar contra una cuenta vacia solo quema intentos.
+
+Cubierto por un caso nuevo en `test_conductor_agent_env.js` con la linea literal de la corrida:
+sale 21 y no 20, no gasta la escalera, el detalle dice que hay que cargar credito y **no** promete
+un restablecimiento. Comprobado que falla sin el arreglo. El conductor sube a **1.15.0** y su README
+a **1.16.0**; `schema_version` no cambia.
 
 ## Abierto
 

@@ -229,6 +229,27 @@ const intentos = (r) => r.eventos.filter((e) => e.evento === 'agente');
     ok(!llamadas.includes('apts_next'), 'no reclama nada al parar');
     console.log();
 
+    console.log('1.bis) sin saldo: mismo codigo, distinto detalle');
+    // Lo trajo una corrida real el 2026-08-16 en "tickets": DeepSeek por opencode escribe
+    // `error="Insufficient Balance"` y ninguno de los tres patrones lo reconocia, asi que
+    // paro con el 20 —que manda a buscar el problema en la story— con la causa escrita en la
+    // ultima linea del agente. Comparte codigo con el tope porque comparte lo que hay que
+    // hacer, y no comparte el detalle porque decirle «se restablece» a quien se quedo sin
+    // saldo lo manda a esperar algo que no va a pasar solo.
+    llamadas.length = 0;
+    r = await correr(puerto, {
+      salida: 'timestamp=2026-08-16T22:42:15.175Z level=ERROR run=246a788b message=process error="Insufficient Balance" stack="AI_APICallError"',
+      codigo: 1,
+    });
+    ok(r.codigoSalida === 21, 'sale con 21 y no con 20', `salio ${r.codigoSalida}`);
+    ok(parada(r).motivo === 'limite_de_uso', 'con el motivo de la cuenta', parada(r).motivo);
+    ok(/sin saldo/.test(parada(r).detalle || ''),
+      'el detalle dice que hay que cargar credito', parada(r).detalle);
+    ok(!/se restablece/.test(parada(r).detalle || ''),
+      'y NO promete un restablecimiento que no va a llegar');
+    ok(intentos(r).length === 1, 'tampoco gasta la escalera', `gasto ${intentos(r).length}`);
+    console.log();
+
     console.log('2) fallo normal del agente: el camino de siempre NO cambia');
     r = await correr(puerto, { salida: 'algo revento a mitad de la story', codigo: 1 });
     ok(r.codigoSalida === 20, 'sigue saliendo con 20', `salio ${r.codigoSalida}`);

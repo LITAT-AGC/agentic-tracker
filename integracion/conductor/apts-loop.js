@@ -179,16 +179,38 @@ const CONDICIONES_ENTORNO = [
   {
     motivo: 'limite_de_uso',
     codigo: SALIDA.limite_de_uso,
-    // Claude Code: «You've hit your session limit · resets 11:20pm (America/Buenos_Aires)».
-    patron: /hit your (?:session|usage|weekly) limit|usage limit reached|out of (?:credits|usage)/i,
+    // Dos formas de quedarse sin poder llamar al modelo, y las dos son de la CUENTA:
+    //
+    //   TOPE   — Claude Code: «You've hit your session limit · resets 11:20pm (America/…)».
+    //            Se agotó una cuota que se restablece sola, y la CLI dice cuándo.
+    //   SALDO  — DeepSeek por opencode: «error="Insufficient Balance"». No hay cuota que
+    //            espere: hay que pagar.
+    //
+    // Comparten código porque comparten lo único que decide qué hacer con ellas —reintentar
+    // no puede salir distinto, porque el límite no es del modelo— pero no comparten el
+    // detalle, que es lo que una persona lee en Telegram: decirle «se restablece» a quien se
+    // quedó sin saldo lo manda a esperar algo que no va a pasar solo.
+    //
+    // El caso del saldo lo trajo una corrida real el 2026-08-16, en `tickets`: paró a las 8
+    // unidades de 25 y salió con el 20, que manda a buscar el problema en la story. La causa
+    // estaba escrita en la última línea del agente y ninguno de los tres patrones la
+    // reconocía. De las cuatro frases de abajo, la de DeepSeek es la MEDIDA; las otras tres
+    // son la misma clase de error en OpenAI y OpenRouter, escritas de sus mensajes
+    // publicados y no vistas aquí — se añaden porque el coste de que falte una es otra
+    // corrida perdida con el motivo equivocado, y el de que sobre es ninguno: ningún patrón
+    // dispara si el intento no falló.
+    patron: /hit your (?:session|usage|weekly) limit|usage limit reached|out of (?:credits|usage)|insufficient[ _](?:balance|credits?|quota)|exceeded your current quota/i,
     // La hora de reset la imprime la propia CLI y es lo único accionable del mensaje:
     // sin ella, «se acabó el crédito» deja a quien mire sin saber cuándo relanzar.
     leer: (cola) => {
       const m = cola.match(/resets?(?:\s+at)?\s+([^\n\r·]{1,60})/i);
       const reset = m ? m[1].trim() : null;
+      const saldo = /insufficient[ _](?:balance|credits?|quota)|exceeded your current quota/i.test(cola);
       return {
         reset,
-        detalle: `la CLI del agente agotó su límite de uso${reset ? `; se restablece ${reset}` : ''}`
+        detalle: (saldo
+          ? 'la cuenta de la CLI del agente se quedó sin saldo: hay que cargarle crédito'
+          : `la CLI del agente agotó su límite de uso${reset ? `; se restablece ${reset}` : ''}`)
           + '. No es un fallo de la story: reintentar con otro modelo no cambia nada,'
           + ' porque el límite es de la cuenta.',
       };

@@ -2628,7 +2628,18 @@ const integrationArtifacts = {
     // Windows el `cmd.exe` intermedio muere con el conductor y sobrevive el NIETO, que se
     // busca por el enlace de paternidad. Quien se quede en 1.13.0 no tiene con que
     // supervisar: un relanzamiento a ciegas es exactamente el escenario de los dos agentes.
-    artifactVersion: '1.14.0',
+    // 1.15.0: el codigo 21 reconoce tambien la cuenta SIN SALDO, no solo el tope que se
+    // restablece. Lo trajo una corrida real el 2026-08-16 en "tickets": DeepSeek por
+    // opencode escribe `error="Insufficient Balance"` y ninguno de los tres patrones lo
+    // reconocia, asi que la corrida paro a las 8 unidades de 25 con el codigo 20 —el que
+    // manda a buscar el problema en la story— teniendo la causa escrita en la ultima linea
+    // del agente. Comparte codigo con el tope porque comparte lo que hay que hacer
+    // —reintentar no puede salir distinto, el limite es de la CUENTA— y no comparte el
+    // detalle: decirle «se restablece» a quien se quedo sin saldo lo manda a esperar algo
+    // que no va a pasar solo. Se añaden ademas las frases equivalentes de OpenAI y
+    // OpenRouter, que no estan medidas aqui y se dicen como tales. Quien se quede en 1.14.0
+    // seguira leyendo «el agente fallo» cuando lo que pasa es que hay que pagar.
+    artifactVersion: '1.15.0',
     kind: 'loop_conductor',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -2693,7 +2704,10 @@ const integrationArtifacts = {
     // programa de Node, cual es su regla y sus codigos— y el agente huerfano: el evento
     // `agente_lanzado`, `--huerfano-espera`, el codigo 16 y como se identifica lo que se va
     // a cortar en cada sistema. Sin esto, los dos artefactos nuevos llegan sin manual.
-    artifactVersion: '1.15.0',
+    // 1.16.0: documenta que el 21 cubre dos cosas —el tope que se restablece y la cuenta sin
+    // saldo—, que comparten codigo y no detalle, y cual de las cuatro frases de la tabla
+    // esta medida y cuales no.
+    artifactVersion: '1.16.0',
     kind: 'loop_conductor_manual',
     recommended: false,
     usagePriority: 'optional_entrypoint',

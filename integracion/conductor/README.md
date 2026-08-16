@@ -664,7 +664,7 @@ comparten lo único que decide qué hacer: reintentar no puede salir distinto.
 
 | motivo | código | qué lo delata |
 |---|---|---|
-| `limite_de_uso` | 21 | «hit your session/usage limit», «usage limit reached» |
+| `limite_de_uso` | 21 | «hit your session/usage limit», «usage limit reached», «insufficient balance/credits/quota», «exceeded your current quota» |
 | `agente_no_ejecutable` | 22 | «command not found», «is not recognized as an internal or external command» |
 | `agente_sin_credenciales` | 23 | «invalid api key», «credit balance is too low», «please run … login» |
 
@@ -674,6 +674,22 @@ escrito `agente_fallo`, que manda a buscar el problema en la story. Pasó dos ve
 días sobre una corrida real. Ahora se para al primer intento, con motivo y código propios,
 y **la hora de reset que imprime la CLI viaja al diario** (campo `reset` del evento
 `parada`), a la consola y al aviso de Telegram: es lo único accionable del mensaje.
+
+**El 21 cubre dos cosas distintas que se hacen igual.** Una es el TOPE —una cuota que se
+restablece sola y cuya hora imprime la CLI— y la otra es el SALDO: la cuenta se quedó sin
+crédito y no hay nada que esperar, hay que pagar. Comparten código porque comparten lo
+único que decide qué hacer con ellas —reintentar no puede salir distinto— pero **no
+comparten el detalle**, que es lo que una persona lee en Telegram: decirle «se restablece»
+a quien se quedó sin saldo lo manda a esperar algo que no va a pasar solo.
+
+El caso del saldo lo trajo una corrida real el 2026-08-16, en «tickets»: paró a las 8
+unidades de 25 con un `error="Insufficient Balance"` de DeepSeek que ningún patrón
+reconocía, así que salió con el **20** —el que manda a mirar la story— teniendo la causa
+escrita en la última línea del agente. De las cuatro frases de la tabla, la de DeepSeek es
+la única **medida**; las otras tres son la misma clase de error en OpenAI y OpenRouter,
+escritas de sus mensajes publicados. Se añaden porque el coste de que falte una es otra
+corrida perdida con el motivo equivocado, y el de que sobre una es ninguno: ningún patrón
+se consulta si el intento no falló.
 
 Se reconocen leyendo la **salida** del agente y no su código, porque los tres terminan en 1
 igual que un bug cualquiera. Por eso el conductor ya no hereda la salida a secas: hace de
