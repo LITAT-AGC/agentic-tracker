@@ -29,6 +29,7 @@
 const { resolvePhaseStep, evaluatePrimitive } = require('./method_primitives');
 const { buildWorkflowCompletion, perStoryDocTypes } = require('./method_outputs');
 const { applyRewire } = require('../importer/rewire');
+const { registrarDesviacion } = require('./deviations');
 
 const LIFECYCLE = ['analysis', 'planning', 'solutioning', 'implementation', 'done'];
 const TERMINAL_STATUSES = ['done', 'archived'];
@@ -1068,6 +1069,41 @@ const aptsSubmitStep = (db, { project_url, agent_name, output }) =>
           + 'mandá su texto en output.content (y su título en output.title). '
           + 'Si no podés producirlo, no cierres la unidad: reportá el bloqueo y detenete',
       };
+    }
+
+    // ---- 0.quater. Forma de la revisión: se OBSERVA, todavía no se exige ----
+    //
+    // La compuerta de arriba comprueba que la revisión existe; no que sea una revisión.
+    // Lo que el método pide son TRES capas en subagentes con contexto limpio, y eso el
+    // servidor no lo puede ver: no alcanza al árbol de procesos del cliente. Lo que sí
+    // puede mirar es si el texto entregado enseña las tres, que es la huella que dejan.
+    //
+    // No rechaza, y la razón es del sistema y no de pereza. Primero: rechazar acoplaría el
+    // motor al vocabulario de una plantilla de prompt que es OPCIONAL y descargable —las
+    // tres capas se llaman así en `dev-story-revision-adversaria`, no en el método—, y el
+    // motor no puede depender de un artefacto que un cliente puede no tener. Segundo: un
+    // rechazo aquí impide cerrar la unidad, y una unidad que no cierra PARA el ciclo entero;
+    // estrenar eso a ciegas es arriesgar una parada por una heurística de texto.
+    //
+    // Así que se cuenta. Si el contador dice que las entregas traen siempre las tres, la
+    // compuerta se puede cerrar con datos delante; si dice que no, lo que hay que arreglar
+    // es otra cosa. Es el mismo orden que el resto: medir, y sólo entonces amurallar.
+    const revision = declared.find((d) => d.kind === 'artifact' && d.doc_type === 'code_review');
+    if (revision && typeof out.content === 'string' && out.content.trim()) {
+      const texto = out.content.toLowerCase();
+      const capas = ['blind hunter', 'edge case hunter', 'acceptance auditor'];
+      const ausentes = capas.filter((capa) => !texto.includes(capa));
+      if (ausentes.length) {
+        await registrarDesviacion(trx, {
+          operacion: 'apts_submit_step',
+          regla: 'revision-adversaria-de-tres-capas',
+          resultado: 'allowed',
+          identidad: { agent_name, project_url },
+          error: {
+            message: `la revisión entregada no nombra ${ausentes.length} de las 3 capas (${ausentes.join(', ')})`,
+          },
+        });
+      }
     }
 
     // ---- 0.ter. Compuerta de cierre: la épica no se queda vacía ----

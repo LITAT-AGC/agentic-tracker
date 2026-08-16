@@ -1888,6 +1888,78 @@ prueba cae con 16 fallos, que es lo que la hace valer.
 **Sube el conductor a 1.12.0 y su README a 1.13.0**, asi que quien conduzca tiene que volver a bajarse
 los dos; `schema_version` no se mueve y el resto de artefactos tampoco.
 
+## Las reglas que solo estaban escritas eran las unicas que se rompian
+
+Siete pasadas de revision adversaria y cuatro unidades cerradas sin que ningun agente desobedeciera al
+motor **ni una vez**: ni el cursor, ni la lista blanca de `branches`, ni el tope de saltos, ni la
+compuerta del `code_review`, ni el corte ante una unidad bloqueada. Lo que si se rompio, el
+2026-08-16, fue un parrafo: el prompt le dice al agente que la tarea que el conductor le presta es
+para registrar y que no la cierre, y la cerro.
+
+No es un problema de comprension. **Un agente hace, tarde o temprano, todo lo que el sistema le deja
+hacer**, y la unica diferencia entre las reglas que aguantan y las que no es donde viven. De ahi los
+tres escalones con los que se mira ahora cada regla: **imposible** (el servidor la rechaza),
+**visible** (no se puede prohibir, pero la desviacion queda contada) y **verificable** (el servidor no
+ve el proceso, asi que exige evidencia en vez de creerse la promesa). Escribir mas prosa no sube de
+escalon, y por eso no se toco el prompt.
+
+**Las stories no se saltean, y ahora hay prueba.** Era cierto y no lo sostenia nadie: el reparto
+ordena por `priority`/`sort_order` —el orden del plan—, excluye solo `done` y `archived`, y mira el
+bloqueo ANTES de repartir. `test_dev_story_claim_order.js` lo fija por comportamiento con las tres
+formas en que podria colarse una excepcion: una unidad a medias (`in_progress`, `review`) se vuelve a
+repartir y la siguiente NO se adelanta; una bloqueada para la epica entera; y `archived` es la unica
+salida, que es un acto humano deliberado. Se fija por comportamiento y no leyendo `TERMINAL_STATUSES`,
+porque una asercion sobre el array se actualizaria junto al cambio sin que nadie lo notara.
+
+**Las desviaciones se cuentan** (`agent_logs.action_type = 'deviation'`, migracion 026). Antes vivian
+en el log de la aplicacion —rotado, sin agrupar, sin consultar—, asi que «¿que reglas intentan romper
+los agentes, y cuantas veces?» no se podia contestar y lo que se arreglaba salia de que un humano
+estuviera mirando en el momento justo. Se guardan las DOS clases: `rejected`, que el servidor rechazo,
+y `allowed`, que el servidor no puede impedir —la que no se veia por ningun lado y la que de verdad
+dice si las reglas escritas se siguen—. El detalle va en campos y no en la frase porque la pregunta es
+un `GROUP BY`; la carga del agente NO se guarda, solo sus claves, que puede traer secretos.
+
+El enganche esta en un punto unico —la respuesta `isError` del `tools/call`, con la identidad ya
+resuelta— y por eso no toca ninguna de las 23 entradas del ejecutor. El ayudante vive en
+`scripts/lib/deviations.js` y no en `index.js` porque tiene dos clientes con vistas distintas: la capa
+HTTP ve todo rechazo de la superficie; el motor ve el contenido de lo que se entrega, que la capa HTTP
+no puede juzgar.
+
+Dos observaciones nacen con el contador:
+
+- **Cerrar la tarea del conductor con la unidad todavia abierta.** No se prohibe, y la razon es del
+  sistema: el conductor llama por la misma superficie, con la misma clave y el mismo `agent_name`, asi
+  que el servidor no puede distinguirlo del agente sin un marcador que el agente podria copiar igual
+  —y un muro falsificable no es un muro—. Ademas ya es inofensivo: la tarea no posee la unidad
+  (`owns_backlog_item: false`) y el conductor 1.13.0 trata lo terminal como exito. Lo que el servidor
+  SI ve sin marcador es si la unidad sigue abierta: el conductor solo cierra su tarea DESPUES de que
+  el motor haya pasado a otra, asi que su camino no deja fila y el del agente si.
+- **La revision adversaria de tres capas.** El servidor no alcanza al arbol de procesos del cliente,
+  asi que no puede comprobar que se lanzaron; lo que puede mirar es si el texto entregado enseña las
+  tres. Se cuenta y NO se rechaza, por dos motivos: rechazar acoplaria el motor al vocabulario de una
+  plantilla de prompt que es opcional y descargable, y un rechazo ahi impide cerrar la unidad — y una
+  unidad que no cierra para el ciclo entero. Cerrar esa compuerta es una linea el dia que el contador
+  diga que es seguro.
+
+**El conductor ya no reanima una tarea que esta cerrada** (1.13.0). La reanimacion existe para la
+tarea que la vigilancia marco `stalled` mientras el agente trabajaba, y se aplicaba a cualquier fallo:
+desde `done` no hay transicion legal ninguna, asi que volvia a fallar y el diario se llevaba un
+`tarea_fallo` que no era un fallo. Ahora pregunta el estado real —`get_task`, y solo en el camino de
+fallo— y trata lo terminal como exito. Es el mismo vicio que la corrida que decia «sin llegar a done»
+sin mirar: afirmar sobre un estado que no se ha consultado.
+
+**Lo medido, para el proximo paso.** El log de PROD dice que las 23 operaciones se usan, pero una
+unidad de dev-story vive con nueve: `apts_workflow_step` (694), `apts_submit_step` (673), `heartbeat`,
+`log_agent_progress`, `get_backlog_item`, `register_task`, `update_task_status`, `get_task` y
+`report_blocker`. El resto son de los roles orquestadores. El mecanismo para acotarlas por rol **ya
+existe**: el spec declara `tools` por agente y el generador los mapea; lo que hace es añadir las 23
+operaciones MCP en bloque a todos, y en Claude Code ese `tools:` es lista blanca EXCLUSIVA. Acotarlo
+es un campo en `apts-surface.json` y una linea en `generate-adapters.js` — lo caro no es la plomeria
+sino decidir el reparto, y ahora hay numeros para decidirlo. Aparece ademas una desviacion que se ve
+sola en esa misma cuenta: `apts_get_backlog_item`, dos llamadas, que **no es una operacion que
+exista**. Un agente inventandose una herramienta, que es justo lo que el contador viene a hacer
+visible.
+
 ## Abierto
 
 **El camino de Cloudflare no se ha visto devolver un vector.** El `CLOUDFLARE_API_TOKEN` del `.env`

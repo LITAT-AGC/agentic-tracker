@@ -62,6 +62,7 @@ const {
   LOOP_CONDUCTOR_INVOCATION_BY_RUNTIME,
   checkLoopConductorInvocations
 } = require('./scripts/lib/loop_conductor_invocations');
+const { registrarDesviacion: registrarDesviacionEn } = require('./scripts/lib/deviations');
 const rootPackage = require('../package.json');
 const db = createKnex(knexConfig[process.env.NODE_ENV || 'development']);
 
@@ -2606,7 +2607,14 @@ const integrationArtifacts = {
     // 14: la unidad que cerro, el ciclo que termino (0) y el bloqueo declarado en la ultima
     // vuelta (10), que es justo el codigo que existe para verlo. Ademas su tarea de
     // ejecucion se soltaba en `review` habiendo con que cerrarla.
-    artifactVersion: '1.12.0',
+    // 1.13.0: una transicion de tarea que falla ya no se reanima a ciegas. La reanimacion
+    // existe para la tarea que la vigilancia marco `stalled` mientras el agente trabajaba,
+    // y se aplicaba a cualquier fallo — incluido el contrario, que la tarea ya este en
+    // `done`, desde donde no hay transicion legal ninguna. Ahora pregunta el estado real
+    // (`get_task`, solo en el camino de fallo) y trata lo terminal como exito. Quien se
+    // quede en 1.12.0 vera un `tarea_fallo` que no es un fallo cada vez que su agente
+    // cierre por su cuenta la tarea prestada.
+    artifactVersion: '1.13.0',
     kind: 'loop_conductor',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -2664,7 +2672,10 @@ const integrationArtifacts = {
     // lo para el tope y no un veredicto del motor—, que con ella el 0 y el 10 dejan de
     // salir como 14, y los campos con los que la parada por tope se puede consultar
     // (`unidad_cerrada`, `backlog_done`, `backlog_total`, `cierre`).
-    artifactVersion: '1.13.0',
+    // 1.14.0: dice que la reanimacion de una tarea `stalled` es solo para ese caso, que
+    // una transicion fallida pregunta antes por el estado real, y que una tarea ya cerrada
+    // no deja `tarea_fallo` en el diario.
+    artifactVersion: '1.14.0',
     kind: 'loop_conductor_manual',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -3705,6 +3716,45 @@ const updateTaskStatusInternal = async (taskId, payload, { connection = db, defe
 
       if (!hasRecentActivity) {
         throw createHttpError(409, 'Cannot mark task as done without recent execution activity. Resume task and send heartbeat or log_agent_progress first.');
+      }
+
+      // La tarea que abre el conductor se la PRESTA al agente para registrar
+      // —`log_agent_progress`, `heartbeat`, `report_blocker`—, y el prompt le dice
+      // explicitamente que no la cierre: la cierra el conductor, cuando el motor confirma
+      // que la unidad paso a otra.
+      //
+      // No se PROHIBE, y la razon importa. El conductor llama por la misma superficie, con
+      // la misma clave y el mismo `agent_name`: el servidor no puede distinguirlo del
+      // agente sin un marcador que el agente podria copiar igual, y un muro falsificable no
+      // es un muro. Ademas, desde el conductor 1.13.0 esto es inofensivo —la tarea no posee
+      // la unidad (`owns_backlog_item: false`) y el conductor ya trata lo terminal como
+      // exito—, asi que rechazarlo romperia clientes por una regla cuyo incumplimiento no
+      // hace daño. Si el contador sube, la regla se gana el muro; para eso esta el contador.
+      //
+      // Lo que SI ve el servidor sin marcador ninguno: si la unidad de esa tarea sigue
+      // abierta. El conductor solo cierra su tarea DESPUES de que el motor haya pasado a
+      // otra unidad, asi que en su camino la unidad ya es terminal y no se registra nada.
+      // Cerrarla con la unidad todavia viva es la desviacion, y es la que se vio el
+      // 2026-08-16. Queda fuera el caso en que el agente la cierra justo despues de su
+      // propio submit terminal: ahi la unidad ya cerro y es indistinguible del conductor.
+      // Tambien es inofensivo, y preferir el falso negativo mantiene el contador limpio.
+      let contexto = null;
+      try { contexto = task.context ? JSON.parse(task.context) : null; } catch (_) { contexto = null; }
+      if (contexto && contexto.conductor && task.backlog_item_id) {
+        const unidad = await connection('backlog_items')
+          .where({ id: task.backlog_item_id })
+          .first('status');
+        if (unidad && !['done', 'archived'].includes(unidad.status)) {
+          registrarDesviacion({
+            operacion: 'update_task_status',
+            regla: 'tarea-del-conductor-no-se-cierra-con-la-unidad-abierta',
+            resultado: 'allowed',
+            taskId,
+            identidad: { agent_name: agentName, project_url: projectUrl },
+            carga: payload,
+            error: { message: `la tarea la abrio el conductor '${contexto.conductor}' y se cerro con la unidad en '${unidad.status}'` },
+          });
+        }
       }
     }
 
@@ -4877,6 +4927,11 @@ app.get('/mcp', apiLimiter, (_req, res) => res
     }
   }));
 
+// Las desviaciones se registran con el ayudante compartido de `scripts/lib/deviations.js`:
+// el motor de metodo tambien las escribe, y ve cosas que esta capa no puede juzgar —el
+// contenido de lo que se entrega—, asi que la forma de la fila no puede vivir aqui.
+const registrarDesviacion = (opciones) => registrarDesviacionEn(db, opciones);
+
 app.post('/mcp', apiLimiter, authenticateAgent, mcpJsonParser, async (req, res) => {
   if (!isMcpOriginAllowed(req)) {
     return res.status(403).json({ error: 'Origin not allowed' });
@@ -4918,6 +4973,11 @@ app.post('/mcp', apiLimiter, authenticateAgent, mcpJsonParser, async (req, res) 
     }
   }, 'MCP request');
 
+  // Fuera del bloque de abajo porque el registro de desviaciones los necesita despues, en
+  // el punto donde se conoce la respuesta.
+  let operacionLlamada = null;
+  let cargaLlamada = null;
+
   if (message.method === 'tools/call') {
     const operationName = message.params?.name;
     const rawArguments = message.params?.arguments;
@@ -4935,8 +4995,21 @@ app.post('/mcp', apiLimiter, authenticateAgent, mcpJsonParser, async (req, res) 
       }
     }, 'MCP identity resolved');
 
+    operacionLlamada = operationName;
+    cargaLlamada = resolved.payload;
+
     if ((resolved.conflicts || []).length) {
       if (isNotification) return res.status(202).end();
+
+      // Un `project_url` que contradice la cabecera es una desviacion como cualquier otra,
+      // y de las que mas cuesta ver: la peticion se rechaza limpiamente y nadie se entera.
+      registrarDesviacion({
+        operacion: operationName,
+        regla: 'identidad-coherente',
+        carga: resolved.payload,
+        identidad: headerIdentity,
+        error: { statusCode: 409, code: 'APTS_MCP_IDENTITY_CONFLICT', message: `identidad en conflicto: ${(resolved.conflicts || []).map((c) => c.field).join(', ')}` },
+      });
 
       const conflictPayload = buildMcpIdentityConflictPayload(operationName, resolved.conflicts);
       return res.json(buildResult(message.id, {
@@ -4963,6 +5036,16 @@ app.post('/mcp', apiLimiter, authenticateAgent, mcpJsonParser, async (req, res) 
   try {
     const response = await dispatch(message, mcpLocalExecutor);
     if (!response) return res.status(202).end();
+    // Punto unico: toda operacion MCP que termina en `isError` pasa por aqui, con la
+    // identidad ya resuelta y sin tocar las 23 entradas del ejecutor.
+    if (operacionLlamada && response.result && response.result.isError) {
+      registrarDesviacion({
+        operacion: operacionLlamada,
+        carga: cargaLlamada,
+        identidad: headerIdentity,
+        error: (response.result.structuredContent && response.result.structuredContent.error) || null,
+      });
+    }
     return res.json(response);
   } catch (error) {
     logger.error({ err: error, method: message.method }, 'MCP dispatch failed');

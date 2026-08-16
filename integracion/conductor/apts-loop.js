@@ -1435,6 +1435,24 @@ const anotarTarea = (cfg, mensaje) => {
 // que lleguemos a cerrarla, y desde ahí la transición que pedimos ya no es legal. Se
 // reanima y se reintenta una vez. No es hacer trampa: vista desde APTS, la tarea
 // efectivamente parecía muerta.
+//
+// Pero reanimar sólo vale para ESE caso. Estados desde los que no hay nada que reanimar
+// porque la tarea ya llegó a donde iba:
+const TAREA_TERMINAL = new Set(['done']);
+
+// El estado que el servidor dice que tiene la tarea, o null si no se puede saber. Sólo se
+// pregunta en el camino de fallo, así que no añade una llamada a la corrida normal.
+const estadoDeTarea = async (cfg, id) => {
+  try {
+    const r = await llamarMcp(cfg, 'get_task', { task_id: id });
+    return (r && r.task && r.task.status) || null;
+  } catch (_) {
+    // Sin respuesta no se inventa un estado: se devuelve null y quien llama sigue por el
+    // camino de antes, que es exactamente lo que hacía siempre.
+    return null;
+  }
+};
+
 const moverTarea = (cfg, estado) => {
   if (!tareaActual) return null;
   const id = tareaActual.id;
@@ -1444,6 +1462,28 @@ const moverTarea = (cfg, estado) => {
       return await llamarMcp(cfg, 'update_task_status', { task_id: id, status: estado });
     } catch (error) {
       if (estado === 'stalled') throw error;
+
+      // Antes de reanimar, PREGUNTAR. La reanimación se escribió para un caso concreto
+      // —la vigilancia marcó `stalled` mientras el agente trabajaba— y se aplicaba a
+      // cualquier fallo, incluido el contrario: que la tarea ya esté CERRADA. Desde `done`
+      // no hay ninguna transición legal, así que reanimar volvía a fallar y el diario se
+      // llevaba un `tarea_fallo` que no era un fallo.
+      //
+      // Visto el 2026-08-16 en "tickets": el agente cerró él mismo la tarea que el
+      // conductor le prestó —el prompt le dice que la use para registrar, no que la
+      // cierre— y el conductor apuntó un error por intentar moverla a `review` después. La
+      // unidad había cerrado bien. Es el mismo vicio que la corrida que decía «sin llegar a
+      // done» sin mirar: afirmar sobre un estado que no se ha consultado.
+      //
+      // No se lee el estado del texto del error a propósito: ese mensaje es del servidor y
+      // puede cambiar sin avisar. Se pregunta.
+      const actual = await estadoDeTarea(cfg, id);
+      if (actual === estado) return { task_id: id, status: actual, sin_cambio: true };
+      if (actual && TAREA_TERMINAL.has(actual)) {
+        log(`la tarea ${id} ya estaba en '${actual}': nada que mover a '${estado}'`);
+        return { task_id: id, status: actual, sin_cambio: true };
+      }
+
       await llamarMcp(cfg, 'update_task_status', { task_id: id, status: 'in_progress' });
       if (estado === 'done') await llamarMcp(cfg, 'update_task_status', { task_id: id, status: 'review' });
       return llamarMcp(cfg, 'update_task_status', { task_id: id, status: estado });

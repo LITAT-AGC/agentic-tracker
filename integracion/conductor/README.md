@@ -429,6 +429,12 @@ Dos detalles del camino, por si aparecen en el diario:
   conductor **no puede latir** mientras el agente corre, porque `spawnSync` bloquea el
   proceso entero. Así que la vigilancia de fondo puede haber marcado la tarea `stalled`
   antes de que se cierre; el conductor la reanima y reintenta la transición una vez.
+- Esa reanimación es **sólo** para ese caso. Si una transición falla, el conductor pregunta
+  antes por el estado real de la tarea (`get_task`, y sólo en el camino de fallo): si ya
+  está donde iba, o ya está cerrada, no hay nada que reanimar y no se apunta ningún fallo.
+  Pasa cuando el agente cierra por su cuenta la tarea que se le prestó —el prompt le dice
+  que la use para registrar, no que la cierre— y antes eso dejaba en el diario un
+  `tarea_fallo` que no lo era: `Invalid task status transition from done to in_progress`.
 
 ## Reintentos de red
 

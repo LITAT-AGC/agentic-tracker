@@ -14,6 +14,18 @@
 //
 // La prueba se monta a proposito con los UUID en contra: la primera del plan es la que el
 // criterio viejo habria dejado para el final.
+//
+// Y fija ademas la regla que gobierna todo esto: LAS STORIES NO SE SALTEAN. El reparto no
+// puede adelantar una unidad sin terminar, pase lo que pase con ella. Las tres formas en
+// que podria colarse una excepcion, cada una con su caso:
+//
+//   · a medias (`in_progress`, `review`) -> se vuelve a repartir LA MISMA, no la siguiente;
+//   · bloqueada                          -> para la epica entera, y la siguiente NO se sirve;
+//   · `archived`                         -> unica salida, y es un acto humano deliberado.
+//
+// Se fija por COMPORTAMIENTO y no leyendo la constante `TERMINAL_STATUSES`: lo que hay que
+// impedir es que alguien amplie esa lista sin darse cuenta de lo que significa, y una
+// asercion sobre el array se actualizaria junto al cambio sin que nadie lo notara.
 
 const crypto = require('node:crypto');
 const knex = require('knex')(require('../knexfile').test);
@@ -105,6 +117,59 @@ const ID_TERCERA = '11111111-0000-4000-8000-000000000003'; // sort_order 240
     ok(urgente.target_id === ID_TERCERA,
       'una prioridad mas alta se salta el sort_order',
       String(urgente.target_id).slice(0, 8));
+
+    // ---- 4. una unidad A MEDIAS no se saltea: se vuelve a repartir la misma ----
+    //
+    // Es el caso que mas facil seria perder de vista, porque no falla ruidosamente: la
+    // story se queda sin cerrar, el motor pasa a la siguiente y el backlog avanza dejando
+    // un agujero detras. Aqui se exige lo contrario. `review` ademas del `in_progress`
+    // porque es donde queda una unidad cuyo agente entrego y el motor no confirmo.
+    // Se le devuelve la prioridad CON LA QUE NACIO, leyendola de una hermana intacta. Un
+    // literal aqui es una trampa: `priority` ordena ASCENDENTE, asi que poner 0 no la
+    // devuelve a la fila, la asciende a la primera de todas.
+    const { priority: prioridadDeFabrica } = await trx('backlog_items')
+      .where({ id: ID_SEGUNDA }).first('priority');
+    await trx('backlog_items').where({ id: ID_TERCERA }).update({ priority: prioridadDeFabrica });
+    for (const aMedias of ['in_progress', 'review']) {
+      await trx('backlog_items').where({ id: ID_PRIMERA }).update({ status: aMedias });
+      await trx('project_state').where({ project_url: PROYECTO, agent_name: AGENTE })
+        .update({ cursor: null, step_status: 'idle' });
+      const otra = await aptsNext(trx, { project_url: PROYECTO, agent_name: AGENTE });
+      ok(otra.target_id === ID_PRIMERA,
+        `una unidad en '${aMedias}' se vuelve a repartir, no se saltea`,
+        `${String(otra.target_id).slice(0, 8)} (${otra.next})`);
+      ok(otra.target_id !== ID_SEGUNDA,
+        `  y la siguiente del plan NO se adelanta por encima de ella`);
+    }
+
+    // ---- 5. una unidad BLOQUEADA para el reparto entero ----
+    //
+    // No es «no hay trabajo»: es que lo que hay delante pide una persona. La siguiente del
+    // plan no se sirve aunque este lista, que es justo lo que hace que el aviso llegue
+    // ahora y no enterrado bajo horas de trabajo posterior.
+    await trx('backlog_items').where({ id: ID_PRIMERA }).update({ status: 'blocked' });
+    await trx('project_state').where({ project_url: PROYECTO, agent_name: AGENTE })
+      .update({ cursor: null, step_status: 'idle' });
+    const parada = await aptsNext(trx, { project_url: PROYECTO, agent_name: AGENTE });
+    ok(parada.next === 'blocked', 'una unidad bloqueada para el ciclo', parada.next);
+    ok(parada.target_id !== ID_SEGUNDA && parada.target_id !== ID_TERCERA,
+      '  y no reparte ninguna de las que tiene listas al lado',
+      String(parada.target_id).slice(0, 8));
+    ok(/US|bloquead|blocked|la primera del plan/i.test(parada.why || ''),
+      '  y dice cual es', parada.why);
+
+    // ---- 6. `archived` es la UNICA salida que deja pasar al reparto ----
+    //
+    // Deliberada y humana: archivar es decir «esta no va». Si alguien anade un estado mas
+    // a TERMINAL_STATUSES, este caso sigue en verde y el 4 se pone en rojo, que es donde
+    // hay que enterarse.
+    await trx('backlog_items').where({ id: ID_PRIMERA }).update({ status: 'archived' });
+    await trx('project_state').where({ project_url: PROYECTO, agent_name: AGENTE })
+      .update({ cursor: null, step_status: 'idle' });
+    const tras = await aptsNext(trx, { project_url: PROYECTO, agent_name: AGENTE });
+    ok(tras.target_id === ID_SEGUNDA,
+      'archivada la primera, el plan sigue por la segunda',
+      String(tras.target_id).slice(0, 8));
 
     throw new Error('__rollback__');
   }).catch((e) => {
