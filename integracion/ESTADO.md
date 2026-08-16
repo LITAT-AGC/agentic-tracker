@@ -2116,6 +2116,11 @@ sale 21 y no 20, no gasta la escalera, el detalle dice que hay que cargar credit
 un restablecimiento. Comprobado que falla sin el arreglo. El conductor sube a **1.15.0** y su README
 a **1.16.0**; `schema_version` no cambia.
 
+En PROD desde el 2026-08-16 (`d34dabd`), sin migraciones, comprobado contra `apts.informaticos.ar`:
+el manifiesto sirve el conductor en 1.15.0 y su README en 1.16.0, la descarga coincide con el
+repositorio y el patron nuevo esta dentro del archivo que se bajo a `tickets`. Seis comprobaciones
+del desplegador en verde, sin aviso de `/mcp`, y un solo reinicio del backend (43 contra 42).
+
 ## Abierto
 
 **El camino de Cloudflare no se ha visto devolver un vector.** El `CLOUDFLARE_API_TOKEN` del `.env`
