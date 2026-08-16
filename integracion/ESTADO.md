@@ -2066,6 +2066,27 @@ una clave nueva. El conductor sube a **1.14.0** y su README a **1.15.0**, asi qu
 tiene que volver a bajarselos: un supervisor contra un conductor 1.13.0 relanzaria a ciegas, que es
 exactamente el escenario de los dos agentes.
 
+En PROD desde el 2026-08-16 (`01b8d40`), sin migraciones, comprobado contra `apts.informaticos.ar`:
+el manifiesto sirve **diez** artefactos —los dos supervisores nuevos en 1.0.0, el conductor en
+1.14.0 y su README en 1.15.0— con `schema_version` en 1.1.3, y las cuatro descargas coinciden byte a
+byte con el repositorio normalizando CRLF a LF. Dos cosas se comprobaron aparte porque son
+precisamente las que un diff normalizado no ve: el `.ps1` **conserva su BOM** al viajar por HTTP y lo
+parsea Windows PowerShell 5.1 tal como se descarga, y el `.sh` llega **con LF y sin normalizar
+nada**, que es lo que confirma que el `.gitattributes` alcanza al checkout del servidor. El coste en
+el manifiesto —que lo lee todo cliente al arrancar— esta medido: **+2.631 caracteres** sobre 43.012,
+un 6,1%, y es todo de las dos fichas de artefacto, porque no se estreno ninguna regla.
+
+Las seis comprobaciones del desplegador pasaron y el aviso de `/mcp` **no salio**: nginx ya lo
+proxya. El backend volvio `online` con **un** reinicio (42 acumulados contra 41), asi que ninguno de
+los dos auto-chequeos de arranque aborto.
+
+Y se desplego **con una corrida en vuelo**, a proposito y sabiendo el riesgo —el reinicio del backend
+puede tumbarle una llamada MCP al agente y hacerle reportar un bloqueo—. No paso: el backend
+reinicio a las 21:16:48Z y las llamadas del agente de `tickets` a un lado y otro de esa marca
+completaron todas (`apts_submit_step` a las 21:17:01Z, doce segundos despues), con `run.err.log` en
+cero bytes. Sale bien porque las llamadas del agente son cortas y espaciadas, no porque la practica
+sea segura: sigue desaconsejada en la skill de despliegue.
+
 ## Abierto
 
 **El camino de Cloudflare no se ha visto devolver un vector.** El `CLOUDFLARE_API_TOKEN` del `.env`
