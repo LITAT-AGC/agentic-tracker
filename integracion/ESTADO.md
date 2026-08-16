@@ -1767,6 +1767,60 @@ vieja, que era el bloqueo entero. Y la que cierra la purga: que no queden histor
 `initiative_id` en NULL. Ademas, las tres rutas por HTTP contra el servidor de prueba —401 sin
 sesion, 400 sin confirmacion— y el ciclo completo pulsando los botones.
 
+## El motor repartia trabajo por encima de una unidad bloqueada, y lo hacia para siempre
+
+`report_blocker` marca la unidad y **no toca el puntero del metodo**. Como `blocked` no estaba entre
+los estados terminales —solo lo estaban `done` y `archived`—, la rama de idempotencia de
+`claimDevStory` devolvia la MISMA unidad bloqueada cada vez que se le preguntaba, y el ciclo
+respondia `run_step` sobre ella indefinidamente. Un bucle desatendido rehacia una unidad bloqueada
+desde el paso 1, sin fin, sin mirar nunca las que si estaban listas. La fase tampoco podia cerrar
+jamas, porque su compuerta es `all-children-status done` y una sola `blocked` la falsea a perpetuidad.
+
+Se vio en `tickets` el 2026-08-15, con US-AUTH-01 bloqueada, **24 historias listas al lado** que el
+motor no miraba, y un precio medido de 54 minutos y 0,109 USD por vuelta. La corrida de comprobacion
+solo lo pago una vez porque iba con `--max-iterations 1`; con el tope en 10 lo habria pagado diez.
+
+**Ahora el motor para, y no reparte por encima del bloqueo.** `aptsNext` mira la epica ANTES de
+repartir y devuelve `blocked` nombrando la unidad, su motivo —el que dejo `report_blocker` en
+`agent_logs`, que hasta ahora habia que ir a buscar al panel— y como reponerla. El conductor ya tenia
+codigo propio para eso (10), asi que no hubo que tocarlo: la parada nombra la unidad en vez de decir
+«tope de vueltas», que era lo unico que se leia antes en el aviso de Telegram.
+
+Se descarto **saltarla y seguir con las listas**, que era la otra salida y la que mas trabajo
+aprovechaba. Un bloqueo es exactamente la condicion que pide una persona: enterrarlo bajo horas de
+trabajo posterior solo retrasa el aviso hasta el final del backlog, cuando ya nadie mira. Y se
+descarto pararlo **solo para el agente que sostiene el puntero**, porque entonces la respuesta
+dependeria de QUIEN pregunta —el mismo backlog daria `blocked` a uno y trabajo a otro— y un segundo
+conductor enterraria el bloqueo igual. El corte es de la epica entera.
+
+Tiene una consecuencia que conviene saber: el vigilante de latidos caducados tambien marca `blocked`
+—una tarea `in_progress` sin señal durante 15 minutos—, asi que un agente que se muere ahora **para
+el reparto** en vez de dejar que otro recoja. Es a proposito: parar en alto y con la unidad nombrada
+es recuperable en segundos desde el panel, y girar en silencio quemando credito no lo era. La salida
+sigue siendo blanda por dos caminos, `update_backlog_item` a `ready` o resolver la tarea.
+
+**El presupuesto de saltos atras pasa de 3 a 5** (`METHOD_MAX_STEP_REVISITS`). El 3 lo agoto una
+unidad que estaba CONVERGIENDO, no girando: US-AUTH-01 encadeno cuatro pasadas de revision adversaria
+de tres capas y **cada una encontro defectos reales de seguridad** —proxy de confianza, truncado de
+bcrypt, redireccion abierta por `//host`, logout que no borraba la cookie `Secure`—, todas corregidas
+y con las suites en verde. Al declarar el cuarto salto el motor degrado a HALT y la unidad acabo
+bloqueada con la ultima correccion commiteada y **sin revalidar**, que es el peor sitio donde dejarla.
+El tope existe para cortar bucles que no avanzan, no revisiones que si; con tres capas buscando en
+paralelo, tres reintentos se gastan antes de que se agote el hallazgo. Se sube el defecto, no se quita
+el tope: el ciclo sigue acotado y el valor viejo sigue estando en la variable de entorno.
+
+Comprobado con `backend/scripts/test_blocked_unit_halts.js`, 22 aserciones contra la base de prueba
+dentro de una transaccion que se revierte. Las que importan: preguntar dos veces sigue dando `blocked`
+—que es el ciclo que se cerraba—, un segundo agente tampoco recibe la historia de al lado, reponer la
+unidad devuelve el trabajo, y el cuarto salto atras ya no muere mientras el sexto si. Lleva ademas una
+guarda de acoplamiento: si `report_blocker` deja de escribir su prefijo en `agent_logs`, la prueba se
+pone en rojo en vez de quedarse en verde con el aviso real sin motivo.
+
+**No cambia ningun artefacto descargable**: el arreglo es del servidor, asi que ningun cliente tiene
+que volver a bajarse nada y `schema_version` no se mueve. Lo unico que cambia para quien ya integra es
+que el ciclo empieza a contestar `blocked` donde antes contestaba `run_step`, que es lo que se
+pretendia.
+
 ## Abierto
 
 **El camino de Cloudflare no se ha visto devolver un vector.** El `CLOUDFLARE_API_TOKEN` del `.env`
@@ -1825,7 +1879,7 @@ nada, y un bundle nuevo con un backend viejo daria 404 en la buena.
 **El `.env` de PROD no necesita ninguna clave nueva.** Tiene diez y ninguna de las que llegaron
 despues es obligatoria: `EMBEDDING_DEFAULT_MODEL` no hace falta porque
 `OPENROUTER_DEFAULT_EMBEDDING_MODEL` se sigue leyendo detras y ya vale
-`openai/text-embedding-3-small`; `METHOD_CLAIM_TTL_MS` (1 h) y `METHOD_MAX_STEP_REVISITS` (3) traen
+`openai/text-embedding-3-small`; `METHOD_CLAIM_TTL_MS` (1 h) y `METHOD_MAX_STEP_REVISITS` (5) traen
 valor por defecto; `PUBLIC_APP_URL` cae en `CORS_ORIGIN`, que apunta al sitio bueno; y las tres
 `CLOUDFLARE_*` solo hacen falta el dia que el modelo por defecto pase a ser un `@cf/...`.
 

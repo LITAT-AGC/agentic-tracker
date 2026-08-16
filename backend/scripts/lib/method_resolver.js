@@ -33,6 +33,27 @@ const { applyRewire } = require('../importer/rewire');
 const LIFECYCLE = ['analysis', 'planning', 'solutioning', 'implementation', 'done'];
 const TERMINAL_STATUSES = ['done', 'archived'];
 
+// Estados desde los que el reparto NO puede seguir solo. `blocked` no es terminal —la
+// unidad no está hecha ni archivada, y una persona puede reponerla— pero tampoco es
+// trabajo disponible: significa que alguien pidió intervención humana, sea el agente por
+// `report_blocker` o el vigilante de latidos caducados.
+//
+// Sin esta distinción el motor se cerraba sobre sí mismo. Visto en producción el
+// 2026-08-15 con el proyecto "tickets": `report_blocker` marca la unidad y NO toca el
+// puntero de método, así que la rama de idempotencia de `claimDevStory` volvía a devolver
+// la misma unidad bloqueada —`blocked` no está en TERMINAL_STATUSES— y el ciclo respondía
+// `run_step` sobre ella indefinidamente. Un bucle desatendido rehacía una unidad bloqueada
+// desde el paso 1 a tres cuartos de hora y crédito real por vuelta, sin mirar nunca las 24
+// unidades listas que tenía al lado, y la fase tampoco podía cerrar jamás porque su
+// compuerta es `all-children-status done`.
+//
+// Se PARA en vez de saltarla, que era la otra salida posible. Un bloqueo es exactamente la
+// condición que pide una persona, y el conductor ya tiene código propio para `blocked` (10)
+// que la nombra al parar. Saltarla y seguir con las listas dejaría el bloqueo enterrado
+// bajo horas de trabajo posterior y el aviso llegaría igualmente al final del backlog, sólo
+// que mucho más tarde y sin nadie mirando.
+const BLOQUEANTES = ['blocked'];
+
 const readPositiveInt = (raw, fallback) => {
   const n = Number.parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : fallback;
@@ -64,7 +85,20 @@ const CLAIM_TTL_MS = readPositiveInt(process.env.METHOD_CLAIM_TTL_MS, 60 * 60 * 
 // —no en la sesión— para que sobreviva a los reintentos del conductor y al re-servido
 // del paso, y se limpie solo al cerrar el workflow o al soltar el claim: cada story
 // empieza con presupuesto fresco.
-const MAX_STEP_REVISITS = readPositiveInt(process.env.METHOD_MAX_STEP_REVISITS, 3);
+//
+// Vale 5 desde el 2026-08-16, y antes valía 3. El 3 lo agotó una unidad que estaba
+// CONVERGIENDO, no girando: en "tickets", US-AUTH-01 encadenó cuatro pasadas de revisión
+// adversaria de tres capas y cada una encontró defectos reales de seguridad —proxy de
+// confianza, truncado de bcrypt, redirección abierta por `//host`, logout que no borraba
+// la cookie `Secure`—, todas corregidas y con las suites en verde. Al declarar el cuarto
+// salto atrás el motor degradó a HALT y la unidad acabó bloqueada con la última corrección
+// commiteada y sin revalidar, que es el peor sitio donde dejarla.
+//
+// El tope existe para cortar bucles que no avanzan, no revisiones que sí: con tres capas
+// buscando en paralelo, tres reintentos se gastan antes de que se agote el hallazgo. Se
+// sube el defecto, no se quita el tope —el ciclo sigue acotado— y quien quiera el valor
+// viejo lo tiene en METHOD_MAX_STEP_REVISITS.
+const MAX_STEP_REVISITS = readPositiveInt(process.env.METHOD_MAX_STEP_REVISITS, 5);
 
 // ---- F3-T1.5 — Navegación DAG multi-skill-por-fase ----
 // El corpus real tiene varios workflows por fase (DAG inter-workflow). El routing
@@ -334,13 +368,48 @@ const resolveEntityProfile = async (db, key, projectUrl, { requireOverride = fal
   return Object.keys(profile).length ? profile : null;
 };
 
+// ---- El porqué de un bloqueo ----
+// Para que la parada lo diga en vez de obligar a abrir el panel. `report_blocker` deja el
+// mensaje en `agent_logs` contra la tarea que lo reportó, y la unidad guarda esa tarea en
+// `active_task_id`. Si no hay rastro —bloqueo puesto a mano con `update_backlog_item`, o
+// tarea ya borrada— devuelve null y el aviso se queda con el título, que siempre está.
+const MARCA_BLOQUEO = 'BLOCKER REPORTED:';
+
+// La primera unidad bloqueada de la épica, en el orden del plan, o null. El orden importa
+// porque es la que se nombra al parar: con varias bloqueadas, la del plan antes que la que
+// se bloqueó antes.
+const unidadBloqueada = (db, ctx) => db('backlog_items')
+  .where({ epic_id: ctx.epic_id })
+  .whereIn('status', BLOQUEANTES)
+  .whereNull('deleted_at')
+  .orderBy('priority', 'asc')
+  .orderBy('sort_order', 'asc')
+  .first();
+
+const motivoDelBloqueo = async (db, story) => {
+  if (!story.active_task_id) return null;
+  const fila = await db('agent_logs')
+    .where({ task_id: story.active_task_id, action_type: 'error' })
+    .where('message', 'like', `${MARCA_BLOQUEO}%`)
+    .orderBy('created_at', 'desc')
+    .first('message');
+  if (!fila) return null;
+  return fila.message.slice(MARCA_BLOQUEO.length).trim() || null;
+};
+
 // ---- Reparto multi-agente sin colisión (dev-story iterable) ----
-// Devuelve { story_id } reclamado para el caller, o null si no quedan libres.
+// Devuelve { story_id } reclamado para el caller, { blocked: <unidad> } si lo que hay
+// delante está bloqueado, o null si no quedan libres.
 // Idempotente: si el caller ya sostiene una story no-terminal, la devuelve sin rebarajar.
 const claimDevStory = async (db, ctx, caller, workflow, step) => {
   const cur = caller.cursor || null;
   if (cur && cur.story_id) {
     const held = await db('backlog_items').where({ id: cur.story_id }).first();
+    // Antes que la idempotencia: sostener una unidad bloqueada no es sostener trabajo, y
+    // devolverla aquí es lo que cerraba el ciclo sobre sí mismo. No se escribe nada —el
+    // puntero se deja como está— porque quien repone el bloqueo decide también si la
+    // unidad sigue siendo de este agente.
+    if (held && BLOQUEANTES.includes(held.status)) return { blocked: held };
     if (held && !TERMINAL_STATUSES.includes(held.status)) return { story_id: held.id };
   }
 
@@ -360,9 +429,14 @@ const claimDevStory = async (db, ctx, caller, workflow, step) => {
   // cinco todavia sin hacer. El agente verifico, se nego a fabricarlas de paso, reporto el
   // bloqueo dos veces y el freno de estancamiento paro el bucle. Ningun orden de trabajo
   // sobrevive a que el reparto lo decida un identificador aleatorio.
+  //
+  // Las bloqueadas tampoco entran. Si no se excluyeran, el ciclo se reabriría por la otra
+  // puerta: basta con que el puntero se suelte —arrendamiento caducado, o el propio
+  // camino de abajo— para que el reparto volviera a entregar la misma unidad bloqueada,
+  // esta vez como si fuera trabajo nuevo.
   const candidates = await db('backlog_items')
     .where({ epic_id: ctx.epic_id })
-    .whereNotIn('status', TERMINAL_STATUSES)
+    .whereNotIn('status', [...TERMINAL_STATUSES, ...BLOQUEANTES])
     .orderBy('priority', 'asc')
     .orderBy('sort_order', 'asc')
     .orderBy('created_at', 'asc')
@@ -408,6 +482,12 @@ const claimDevStory = async (db, ctx, caller, workflow, step) => {
         .where({ id: caller.id })
         .update({ step_status: 'idle', cursor: null, updated_at: db.fn.now() });
     }
+    // Si lo que queda son unidades bloqueadas, hay que decirlo. Sin esto el ciclo
+    // respondía `wait: sin unidades de trabajo libres`, que invita a esperar a que se
+    // libere algo que no se va a liberar solo: nadie va a soltar un bloqueo salvo una
+    // persona, y el que espera es un bucle desatendido que no puede ir a buscarla.
+    const bloqueada = await unidadBloqueada(db, ctx);
+    if (bloqueada) return { blocked: bloqueada };
     return null;
   }
 
@@ -520,7 +600,30 @@ const aptsNext = (db, { project_url, agent_name }) =>
       }
 
       if (step.iterable) {
-        const claim = await claimDevStory(trx, ctx, caller, workflow, step);
+        // Un bloqueo para el reparto ENTERO de la épica, no sólo al agente que lo sostiene.
+        // La alternativa —parar sólo a quien tiene la unidad en el puntero— hacía que la
+        // respuesta dependiera de QUIÉN pregunta: el mismo backlog daba `blocked` a un
+        // agente y trabajo a otro, y un bloqueo quedaba enterrado bajo horas de trabajo de
+        // un segundo conductor. Se mira antes de repartir, no después, para no fijar un
+        // claim que hay que soltar acto seguido.
+        const bloqueada = await unidadBloqueada(trx, ctx);
+        const claim = bloqueada ? null : await claimDevStory(trx, ctx, caller, workflow, step);
+        const parada = bloqueada || (claim && claim.blocked) || null;
+        if (parada) {
+          // `target_id` nombra la unidad parada —no null, como los demás bloqueos, que no
+          // tienen ninguna que señalar— para que la parada del conductor la escriba en su
+          // diario y quien lea el aviso sepa cuál reponer.
+          const motivo = await motivoDelBloqueo(trx, parada);
+          return {
+            next: 'blocked',
+            target_id: parada.id,
+            role,
+            why: `la unidad '${parada.title}' está bloqueada${motivo ? `: ${motivo}` : ''}`
+              + '. El método no reparte trabajo por encima de un bloqueo: reponela con '
+              + "update_backlog_item (status 'ready') o resolvé su tarea, y volvé a pedir apts_next",
+            args,
+          };
+        }
         if (!claim) {
           // Dos causas muy distintas daban el MISMO `wait`. Una es transitoria —las
           // historias existen y las sostiene otro agente, hay que esperar—; la otra es
