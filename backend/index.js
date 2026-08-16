@@ -2598,7 +2598,15 @@ const integrationArtifacts = {
     // la CLI registra las preguntas y no las respuestas, asi que desde fuera no se puede
     // afirmar que quedara sin contestar. Quien se quede en 1.10.0 sigue leyendo un
     // `agente_mudo` que no dice donde mirar.
-    artifactVersion: '1.11.0',
+    // 1.12.0: la corrida que agota `--max-iterations` lee el estado UNA vez mas antes de
+    // parar, y por eso deja de mentir. Antes afirmaba «sin llegar a done» sin preguntar:
+    // la ultima vuelta de trabajo acaba en cuanto el agente entrega, y quien puede decir si
+    // la unidad cerro es el motor, en la vuelta siguiente — que con el tope agotado no
+    // existia. Quien se quede en 1.11.0 seguira leyendo tres cosas distintas como si fueran
+    // 14: la unidad que cerro, el ciclo que termino (0) y el bloqueo declarado en la ultima
+    // vuelta (10), que es justo el codigo que existe para verlo. Ademas su tarea de
+    // ejecucion se soltaba en `review` habiendo con que cerrarla.
+    artifactVersion: '1.12.0',
     kind: 'loop_conductor',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -2652,7 +2660,11 @@ const integrationArtifacts = {
     // `opencode.json` y por eso el aplanado no alcanzaba—, por que se siembran en vez de
     // aplastarlos con un comodin, y que la parada por mudo nombra ahora las peticiones de
     // permiso que encuentre en la salida.
-    artifactVersion: '1.12.0',
+    // 1.13.0: documenta la vuelta de cierre —la lectura de mas que da el conductor cuando
+    // lo para el tope y no un veredicto del motor—, que con ella el 0 y el 10 dejan de
+    // salir como 14, y los campos con los que la parada por tope se puede consultar
+    // (`unidad_cerrada`, `backlog_done`, `backlog_total`, `cierre`).
+    artifactVersion: '1.13.0',
     kind: 'loop_conductor_manual',
     recommended: false,
     usagePriority: 'optional_entrypoint',

@@ -13,7 +13,7 @@ llego hasta aqui: eso esta en el historial de git.
 | Manifiesto | `GET /api/public/integrar`, `schema_version` 1.1.3 |
 | Guia para personas | `GET /api/public/integrar/guia`, HTML renderizado del manifiesto |
 | Runtimes soportados | Dos: Claude Code y opencode |
-| Artefactos publicados | 8; el conductor en `artifact_version` 1.11.0 y su README en 1.12.0, `adapter_generator` en 1.5.0, `loop_prompt_code_review` en 1.3.0, `agent_guidelines` y `surface_spec` en 1.1.1, `skill_markdown` y `skills_json` en 1.1.0 |
+| Artefactos publicados | 8; el conductor en `artifact_version` 1.12.0 y su README en 1.13.0, `adapter_generator` en 1.5.0, `loop_prompt_code_review` en 1.3.0, `agent_guidelines` y `surface_spec` en 1.1.1, `skill_markdown` y `skills_json` en 1.1.0 |
 | Descargas necesarias para **llamar** a las operaciones | Ninguna |
 | Descargas necesarias para **conducir** | El spec y el generador (agentes y comandos); el conductor y su README si se quiere el bucle desatendido, y su plantilla de revision si se quiere ademas la compuerta dentro de la sesion del agente |
 
@@ -1834,6 +1834,59 @@ las que ejercitan `report_blocker` por HTTP y piden servidor de prueba levantado
 que volver a bajarse nada y `schema_version` no se mueve. Lo unico que cambia para quien ya integra es
 que el ciclo empieza a contestar `blocked` donde antes contestaba `run_step`, que es lo que se
 pretendia.
+
+## Una corrida acotada decia que no habia llegado a done sin haberlo preguntado
+
+El conductor terminaba la ultima vuelta y paraba con `tope_iteraciones` (14) y el texto «se alcanzo el
+tope de N vueltas **sin llegar a done**». Nunca lo comprobaba. Una vuelta de trabajo acaba en cuanto el
+agente entrega, y quien puede decir si la unidad cerro es el motor, no el agente: dentro del bucle eso
+lo contesta la vuelta SIGUIENTE, al ver que el motor ya no apunta a esa historia. Con el tope agotado
+esa vuelta no existia, asi que la ultima frase de la corrida era una suposicion.
+
+Se vio en `tickets` el 2026-08-16, en la corrida que cerro US-AUTH-01: la unidad paso a `done` a las
+07:16:48Z y el conductor salio 14 **cincuenta segundos despues** diciendo que no. 48 minutos, 53 turnos,
+0,109 USD y tres pasadas mas de revision adversaria, reportados como si no hubieran llegado a nada.
+
+Lo caro no era el texto sino lo que tapaba. `--max-iterations 1` es la forma de lanzar una corrida de
+comprobacion, y con ese tope **todo** salia 14: la unidad que cerro, el ciclo que termino en la ultima
+vuelta —que es un 0— y el bloqueo declarado en la ultima vuelta —que es un 10, el codigo que se acababa
+de estrenar precisamente para verlo—. La frase de la seccion anterior, «el conductor ya tenia codigo
+propio para eso (10), asi que no hubo que tocarlo», era cierta en todas las vueltas menos en la ultima,
+que es justo donde ocurre. Y la tarea de ejecucion de la unidad se soltaba en `review` habiendo con que
+cerrarla.
+
+**Ahora hay una vuelta de cierre.** Cuando lo que para la corrida es el tope, el conductor da una vuelta
+mas que no trabaja: lee el estado una vez y enruta por el MISMO camino que las demas —`done` sale 0,
+`blocked` sale 10—. No lanza agente, no abre tarea y no gasta tokens; cuesta una llamada MCP de solo
+lectura. Si el tope es de verdad lo que paro la corrida sigue saliendo 14, pero el detalle dice si la
+ultima unidad cerro o sigue en marcha, y la parada lleva `unidad_cerrada`, `backlog_done` y
+`backlog_total` como campos: «¿cerro la unidad?» es la pregunta que se le hace al diario despues de cada
+corrida acotada, y una frase no se puede consultar. La tarea se cierra como `done` con la misma regla que
+ya usaba la vuelta siguiente —el motor dejo de apuntar a esa unidad—, no con el codigo de salida del
+agente.
+
+Se descarto **duplicar el enrutado** en un bloque posterior al bucle, que era lo mas corto de escribir:
+seria una segunda copia de las ramas `done`/`blocked` condenada a separarse de la primera, que es
+exactamente lo que el comentario de ese sitio ya advertia. Por eso la vuelta de cierre va DENTRO del
+bucle, con una bandera, y no despues. Se descarto tambien **sacar un codigo nuevo** para «tope alcanzado
+pero la unidad cerro»: 0 significa que el ciclo entero termino y cambiarlo haria que un supervisor
+leyera «no queda nada» sobre un backlog con 24 unidades vivas. El 14 sigue queriendo decir lo mismo que
+siempre —me paro el tope, relanza para seguir—, solo que ahora sin afirmar de propina algo que no sabia.
+
+Dos detalles que no se deducen. La vuelta de cierre **no cuenta como vuelta**: informa la ultima que si
+lo fue y se distingue por el campo `cierre`, porque un diario que nombra una vuelta 2 con el tope en 1
+hace contar un trabajo que no se hizo. Y el estancamiento **no se mide contra ella**: compara una vuelta
+con la anterior y entre las dos no ha corrido ningun agente, asi que «no cambio nada» seria verdad por
+construccion y el tope acabaria reportandose como 13.
+
+Comprobado con `backend/scripts/test_conductor_cierre_por_tope.js`, que levanta un APTS de mentira en un
+puerto efimero y lanza el conductor de verdad contra el con un agente falso: los cuatro finales se
+distinguen, la tarea se cierra en uno y se suelta en el otro, la vuelta de cierre no lanza un segundo
+agente y el tope con `--max-stalls 1` no se disfraza de estancamiento. Contra el conductor anterior la
+prueba cae con 16 fallos, que es lo que la hace valer.
+
+**Sube el conductor a 1.12.0 y su README a 1.13.0**, asi que quien conduzca tiene que volver a bajarse
+los dos; `schema_version` no se mueve y el resto de artefactos tampoco.
 
 ## Abierto
 

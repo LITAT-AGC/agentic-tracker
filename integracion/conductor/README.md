@@ -594,13 +594,43 @@ operador que puede colgarse.
 | 11 | `wait` — el motor pide otro rol (en modo secuencial es una anomalía) |
 | 12 | fuera de alcance — el paso recomendado no lo conduce este script |
 | 13 | estancado — la huella no cambió en N vueltas |
-| 14 | tope de iteraciones |
+| 14 | tope de iteraciones — el diario dice si la última unidad cerró |
 | 15 | detenido — alguien lo paró desde el panel |
 | 20 | el agente terminó con error en todos sus intentos |
 | 21 | la CLI del agente agotó su límite de uso |
 | 22 | el comando de `--agent-cmd` no se pudo ejecutar |
 | 23 | la CLI del agente rechazó sus credenciales |
 | 24 | el agente se quedó mudo y hubo que cortarlo (`--agent-silence`) |
+
+### La vuelta de cierre
+
+Cuando lo que para la corrida es el **tope** —y no un veredicto del motor— el conductor da
+una vuelta más que no trabaja: sólo lee el estado. No lanza agente, no abre tarea y no
+gasta tokens.
+
+Existe porque una vuelta de trabajo termina en cuanto el agente entrega, y **quien puede
+decir si la unidad cerró es el motor, no el agente**. Dentro del bucle eso lo contesta la
+vuelta siguiente, al ver que el motor ya no apunta a esa historia; con el tope agotado esa
+vuelta no existía y el conductor daba por hecho lo que no había preguntado.
+
+Lo que cambia para quien lee el resultado:
+
+- Si el ciclo terminó justo en la última vuelta, sale **0**, no 14.
+- Si la última vuelta dejó un **bloqueo**, sale **10**, no 14. Con `--max-iterations 1`
+  —la forma de lanzar una corrida de comprobación— antes no había manera de verlo.
+- Si el tope es de verdad lo que paró la corrida, sigue saliendo **14**, pero el `detalle`
+  dice si la última unidad cerró o sigue en marcha, y la parada lleva el campo
+  `unidad_cerrada` junto a `backlog_done` / `backlog_total`. Es un campo y no una frase
+  porque «¿cerró la unidad?» es la pregunta que se le hace al diario después de cada
+  corrida acotada, y una frase no se puede consultar.
+- La tarea de ejecución de esa unidad se cierra como `done` cuando el motor confirma que
+  cerró, en vez de quedarse suelta en `review`.
+
+La lectura de cierre va marcada en el diario con `cierre: true` y **no cuenta como
+vuelta**: informa la última que sí lo fue, para que nadie lea una vuelta que no se hizo.
+Tampoco se mide el estancamiento contra ella —entre la última vuelta de trabajo y ésta no
+ha corrido ningún agente, así que «no cambió nada» sería verdad por construcción y el tope
+acabaría reportándose como 13.
 
 No hay código nuevo para "falló incluso después de escalar": el motivo es el mismo y el
 detalle lleva la historia — `el agente falló en los 3 intentos (1: sonnet → código 1;

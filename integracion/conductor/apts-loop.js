@@ -2160,7 +2160,28 @@ const conducir = async (cfg, plantillaPrompt) => {
   let huellaPrevia = null;
   let estancadas = 0;
 
-  for (let iteracion = 1; iteracion <= cfg.maxIterations; iteracion += 1) {
+  // Una vuelta MÁS que el tope, y la de más no trabaja: sólo lee. Una vuelta de trabajo
+  // termina en cuanto el agente entrega, y quien puede decir si la unidad cerró es el
+  // motor, no el agente — dentro del bucle eso lo contesta la vuelta siguiente al dejar
+  // de apuntar a esa historia. Con el tope agotado esa vuelta no existía, así que el
+  // conductor afirmaba «sin llegar a done» sin haber preguntado, y se equivocaba justo
+  // cuando el trabajo había salido bien: el 2026-08-16, en "tickets", US-AUTH-01 cerró a
+  // las 07:16:48Z y la corrida salió 14 cincuenta segundos después diciendo que no.
+  //
+  // Lo que más dolía no era el texto sino lo que tapaba: con `--max-iterations 1` —la
+  // forma de lanzar una corrida de comprobación— un bloqueo declarado en la última vuelta
+  // también salía 14, de modo que el 10 recién estrenado no se veía nunca. Y la tarea de
+  // la unidad se soltaba en `review` habiendo con qué cerrarla.
+  //
+  // No lanza agente, no abre tarea y no gasta tokens: es una lectura, y va por el MISMO
+  // enrutado que las demás vueltas para que done/blocked no tengan aquí una segunda copia
+  // que se desincronice de la de arriba.
+  for (let iteracion = 1; iteracion <= cfg.maxIterations + 1; iteracion += 1) {
+    const cierre = iteracion > cfg.maxIterations;
+    // Al diario nunca se le dice una vuelta que no existe: la de cierre no es trabajo, así
+    // que lo que informa —y lo que informan las paradas que nazcan en ella— es la última
+    // vuelta que sí lo fue. Quien quiera distinguirla tiene el campo `cierre`.
+    const vueltaInformada = cierre ? cfg.maxIterations : iteracion;
     // `apts_status` es de sólo lectura: computa la misma recomendación que `apts_next`
     // pero dentro de una transacción que se rollbackea, así que el conductor NUNCA
     // reclama una story. El claim lo hace el agente cuando arranca — que es quien va a
@@ -2177,13 +2198,18 @@ const conducir = async (cfg, plantillaPrompt) => {
     const args_ = rec.args || {};
     const b = estado && estado.backlog ? estado.backlog : { done: 0, total: 0 };
 
-    log(`vuelta ${iteracion}: fase=${fase} next=${rec.next} backlog=${b.done}/${b.total} ${args_.workflow_key ? `wf=${args_.workflow_key}` : ''}`);
+    log(`${cierre ? 'vuelta de cierre' : `vuelta ${iteracion}`}: fase=${fase} next=${rec.next} backlog=${b.done}/${b.total} ${args_.workflow_key ? `wf=${args_.workflow_key}` : ''}`);
     registrar(cfg, {
-      evento: 'estado', iteracion, fase, next: rec.next, role: rec.role, target_id: rec.target_id, args: args_, backlog: b,
+      evento: 'estado', iteracion: vueltaInformada, fase, next: rec.next, role: rec.role, target_id: rec.target_id, args: args_, backlog: b,
+      ...(cierre ? { cierre: true } : {}),
     });
 
     const h = huella(estado);
-    if (h === huellaPrevia) {
+    // El estancamiento NO se mide en la vuelta de cierre. Compara una vuelta con la
+    // anterior, y entre la última de trabajo y ésta no ha corrido ningún agente: «no
+    // cambió nada» sería verdad por construcción y el tope acabaría reportándose con un
+    // motivo prestado —13 en vez de 14— justo en la corrida que salió bien.
+    if (!cierre && h === huellaPrevia) {
       estancadas += 1;
       log(`nada cambió respecto de la vuelta anterior (${estancadas}/${cfg.maxStalls})`);
       if (estancadas >= cfg.maxStalls) {
@@ -2196,7 +2222,7 @@ const conducir = async (cfg, plantillaPrompt) => {
           iteracion,
         });
       }
-    } else {
+    } else if (!cierre) {
       estancadas = 0;
       huellaPrevia = h;
     }
@@ -2213,12 +2239,49 @@ const conducir = async (cfg, plantillaPrompt) => {
       if (confirmado.next !== 'done') {
         log(`aviso: apts_status dijo done pero apts_next devolvió '${confirmado.next}' (${confirmado.why || ''})`);
       }
-      registrar(cfg, { evento: 'cierre', iteracion, confirmado: confirmado.next });
-      await parar(cfg, { motivo: 'done', detalle: rec.why || 'lifecycle completo', codigo: SALIDA.done, fase, iteracion });
+      registrar(cfg, { evento: 'cierre', iteracion: vueltaInformada, confirmado: confirmado.next });
+      await parar(cfg, { motivo: 'done', detalle: rec.why || 'lifecycle completo', codigo: SALIDA.done, fase, iteracion: vueltaInformada });
     }
     if (rec.next === 'blocked') {
-      await parar(cfg, { motivo: 'blocked', detalle: rec.why || 'bloqueado', codigo: SALIDA.blocked, fase, iteracion });
+      await parar(cfg, {
+        motivo: 'blocked', detalle: rec.why || 'bloqueado', codigo: SALIDA.blocked, fase, iteracion: vueltaInformada,
+        // El bloqueo declarado en la ÚLTIMA vuelta sólo se ve desde la de cierre, y quien
+        // lea el diario tiene que poder saber cuál de las dos lo trajo.
+        ...(cierre ? { extra: { cierre: true } } : {}),
+      });
     }
+
+    // La vuelta de cierre acaba aquí: `done` y `blocked` ya se han enrutado arriba con su
+    // código de siempre, y lo que quede —`run_step` sobre otra unidad, `wait` sobre el
+    // paso siguiente— no es un veredicto sobre esta corrida sino sobre la que no se va a
+    // hacer. Quien la paró fue el tope, y eso es lo que se reporta.
+    if (cierre) {
+      // Misma regla que usa la vuelta siguiente para cerrar la tarea de la anterior: si
+      // el motor ya no apunta a esa unidad, cerró. Un bloqueo no llega hasta aquí, y otro
+      // agente no puede habérsela llevado porque el conductor es de un solo agente.
+      const ultima = tareaActual ? tareaActual.story_id : null;
+      const cerrada = Boolean(ultima) && rec.target_id !== ultima;
+      if (cerrada) {
+        await cerrarTarea(cfg, 'done', `el motor ya no apunta a ${ultima}: la unidad quedó cerrada`);
+      }
+      const vueltas = `${cfg.maxIterations} vuelta${cfg.maxIterations > 1 ? 's' : ''}`;
+      await parar(cfg, {
+        motivo: 'tope_iteraciones',
+        detalle: `se alcanzó el tope de ${vueltas}`
+          + (ultima
+            ? `; la última unidad (${ultima}) ${cerrada ? 'cerró' : 'sigue en marcha'}`
+            : '')
+          + `. Quedan ${b.remaining == null ? b.total - b.done : b.remaining} de ${b.total}: relanza para seguir.`,
+        codigo: SALIDA.tope_iteraciones,
+        fase,
+        storyId: ultima,
+        iteracion: cfg.maxIterations,
+        // Campos y no prosa: «¿cerró la unidad?» es la pregunta que se le hace al diario
+        // después de cada corrida acotada, y una frase no se puede consultar.
+        extra: { unidad_cerrada: cerrada, backlog_done: b.done, backlog_total: b.total },
+      });
+    }
+
     if (rec.next === 'wait') {
       // Secuencial y un solo agente: aquí `wait` no es "espera a otro", es una anomalía.
       // Casi siempre significa que este agent_name no está registrado con el rol que el
@@ -2445,9 +2508,12 @@ const conducir = async (cfg, plantillaPrompt) => {
       + `${acumulado ? ` · acumulado ${acumulado}` : ''}`);
   }
 
+  // Inalcanzable por construcción: la vuelta de cierre siempre para. Se deja como red
+  // porque salir de esta función sin parar terminaría el proceso con 0 en silencio, que
+  // es el peor final posible: una corrida que no llegó a ninguna parte diciendo que sí.
   await parar(cfg, {
     motivo: 'tope_iteraciones',
-    detalle: `se alcanzó el tope de ${cfg.maxIterations} vueltas sin llegar a done`,
+    detalle: `se alcanzó el tope de ${cfg.maxIterations} vueltas y la vuelta de cierre no llegó a leer el estado`,
     codigo: SALIDA.tope_iteraciones,
     iteracion: cfg.maxIterations,
   });

@@ -245,7 +245,7 @@ real)—. Un hallazgo solo cuenta si trae `archivo:linea` y un escenario de fall
 
 #### El tope de saltos
 
-Los saltos **hacia atras** estan topados en 3 por unidad (`METHOD_MAX_STEP_REVISITS`). Solo
+Los saltos **hacia atras** estan topados en 5 por unidad (`METHOD_MAX_STEP_REVISITS`). Solo
 se cobran los retrogrados: todo ciclo contiene al menos una arista hacia atras, asi que
 acotarlas acota el grafo entero y los saltos hacia adelante no gastan presupuesto.
 
@@ -255,9 +255,15 @@ vigilancia externa. Sin tope, un agente que no consigue arreglar algo puede qued
 8->5->8->5 hasta agotar su contexto sin producir nada. Por eso el contador vive en el
 servidor, en `project_state.cursor.visits`.
 
-Cuatro pasadas por el paso 8 gastan tres saltos. La quinta se degrada a `HALT`, y entonces
+Seis pasadas por el paso 8 gastan cinco saltos. La septima se degrada a `HALT`, y entonces
 el agente debe reportar bloqueo: cerrar la story a la fuerza, o corregir en silencio para
 esquivar el tope, esta explicitamente prohibido.
+
+Valia 3 hasta el 2026-08-16. Se subio porque el 3 lo agoto una unidad que estaba
+CONVERGIENDO, no girando: cuatro pasadas de revision adversaria de tres capas, cada una con
+defectos reales de seguridad y todos corregidos. Con tres lentes buscando en paralelo, tres
+reintentos se gastan antes de que se agote el hallazgo. Se subio el defecto, no se quito el
+tope: el ciclo sigue acotado.
 
 El presupuesto **se limpia al soltar el claim**, no solo al cerrar el workflow. Ese es el
 camino de desatasco cuando el tope se agota con rondas productivas:
