@@ -2121,6 +2121,52 @@ el manifiesto sirve el conductor en 1.15.0 y su README en 1.16.0, la descarga co
 repositorio y el patron nuevo esta dentro del archivo que se bajo a `tickets`. Seis comprobaciones
 del desplegador en verde, sin aviso de `/mcp`, y un solo reinicio del backend (43 contra 42).
 
+## El panel borraba descripciones sin decirlo, y creaba backlog que el motor no ve
+
+Dos defectos con una sola causa: **el panel leia de la vista `compact` campos que esa vista no manda.**
+No falla ruidosamente, porque una columna que el `select` no trajo no da error: da `undefined`.
+
+**Borraba los textos largos.** `compact` sustituye `description` y `acceptance_criteria` por las
+banderas `has_*` y un extracto. El editor se llenaba con la fila del listado, y su guardado manda
+siempre los dos campos: `undefined || null` es `null`. Abrir el editor de un item con descripcion y
+pulsar Guardar la borraba, con respuesta **200** y sin nada que mirar despues. Se repara pudiendo leer
+UN item completo (`GET /dashboard/backlog/:id`), y con una regla en la vista: si esa lectura falla el
+editor **no se abre**. Un editor a medio llenar es exactamente la trampa que causo la perdida, porque
+los campos vacios se leen como «este item no tenia nada escrito». Se descarto un `?view=full` en el
+listado: los textos largos se leen al abrir un editor, y meterlos en la lista los traeria los
+veintiseis para mostrar uno.
+
+**Y creaba huerfanos.** El motor cuenta y reparte por `epic_id`, y todo lo que nace por el panel o por
+`create_backlog_item` nace sin epica. Un item creado desde el panel aparecia en la lista y el conductor
+no lo iba a tomar nunca, sin un solo aviso. Es el sintoma del 2026-08-14 —`total: 0` con 21 items— por
+una via que entonces no existia: el 2026-08-17, en "tickets", 26 items en la base y el conductor
+diciendo 25.
+
+**No se adopta automaticamente al crear**, y no es un olvido. El backlog del proyecto y el plan de la
+iniciativa activa son cosas distintas a proposito —el barrido de `adopt_backlog_items` deja los bugs
+fuera por eso mismo, para no arrastrar el triaje a un plan BMAD—. Lo que faltaba no era automatismo,
+era **poder verlo** (`has_epic` en compact, con el aviso «fuera del plan» pegado al titulo) y **poder
+decidirlo** desde donde se ve el backlog: la operacion existia pero solo por credencial de agente, asi
+que la unica superficie donde una persona ve el backlog era la unica desde la que no podia repararlo.
+La ruta nueva es un forward fino; el orden y la normalizacion de estado los sigue poniendo
+`method_bootstrap`, que ya trataba el `sort_order` con el cuidado que se pago en PROD el 2026-08-08.
+
+`has_epic` es un booleano y no `epic_id` porque la pregunta es de si o no y el uuid cuesta 36
+caracteres por item en la vista que existe para no gastarlos.
+
+**Un tercero, de la misma especie, salio de mirar la lista del `select`:** `code_ref` se emite en
+compact a proposito —«que commit cerro esta historia» es una linea— pero no estaba en las columnas
+que se leen, asi que salia **null desde siempre**. Y `has_epic` nacio con ese mismo fallo: lo cazo su
+propia prueba en la primera corrida. De ahi la regla que queda escrita junto a la lista: un campo de
+la proyeccion que no este en el `select` no avisa, se queda en null o false para siempre.
+
+Lo fija `test_dashboard_backlog_epic_scope.js`: 18 comprobaciones sobre las rutas HTTP con sesion de
+panel, de las que **14 fallan contra el codigo viejo** —las 4 que pasan son las que documentan lo que
+ya era correcto—. Va por HTTP y no por debajo porque lo que se rompio eran rutas y una sesion, no una
+funcion.
+
+Esto **no esta desplegado todavia**.
+
 ## Abierto
 
 **El camino de Cloudflare no se ha visto devolver un vector.** El `CLOUDFLARE_API_TOKEN` del `.env`

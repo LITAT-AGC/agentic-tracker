@@ -309,8 +309,25 @@
                 <template #body="{ data }">
                   <div>
                     <p class="font-medium text-surface-700">{{ data.title }}</p>
-                    <p v-if="data.description" class="text-xs text-surface-500 truncate max-w-[260px]" :title="data.description">
-                      {{ data.description }}
+                    <!--
+                      `has_epic` en false = el item esta en el backlog del proyecto pero no
+                      cuelga de la epica de la iniciativa activa, y el motor cuenta y
+                      reparte POR EPICA: el conductor no lo va a tomar nunca. El aviso va
+                      pegado al titulo porque el sitio donde se crean los items es el mismo
+                      donde hay que poder ver que crearlos no basta.
+                    -->
+                    <span
+                      v-if="data.has_epic === false"
+                      class="inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider bg-amber-100 text-amber-800"
+                      title="Está en el backlog del proyecto pero no en la épica de la iniciativa activa: el conductor no lo va a tomar. Usá «Adoptar» para meterlo en el plan."
+                    >fuera del plan</span>
+                    <!--
+                      `text_excerpt` y no `description`: en vista compact la descripcion no
+                      viaja, asi que este parrafo no se pintaba nunca. El extracto existe
+                      justamente para esto.
+                    -->
+                    <p v-if="data.text_excerpt" class="text-xs text-surface-500 truncate max-w-[260px]" :title="data.text_excerpt">
+                      {{ data.text_excerpt }}
                     </p>
                   </div>
                 </template>
@@ -385,8 +402,18 @@
                       size="small"
                     />
                     <Button
+                      v-if="data.has_epic === false"
+                      @click="adoptBacklogItem(data)"
+                      :disabled="adoptingBacklogId === data.id"
+                      :label="adoptingBacklogId === data.id ? 'Adoptando...' : 'Adoptar'"
+                      icon="pi pi-sign-in"
+                      severity="warn"
+                      size="small"
+                    />
+                    <Button
                       @click="openBacklogEditor(data)"
-                      label="Editar"
+                      :disabled="openingBacklogId === data.id"
+                      :label="openingBacklogId === data.id ? 'Abriendo...' : 'Editar'"
                       icon="pi pi-pencil"
                       severity="secondary"
                       size="small"
@@ -1373,6 +1400,8 @@ const isSavingBacklog = ref(false);
 const isAnalyzingBacklog = ref(false);
 const analyzingBacklogId = ref(null);
 const deletingBacklogId = ref(null);
+const openingBacklogId = ref(null);
+const adoptingBacklogId = ref(null);
 const editingBacklog = ref(null);
 const showEditBacklogDialog = ref(false);
 const backlogDialogMode = ref('edit');
@@ -2270,15 +2299,72 @@ const openBacklogCreator = () => {
   backlogError.value = null;
 };
 
-const openBacklogEditor = (item) => {
-  editingBacklog.value = {
-    ...item,
-    priority: Number.parseInt(item.priority, 10),
-    sort_order: Number.parseInt(item.sort_order, 10)
-  };
-  backlogDialogMode.value = 'edit';
-  showEditBacklogDialog.value = true;
+// La fila del listado NO sirve para llenar el editor. El listado viaja en vista
+// `compact`, que sustituye `description` y `acceptance_criteria` por las banderas `has_*`
+// y un extracto, asi que esos dos campos llegan como `undefined`; el guardado manda
+// siempre los dos, y `undefined || null` es `null`. Resultado: abrir el editor de un item
+// con descripcion y pulsar Guardar la borraba, sin error y con respuesta 200. Se perdio
+// asi el 2026-08-17.
+//
+// Por eso se pide el item completo ANTES de abrir, y si esa lectura falla no se abre
+// nada: un editor a medio llenar es justo la trampa que causo la perdida, porque los
+// campos vacios se leen como «este item no tenia nada escrito».
+const openBacklogEditor = async (item) => {
+  if (!item?.id) return;
+
+  openingBacklogId.value = item.id;
   backlogError.value = null;
+
+  try {
+    const { data } = await apiFetchJson(`/dashboard/backlog/${item.id}`, {
+      credentials: 'include'
+    }, 'No se pudo leer el backlog item.');
+    const full = data.backlog_item;
+
+    editingBacklog.value = {
+      ...full,
+      description: full.description ?? '',
+      acceptance_criteria: full.acceptance_criteria ?? '',
+      priority: Number.parseInt(full.priority, 10),
+      sort_order: Number.parseInt(full.sort_order, 10)
+    };
+    backlogDialogMode.value = 'edit';
+    showEditBacklogDialog.value = true;
+  } catch (error) {
+    backlogError.value = getApiErrorMessage(
+      error,
+      'No se pudo leer el backlog item, asi que no se abre el editor: guardar sobre lo que no se pudo leer borraria la descripcion y los criterios.'
+    );
+    console.error('Failed to load backlog item for editing', error);
+  } finally {
+    openingBacklogId.value = null;
+  }
+};
+
+// Mete el item en la epica de la iniciativa activa. Forward fino a la operacion del
+// motor: el orden y la normalizacion de estado los pone ella, no esta vista.
+const adoptBacklogItem = async (item) => {
+  if (!item?.id || !selectedProject.value?.url) return;
+
+  adoptingBacklogId.value = item.id;
+  backlogError.value = null;
+
+  try {
+    const encodedUrl = encodeURIComponent(selectedProject.value.url);
+    await apiFetchJson(`/dashboard/projects/${encodedUrl}/backlog/adopt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ backlog_item_ids: [item.id] })
+    }, 'No se pudo adoptar el backlog item.');
+
+    await fetchProjectDetails(selectedProject.value.url);
+  } catch (error) {
+    backlogError.value = getApiErrorMessage(error, 'No se pudo adoptar el backlog item.');
+    console.error('Failed to adopt backlog item', error);
+  } finally {
+    adoptingBacklogId.value = null;
+  }
 };
 
 const cancelBacklogEdit = () => {

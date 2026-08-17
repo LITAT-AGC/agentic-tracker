@@ -332,6 +332,15 @@ const BACKLOG_COMPACT_SELECT_COLUMNS = [
   'source_kind',
   'source_ref',
   'active_task_id',
+  // Estas dos se LEEN aqui y no salen tal cual: `epic_id` se emite como el booleano
+  // `has_epic`, y `code_ref` sale como esta. Van en la lista porque la proyeccion de
+  // `mapBacklogItemRecord` solo puede mirar lo que el select trajo, y esa desincronizacion
+  // no se nota: la columna ausente no da error, da `undefined`, y el campo sale null o
+  // false para siempre. `code_ref` llevaba asi desde que se le puso el comentario que dice
+  // que viaja en compact —siempre null—, y `has_epic` nacio con el mismo fallo el
+  // 2026-08-17; lo cazo su propia prueba.
+  'epic_id',
+  'code_ref',
   'llm_analysis_summary',
   'llm_confidence',
   'llm_recommendation_status',
@@ -1302,6 +1311,15 @@ const mapBacklogItemRecord = (item, { view = DEFAULT_RESPONSE_VIEW } = {}) => {
       has_description: Boolean(description),
       has_acceptance_criteria: Boolean(acceptanceCriteria),
       has_llm_analysis: Boolean(analysisSummary),
+      // Un booleano y no `epic_id` porque la pregunta que hay que poder contestar es de
+      // si o no —«¿esto lo va a ver el motor?»— y el uuid cuesta 36 caracteres por item
+      // en la vista que existe justamente para no gastarlos. Viaja en compact porque sin
+      // el NADA de lo que se lee del backlog distingue un item que el bucle va a conducir
+      // de uno invisible para el motor: `apts_status` cuenta por `epic_id`, y todo lo que
+      // nace por `create_backlog_item` o por el panel nace sin epica. Se pago el
+      // 2026-08-17: un backlog de 26 items, el conductor diciendo 25, y ni un aviso en
+      // ninguna de las dos superficies.
+      has_epic: Boolean(item.epic_id),
       llm_confidence: toNumberOrNull(item.llm_confidence),
       llm_recommendation_status: item.llm_recommendation_status || null
     };
@@ -7023,6 +7041,30 @@ app.post('/api/dashboard/projects/:url/semantic/backlog/search', requireAuth, as
   }
 });
 
+// Adoptar desde el panel. La operacion ya existia, pero SOLO por credencial de agente
+// (`POST /api/projects/backlog/adopt`), asi que la unica superficie donde una persona ve
+// el backlog era la unica desde la que no podia repararlo: crear un item aqui lo dejaba
+// fuera de la epica, y salir de ahi pedia una llamada MCP a mano.
+//
+// No se adopta automaticamente al crear, y no es un olvido: el backlog del proyecto y el
+// plan de la iniciativa activa son cosas distintas a proposito —el barrido de
+// `adopt_backlog_items` deja los bugs fuera por eso mismo, para no arrastrar el triaje a
+// un plan BMAD—. Lo que faltaba no era automatismo, era poder verlo (`has_epic`) y poder
+// decidirlo. Forward fino: la validacion y el orden los sigue poniendo method_bootstrap.
+app.post('/api/dashboard/projects/:url/backlog/adopt', requireAuth, async (req, res) => {
+  try {
+    const url = normalizeUrl(decodeURIComponent(req.params.url));
+    const input = parseAdoptBacklogItemsInput({ ...req.body, project_url: url });
+    return res.json(await adoptBacklogItems(db, input));
+  } catch (error) {
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to adopt backlog items',
+      logMessage: 'Dashboard backlog adoption failed',
+      logContext: { project_url: req.params.url }
+    });
+  }
+});
+
 app.post('/api/dashboard/projects/:url/backlog', requireAuth, async (req, res) => {
   try {
     const url = normalizeUrl(decodeURIComponent(req.params.url));
@@ -7036,6 +7078,28 @@ app.post('/api/dashboard/projects/:url/backlog', requireAuth, async (req, res) =
       fallbackMessage: 'Failed to create backlog item',
       logMessage: 'Dashboard backlog creation failed',
       logContext: { project_url: req.params.url }
+    });
+  }
+});
+
+// El editor del panel NO puede llenarse con la fila del listado. Ese listado viaja en
+// vista `compact`, que sustituye `description` y `acceptance_criteria` por las banderas
+// `has_*` y un extracto, asi que la fila no trae los textos. Sin esta ruta el panel abria
+// el editor con los dos campos vacios y su guardado —que manda siempre los dos— los
+// borraba. Se perdio asi el 2026-08-17 y no dejaba rastro que mirar: el PATCH era valido,
+// la respuesta 200, y el item se quedaba sin descripcion ni criterios.
+//
+// Es una ruta por item y no un `?view=full` en el listado a proposito: los textos largos
+// se leen al abrir UN editor, y ponerlos en la lista los traeria los veintiseis para
+// mostrar uno.
+app.get('/api/dashboard/backlog/:id', requireAuth, async (req, res) => {
+  try {
+    return res.json(await getBacklogItemInternal(req.params.id, { view: 'full', includeDeleted: false }));
+  } catch (error) {
+    return sendApiError(res, error, {
+      fallbackMessage: 'Failed to load backlog item',
+      logMessage: 'Dashboard backlog item read failed',
+      logContext: { backlog_item_id: req.params.id }
     });
   }
 });
