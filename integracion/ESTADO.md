@@ -162,8 +162,8 @@ opencode no: el mismo manejador que descarta los permisos de las sesiones hijas 
 sus `message.part.updated` y sus `session.error`, y en formato JSON una herramienta solo se emite
 cuando ya termino —el estado `running` esta explicitamente detras de `format !== "json"`—. El
 stream del padre calla durante **toda** herramienta larga aunque el proceso este a pleno: una
-revision adversaria en subagentes calla de principio a fin, y una suite de veinticinco minutos
-tambien. Con esa premisa, arreglar el cuelgue habria empezado a matar corridas sanas.
+revision adversaria en subagentes calla de principio a fin, y una suite de tests tambien mientras
+corre. Con esa premisa, arreglar el cuelgue habria empezado a matar corridas sanas.
 
 Por eso la linea publicada de opencode gana `--print-logs`, que no esta para leerlo: manda el
 registro de la CLI a stderr, que es un flujo que el vigilante ya cuenta, y convierte «el stream
@@ -174,6 +174,17 @@ prosa salta el registro estructurado (`timestamp=… level=INFO`) salvo `level=E
 una CLI escribe su fallo fatal. Sin eso, la pista de cada parada habria pasado a ser
 «message=loop session.id=ses_…» y el arreglo de esa misma mañana quedaba devuelto por el de al
 lado.
+
+**Lo que el corte por silencio NO alcanza (abierto).** Medido el 2026-08-17 en un cliente: el
+freno mata el arbol de procesos del agente, pero no lo que ese arbol lanzo por una TUBERIA DE
+SHELL. Un agente que arranca la suite del proyecto y se queda mudo se lleva el corte, y el
+proceso de tests le sobrevive: quedaron seis huerfanos de dos corridas, matados a mano, cada uno
+reteniendo los puertos y las conexiones que la corrida siguiente necesita. El sintoma es la
+corrida que sale con codigo 24 y la siguiente que falla por un puerto ocupado sin nadie a la
+vista. Se buscan con `Get-CimInstance Win32_Process -Filter "Name='node.exe'"` filtrando por su
+`CommandLine`. Subir `--agent-silence` no arregla nada de esto —se probo con 20 y con 40 minutos,
+las dos corridas salieron con 24—: un freno mayor no cura un cuelgue infinito, solo tarda mas en
+declararlo.
 
 **Y la plantilla se corrige en vez de conservarse.** La 1.2.0 recomendaba la via secuencial bajo
 opencode nombrando el caso; se escribio sobre un diagnostico equivocado y no protegia de nada.
