@@ -2165,7 +2165,16 @@ panel, de las que **14 fallan contra el codigo viejo** —las 4 que pasan son la
 ya era correcto—. Va por HTTP y no por debajo porque lo que se rompio eran rutas y una sesion, no una
 funcion.
 
-Esto **no esta desplegado todavia**.
+Esto entro en **produccion** con `27ba293` el 2026-08-17, **sin migraciones** —siguen siendo 23, asi
+que no hubo copia de la base— y con el frontend recompilado en el mismo viaje. No se toco ningun
+artefacto, asi que el manifiesto publico sigue anunciando lo mismo y ningun cliente tiene que bajarse
+nada. Verificado contra la superficie publica y no contra el disco: la ruta nueva responde **401** en
+vez de 404 —existe y pide sesion— y el `ProjectDetails` que sirve nginx trae los cinco marcadores del
+cambio (`fuera del plan`, `Adoptar`, `dashboard/backlog/`, `has_epic`, `text_excerpt`).
+
+Del despliegue salio ademas una nota que no es de este arreglo: **el aviso de `/mcp` ya no aparece**.
+nginx contesta esa ruta por el backend, asi que la superficie MCP publica es alcanzable y deja de ser
+lo que impedia a un cliente externo usarla.
 
 ## Abierto
 
