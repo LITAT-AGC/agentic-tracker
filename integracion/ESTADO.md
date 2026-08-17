@@ -13,7 +13,7 @@ llego hasta aqui: eso esta en el historial de git.
 | Manifiesto | `GET /api/public/integrar`, `schema_version` 1.1.3 |
 | Guia para personas | `GET /api/public/integrar/guia`, HTML renderizado del manifiesto |
 | Runtimes soportados | Dos: Claude Code y opencode |
-| Artefactos publicados | 10; el conductor en `artifact_version` 1.15.0 y su README en 1.18.0, los dos supervisores (`.ps1` y `.sh`) en 1.0.0, `adapter_generator` en 1.6.0, `loop_prompt_code_review` en 1.5.0, `surface_spec` en 1.2.0, `agent_guidelines` y `skill_markdown` en 1.1.1, `skills_json` en 1.1.0 |
+| Artefactos publicados | 10; el conductor en `artifact_version` 1.15.0 y su README en 1.19.0, los dos supervisores (`.ps1` y `.sh`) en 1.0.0, `adapter_generator` en 1.7.0, `loop_prompt_code_review` en 1.5.0, `surface_spec` en 1.2.0, `agent_guidelines` y `skill_markdown` en 1.1.1, `skills_json` en 1.1.0 |
 | Descargas necesarias para **llamar** a las operaciones | Ninguna |
 | Descargas necesarias para **conducir** | El spec y el generador (agentes y comandos); el conductor y su README si se quiere el bucle desatendido, y su plantilla de revision si se quiere ademas la compuerta dentro de la sesion del agente |
 
@@ -2220,20 +2220,36 @@ traduce al `reasoning_effort` del proveedor—. **El spec no trae valores a prop
 existen depende del modelo de cada cliente, y fijar aqui un "high" le rompe la configuracion a quien
 conduzca con otro. Es la fontaneria; el valor lo pone el operador en su repositorio.
 
-Las tres van sin `edit` y con `mcpSurface: false`, forma nueva del spec: sin ella una capa hereda
-las 23 operaciones APTS y puede cerrar con `submit_step` la misma unidad que esta revisando, que es
-una puerta trasera justo al lado de la compuerta. Solo se puede cumplir en Claude Code, donde
-`tools:` es lista exclusiva; en opencode el mapa es aditivo y la barrera es la que la capa lleva
-escrita en su cuerpo. Por eso este spec **pide** el generador 1.6.0: uno anterior ignora el campo y
-emite las capas con la superficie entera puesta, que es peor que no emitirlas.
+Las tres van sin permiso de escritura y con `mcpSurface: false`, forma nueva del spec: sin ella una
+capa hereda las 23 operaciones APTS y puede cerrar con `submit_step` la misma unidad que esta
+revisando, que es una puerta trasera justo al lado de la compuerta. Por eso este spec **pide** el
+generador 1.6.0 o superior: uno anterior ignora el campo y emite las capas con la superficie entera
+puesta, que es peor que no emitirlas.
 
-Esto entro en **produccion** con `487508c` el 2026-08-17, **sin migraciones** —siguen siendo 23, asi
+Y de ahi salio una segunda grieta, esta vieja. Los dos runtimes leian la lista `tools:` al reves:
+en Claude Code es **cerrada** —el agente tiene solo lo que aparece— y en opencode era **de
+encendido** —lo nombrado se activa, lo omitido se queda habilitado—. Asi que un agente que el spec
+declara de solo lectura podia editar archivos en opencode y no en Claude. `apts-bugfix-intake`
+llevaba asi desde el principio y las tres capas heredaron lo mismo. Lo unico que las frenaba era una
+frase escrita en su propio texto de instrucciones: eso es una **instruccion**, que la cumple el
+modelo porque la lee, y no un **permiso**, que lo impone el runtime. Para una capa de revision la
+diferencia es el sentido de la compuerta: si arregla por su cuenta, el arreglo entra sin triage, sin
+contar como revisita y sin quedar escrito en el documento. `adapter_generator` 1.7.0 emite el
+vocabulario entero con su valor, `false` incluido, y se comprobo con `opencode debug agent` sobre el
+cliente real: `edit`, `write` y `task` salen apagados. Siguen encendidas las que el vocabulario
+neutral no nombra —`webfetch`, `todowrite`, `skill`—, y las herramientas MCP no viven en ese mapa
+—ni aparecen en `opencode debug agent`—, asi que `mcpSurface` se sigue cumpliendo solo en Claude
+Code.
+
+Esto entro en **produccion** en dos viajes el 2026-08-17 —`487508c` la compuerta y las capas,
+`747e873` la exclusividad de `tools:` en opencode—, **sin migraciones** —siguen siendo 23, asi
 que no hubo copia de la base—. Verificado contra la superficie publica: el manifiesto anuncia los
-diez artefactos con `surface_spec` 1.2.0, `adapter_generator` 1.6.0, `loop_prompt_code_review` 1.5.0,
-`loop_conductor_readme` 1.18.0 y `skill_markdown` 1.1.1; el spec servido trae las tres capas con
+diez artefactos con `surface_spec` 1.2.0, `adapter_generator` 1.7.0, `loop_prompt_code_review` 1.5.0,
+`loop_conductor_readme` 1.19.0 y `skill_markdown` 1.1.1; el spec servido trae las tres capas con
 `mcpSurface: false` y la plantilla servida las tres reglas nuevas. En local, el generador es
 idempotente (30 archivos, 7 agentes), las capas salen con `tools: Read, Glob, Grep, Bash` y cero
-`mcp__apts__*` mientras los otros cuatro conservan sus 23, y `test_adapters_unattended`,
+`mcp__apts__*` mientras los otros cuatro conservan sus 23, y en opencode `edit`, `write` y `task`
+salen apagados, y `test_adapters_unattended`,
 `test_integration_guide` y `test_loop_conductor_invocations` en verde.
 
 Aplicado ademas al cliente "tickets", que es donde se midio el problema: adaptador regenerado con el
