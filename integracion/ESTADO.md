@@ -175,6 +175,22 @@ una CLI escribe su fallo fatal. Sin eso, la pista de cada parada habria pasado a
 «message=loop session.id=ses_…» y el arreglo de esa misma mañana quedaba devuelto por el de al
 lado.
 
+**El esfuerzo por agente no llega bajo opencode (abierto).** El spec deja `model`/`effort` sin
+rellenar en las tres capas de revision a proposito, para que cada cliente ponga los suyos. Medido el
+2026-08-17 con `deepseek-v4-pro` —modelo con variantes demostradas, hay decenas de sesiones suyas en
+`high`—, lo que el cliente configura no se aplica: `variant: "high"` en su `opencode.json` para el
+agente `build` sale `default`, y en el archivo de una capa de revision sale `default` tambien. Tres
+sesiones identicas salvo la bandera lo aislan: solo `opencode run --variant high` persiste `high`.
+Las sesiones que aparecen en `high` sin pedirlo son las INTERACTIVAS y sus subagentes, que heredan el
+modelo entero de la sesion padre; una corrida del conductor no tiene padre del que heredar.
+
+Dos consecuencias. La primera es que `opencode debug agent` **no sirve para comprobar esto**: informa
+de lo configurado, y devolvia `high` en los dos casos que luego salieron en `default`; la
+comprobacion honesta es mirar lo que persiste la base de opencode. La segunda es de diseño: la
+bandera vale para toda la sesion y los subagentes heredan, asi que «esta capa en alto y esta otra no»
+no es expresable por ahi. Si el conductor gana `--variant`, gana un esfuerzo por CORRIDA, no por
+agente, y eso es una promesa distinta de la que hoy hace el spec.
+
 **Lo que el corte por silencio NO alcanza (abierto).** Medido el 2026-08-17 en un cliente: el
 freno mata el arbol de procesos del agente, pero no lo que ese arbol lanzo por una TUBERIA DE
 SHELL. Un agente que arranca la suite del proyecto y se queda mudo se lleva el corte, y el
