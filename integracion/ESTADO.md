@@ -13,7 +13,7 @@ llego hasta aqui: eso esta en el historial de git.
 | Manifiesto | `GET /api/public/integrar`, `schema_version` 1.1.3 |
 | Guia para personas | `GET /api/public/integrar/guia`, HTML renderizado del manifiesto |
 | Runtimes soportados | Dos: Claude Code y opencode |
-| Artefactos publicados | 10; el conductor en `artifact_version` 1.15.0 y su README en 1.16.0, los dos supervisores (`.ps1` y `.sh`) en 1.0.0, `adapter_generator` en 1.5.0, `loop_prompt_code_review` en 1.3.0, `agent_guidelines` y `surface_spec` en 1.1.1, `skill_markdown` y `skills_json` en 1.1.0 |
+| Artefactos publicados | 10; el conductor en `artifact_version` 1.15.0 y su README en 1.18.0, los dos supervisores (`.ps1` y `.sh`) en 1.0.0, `adapter_generator` en 1.6.0, `loop_prompt_code_review` en 1.5.0, `surface_spec` en 1.2.0, `agent_guidelines` y `skill_markdown` en 1.1.1, `skills_json` en 1.1.0 |
 | Descargas necesarias para **llamar** a las operaciones | Ninguna |
 | Descargas necesarias para **conducir** | El spec y el generador (agentes y comandos); el conductor y su README si se quiere el bucle desatendido, y su plantilla de revision si se quiere ademas la compuerta dentro de la sesion del agente |
 
@@ -46,9 +46,9 @@ runtime, siendo el que conduce el ciclo desde una spec.
 
 Ahora la condicion no nombra ningun runtime —"mientras falten los adaptadores del runtime ACTIVO"—,
 hay un mapping por runtime cuyo destino es el directorio entero en vez de un agente por linea, y los
-cuatro agentes se listan aparte con su papel. Copiar `runtime-adapters/claude/` o
+siete agentes se listan aparte con su papel. Copiar `runtime-adapters/claude/` o
 `runtime-adapters/opencode/` a la raiz del cliente trae de una vez el registro MCP, el archivo de
-instrucciones, los permisos, los cuatro agentes y los cinco comandos —y, en opencode, el plugin que
+instrucciones, los permisos, los siete agentes y los cinco comandos —y, en opencode, el plugin que
 carga el `.env`—.
 
 **El conductor del bucle ya se publica.** `integracion/conductor/apts-loop.js` existia desde el
@@ -2175,6 +2175,75 @@ cambio (`fuera del plan`, `Adoptar`, `dashboard/backlog/`, `has_epic`, `text_exc
 Del despliegue salio ademas una nota que no es de este arreglo: **el aviso de `/mcp` ya no aparece**.
 nginx contesta esa ruta por el backend, asi que la superficie MCP publica es alcanzable y deja de ser
 lo que impedia a un cliente externo usarla.
+
+## La revision adversaria costaba mas que escribir el codigo
+
+Una corrida real del 2026-08-16 sobre el cliente "tickets" —14 stories, doce horas y media,
+conducida con opencode sobre deepseek-v4-pro— gasto **7,25 USD**, y el reparto no era el que se
+suponia: **el 52% se fue en la compuerta de revision** (3,74 USD en 122 sesiones de subagente)
+contra 2,56 del hilo que escribia el codigo. La lectura salio de la base local de opencode, no de
+APTS, y eso ya dice algo: el conductor agrega el coste por sesion y el `--format json` de opencode
+descarta los eventos de subagente, asi que **por dentro de una sesion APTS no ve nada**.
+
+Fueron 41 rondas de tres capas para 14 stories. Las pasadas seguian casi 1:1 a los 61 hallazgos
+confirmados, de modo que el problema no era un revisor quisquilloso sino de donde salian esos
+hallazgos. Salian de dos sitios distintos:
+
+- **La mitad los generaba el propio arreglo.** Los confirmados se apinaban en un solo archivo por
+  story —4 de 4 en un validador, 6 de 12 en un `.vue`, 5 de 9 en otro— y la cadena se lee sola en
+  el documento de revision: la descripcion rechazaba `\n`, se arregla con un helper propio, el
+  helper deja pasar el resto de controles C0, se arregla, ahora rechaza `\r`. Tres de esas cuatro
+  pasadas las causo la anterior. Una unidad agoto el tope de revisitas por ese camino.
+- **La otra mitad eran reales y la revision se gano el sueldo.** Diez fallos independientes sobre un
+  cliente SMTP escrito a mano: sin dot-stuffing, inyeccion por direccion sin sanear, decodificacion
+  UTF-8 por chunk, saludo multilinea sin validar, socket colgado si el servidor cierra a mitad.
+
+Y ninguna pasada se acordaba de la anterior: el mismo hallazgo se reanoto en las pasadas 5, 6 y 7 de
+una unidad, encontrado y descartado tres veces.
+
+**La plantilla estrena tres reglas** (`loop_prompt_code_review` 1.5.0). *Como corregir*: al volver
+al paso 5, primero un test que reproduzca el escenario de fallo y FALLE, luego el arreglo, y antes de
+entregar el paso 8 los confirmados de las pasadas previas como lista de comprobacion; con salida
+explicita para lo que no admite test. *Memoria del triage*: se lee el documento de la pasada
+anterior, asi que lo ya anotado no se vuelve a desarrollar y lo ya confirmado que reaparece se nombra
+regresion. Es del TRIAGE y **no** de las capas, que siguen naciendo ciegas en su propio subagente:
+eso es lo innegociable, y contarles lo que ya se descarto seria enseniarles donde no mirar. *El
+documento acumula* todas las pasadas, porque es donde vive esa memoria.
+
+**Y las capas dejan de ser anonimas.** Existian como lentes descritas en la plantilla pero se
+lanzaban con el subagente generico del runtime, de modo que NO habia donde colgarles configuracion.
+Ahora son agentes del spec (`surface_spec` 1.2.0): `apts-review-blind-hunter`,
+`apts-review-edge-cases` y `apts-review-acceptance`. El generador (`adapter_generator` 1.6.0) emite
+`model` y `effort` por agente cuando el spec los declara, con nombres neutrales como ya hace con
+`tools`: Claude Code lee `model:`/`effort:`, opencode lee `model:`/`variant:` —su variante se
+traduce al `reasoning_effort` del proveedor—. **El spec no trae valores a proposito**: que variantes
+existen depende del modelo de cada cliente, y fijar aqui un "high" le rompe la configuracion a quien
+conduzca con otro. Es la fontaneria; el valor lo pone el operador en su repositorio.
+
+Las tres van sin `edit` y con `mcpSurface: false`, forma nueva del spec: sin ella una capa hereda
+las 23 operaciones APTS y puede cerrar con `submit_step` la misma unidad que esta revisando, que es
+una puerta trasera justo al lado de la compuerta. Solo se puede cumplir en Claude Code, donde
+`tools:` es lista exclusiva; en opencode el mapa es aditivo y la barrera es la que la capa lleva
+escrita en su cuerpo. Por eso este spec **pide** el generador 1.6.0: uno anterior ignora el campo y
+emite las capas con la superficie entera puesta, que es peor que no emitirlas.
+
+Esto entro en **produccion** con `487508c` el 2026-08-17, **sin migraciones** —siguen siendo 23, asi
+que no hubo copia de la base—. Verificado contra la superficie publica: el manifiesto anuncia los
+diez artefactos con `surface_spec` 1.2.0, `adapter_generator` 1.6.0, `loop_prompt_code_review` 1.5.0,
+`loop_conductor_readme` 1.18.0 y `skill_markdown` 1.1.1; el spec servido trae las tres capas con
+`mcpSurface: false` y la plantilla servida las tres reglas nuevas. En local, el generador es
+idempotente (30 archivos, 7 agentes), las capas salen con `tools: Read, Glob, Grep, Bash` y cero
+`mcp__apts__*` mientras los otros cuatro conservan sus 23, y `test_adapters_unattended`,
+`test_integration_guide` y `test_loop_conductor_invocations` en verde.
+
+Aplicado ademas al cliente "tickets", que es donde se midio el problema: adaptador regenerado con el
+1.6.0, `apts-review-blind-hunter` con `variant: high` y el hilo dev (`build`) tambien, comprobado
+con `opencode debug agent` y no de palabra. Las otras dos capas heredan.
+
+**Queda un hueco.** El esfuerzo del hilo dev no es un agente de APTS —`build` es de opencode—, asi
+que su `variant` hay que escribirlo en el `opencode.json` del cliente, que es un archivo GENERADO y
+lleva su banner de "no editar": la proxima regeneracion se lo lleva. El adaptador de opencode no
+tiene hoy un sitio de configuracion del operador que sobreviva a regenerar.
 
 ## Abierto
 
