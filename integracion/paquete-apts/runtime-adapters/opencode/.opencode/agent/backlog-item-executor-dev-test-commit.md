@@ -9,6 +9,7 @@ tools:
   edit: true
   write: true
   bash: true
+  task: false
 ---
 <!-- GENERADO — no editar; fuente: spec/apts-surface.json -->
 

@@ -2,7 +2,6 @@
 description: "Use when: the user wants to drive a BMAD-method initiative end-to-end from a client that only has a spec — bootstrap the initiative, register the role roster, and conduct analysis → planning → solutioning → implementation → done by switching role identity and delegating dev-story implementation to a worker subagent until completion or blocker."
 mode: primary
 tools:
-  task: true
   read: true
   grep: true
   glob: true
@@ -10,6 +9,7 @@ tools:
   edit: true
   write: true
   bash: true
+  task: true
 ---
 <!-- GENERADO — no editar; fuente: spec/apts-surface.json -->
 

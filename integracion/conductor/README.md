@@ -539,7 +539,10 @@ plantilla los invoca por nombre. No cambia lo que hacen —la lente ya estaba es
 plantilla— sino que ahora hay **dónde colgarles configuración**: el frontmatter de cada uno
 admite `model` y el esfuerzo de razonamiento (`effort` en Claude Code, `variant` en
 opencode), así que se puede revisar con un modelo distinto del que escribe el código, y con
-distinto esfuerzo por capa. APTS no elige esos valores: los emite vacíos, porque qué
+distinto esfuerzo por capa. Y llegan sin permiso para escribir: una capa reporta y el hilo
+principal decide, así que `edit`, `write` y `task` les salen apagados en los dos runtimes
+—desde `adapter_generator` 1.7.0, que es cuando opencode dejó de conceder por omisión lo que
+el spec no nombra—. APTS no elige esos valores: los emite vacíos, porque qué
 variantes existen depende del modelo de cada cliente. Con un adaptador anterior no se pierde
 nada: la plantilla degrada al subagente genérico con las mismas instrucciones.
 

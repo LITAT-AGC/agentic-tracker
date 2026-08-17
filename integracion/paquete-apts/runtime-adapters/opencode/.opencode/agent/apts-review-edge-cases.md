@@ -6,7 +6,10 @@ tools:
   grep: true
   glob: true
   list: true
+  edit: false
+  write: false
   bash: true
+  task: false
 ---
 <!-- GENERADO — no editar; fuente: spec/apts-surface.json -->
 

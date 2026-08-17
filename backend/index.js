@@ -2550,7 +2550,19 @@ const integrationArtifacts = {
     // aditivo y lo que no se nombra queda habilitado, asi que alli la barrera es la que la capa
     // lleva escrita en su cuerpo. La asimetria se documenta en el generador en vez de fingir
     // que el spec la resuelve.
-    artifactVersion: '1.6.0',
+    // 1.7.0: el mapa `tools:` de opencode pasa a ser exclusivo. Era ADITIVO —lo que no se
+    // nombra queda habilitado—, asi que enumerar las concedidas no apagaba nada y la misma
+    // lista neutral significaba «habilita estas» alli y «solo estas» en Claude Code. Un agente
+    // que el spec declara de solo lectura podia editar archivos en opencode: `apts-bugfix-intake`
+    // llevaba asi desde el principio y las tres capas de revision heredaron el agujero. Lo unico
+    // que las frenaba era una frase de su propio texto, y una frase la cumple el modelo porque la
+    // lee, no el runtime porque la imponga; para una capa de revision eso es justo lo que la
+    // compuerta viene a evitar, porque un arreglo suyo entraria sin triage, sin contar como
+    // revisita y sin quedar escrito. Ahora se emite el vocabulario entero con su valor, `false`
+    // incluido. Comprobado con `opencode debug agent` sobre un cliente real: `edit`, `write` y
+    // `task` salen apagados. Siguen encendidas las que el vocabulario no nombra —`webfetch`,
+    // `todowrite`, `skill`—, que en Claude Code la lista cerrada si excluye.
+    artifactVersion: '1.7.0',
     kind: 'adapter_generator',
     recommended: true,
     usagePriority: 'primary',
@@ -2758,7 +2770,9 @@ const integrationArtifacts = {
     // 1.18.0: dice que las tres capas ya son agentes del adaptador y que ahi es donde se les
     // fija modelo y esfuerzo, con la plantilla degradando al subagente generico si el
     // adaptador es anterior.
-    artifactVersion: '1.18.0',
+    // 1.19.0: dice que las capas llegan sin permiso de escritura en los DOS runtimes, que es lo
+    // que cambia `adapter_generator` 1.7.0.
+    artifactVersion: '1.19.0',
     kind: 'loop_conductor_manual',
     recommended: false,
     usagePriority: 'optional_entrypoint',

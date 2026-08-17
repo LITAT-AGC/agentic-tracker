@@ -2,7 +2,6 @@
 description: "Use when: user asks to run next task, continue backlog, execute backlog, or orchestrate backlog-driven execution from APTS by taking the next ready item and delegating implementation to a subagent until completion or blocker."
 mode: primary
 tools:
-  task: true
   read: true
   grep: true
   glob: true
@@ -10,6 +9,7 @@ tools:
   edit: true
   write: true
   bash: true
+  task: true
 ---
 <!-- GENERADO — no editar; fuente: spec/apts-surface.json -->
 

@@ -238,8 +238,10 @@ function emitClaude(spec, root, written) {
   // Se cierra AQUI y no en opencode porque solo aqui se puede: en Claude Code la lista es
   // exclusiva, asi que omitir las `mcp__*` las deja fuera de verdad. En opencode el mapa es
   // aditivo y lo que no se nombra queda habilitado, de modo que alli la unica barrera es la que
-  // llevan escrita en su propio cuerpo. Es la misma asimetria que ya tiene `edit` en
-  // `apts-bugfix-intake`, y se deja dicha en vez de fingir que el spec la resuelve.
+  // llevan escrita en su propio cuerpo, que es una instruccion y no un permiso. La asimetria
+  // hermana —`edit` concedido en opencode a un agente que el spec declara de solo lectura— si
+  // se cierra, escribiendo los `false` del vocabulario; esta no se puede, y se deja dicha en
+  // vez de fingir que el spec la resuelve.
   //
   // Agents
   for (const agent of spec.agents) {
@@ -309,17 +311,33 @@ function emitOpencode(spec, root, written) {
 
   // Agents
   //
-  // Aqui no hace falta el equivalente de las `mcp__*` de Claude: en opencode el mapa `tools:`
-  // es aditivo —lo que no se nombra queda en su valor por defecto, que para las herramientas
-  // MCP es habilitado—, asi que enumerar unas pocas no apaga el resto. La misma lista neutral
-  // del spec significa «habilita estas» en un runtime y «solo estas» en el otro.
+  // El mapa `tools:` de opencode es ADITIVO: lo que se nombra se enciende y lo que no se
+  // nombra se queda en su valor por defecto, que es habilitado. Enumerar solo las concedidas
+  // no apagaba nada, asi que la misma lista neutral significaba «habilita estas» aqui y «solo
+  // estas» en Claude Code, donde `tools:` es lista cerrada. Un agente declarado de solo
+  // lectura en el spec podia editar archivos en opencode y no en Claude: `apts-bugfix-intake`
+  // llevaba asi desde el principio, y las tres capas de revision heredaron el mismo agujero.
+  //
+  // Lo unico que las frenaba era una FRASE en su propio texto («no edites, reportas y ya»), y
+  // una frase la cumple el modelo porque la lee, no el runtime porque la imponga. Para una capa
+  // de revision eso es justo lo que la compuerta viene a evitar: si arregla por su cuenta, el
+  // arreglo entra sin triage, sin contar como revisita y sin quedar escrito en el documento.
+  //
+  // Se cierra escribiendo tambien los `false` de lo que el spec NO concede. El vocabulario
+  // neutral entero se emite siempre, en orden fijo, con su valor: asi el archivo generado dice
+  // lo mismo que el spec en los dos runtimes.
+  //
+  // Queda fuera lo que el vocabulario no nombra —`webfetch`, `todowrite`, `skill`— que en
+  // opencode sigue habilitado y en Claude Code no, porque alli la lista cerrada tambien lo
+  // excluye. Y quedan fuera las herramientas MCP: no viven en este mapa —no aparecen ni en
+  // `opencode debug agent`—, asi que `mcpSurface: false` se sigue cumpliendo solo en Claude.
   for (const agent of spec.agents) {
     const fm = [
       `description: ${quoteYaml(agent.description)}`,
       `mode: ${agent.role === 'primary' ? 'primary' : 'subagent'}`,
       ...modelLines(agent, 'variant'),
       'tools:',
-      ...mapTools(agent.tools, OPENCODE_TOOLS).map((tool) => `  ${tool}: true`),
+      ...opencodeToolLines(agent),
     ];
     writeFileTracked(written, path.join(root, '.opencode', 'agent', `${agent.id}.md`),
       markdownText(fm, agentBody(agent)));
@@ -542,6 +560,15 @@ function opencodeEnvPlugin(spec) {
 }
 
 // ---- shared body builders --------------------------------------------------
+
+// El vocabulario de opencode al completo, en orden de declaracion para que el archivo salga
+// igual en cada corrida (el generador promete ser idempotente).
+const OPENCODE_ALL_TOOLS = [...new Set(Object.values(OPENCODE_TOOLS).flat())];
+
+function opencodeToolLines(agent) {
+  const concedidas = new Set(mapTools(agent.tools, OPENCODE_TOOLS));
+  return OPENCODE_ALL_TOOLS.map((tool) => `  ${tool}: ${concedidas.has(tool)}`);
+}
 
 function agentBody(agent) {
   return [agent.body];
