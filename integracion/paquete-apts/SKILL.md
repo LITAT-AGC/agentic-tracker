@@ -43,7 +43,7 @@ To drive the BMAD method lifecycle end to end, read `method_conduction` from the
 
 ## Agents and commands (do this, not optional)
 
-The four agents and the five commands are NOT downloaded one by one: run `scripts/generate-adapters.js` over `runtime-adapters/spec/apts-surface.json` and copy the directory for your runtime — `runtime-adapters/claude/` or `runtime-adapters/opencode/` — into the client project root, keeping the relative paths. That single copy brings the MCP registration, the instruction file, the permissions, the four agents and the five slash commands (`apts-next`, `apts-method`, `apts-bug`, `apts-status`, `apts-resume`).
+The seven agents and the five commands are NOT downloaded one by one: run `scripts/generate-adapters.js` over `runtime-adapters/spec/apts-surface.json` and copy the directory for your runtime — `runtime-adapters/claude/` or `runtime-adapters/opencode/` — into the client project root, keeping the relative paths. That single copy brings the MCP registration, the instruction file, the permissions, the seven agents and the five slash commands (`apts-next`, `apts-method`, `apts-bug`, `apts-status`, `apts-resume`).
 
 Skipping this leaves the project without the method orchestrator and without any command, and the whole lifecycle has to be conducted by hand. Generated adapters are managed output: never hand-edit them — edit the spec and regenerate.
 

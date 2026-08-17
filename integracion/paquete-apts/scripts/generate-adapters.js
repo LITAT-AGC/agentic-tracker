@@ -105,6 +105,26 @@ function agentById(spec, id) {
   return spec.agents.find((a) => a.id === id);
 }
 
+// Motor y esfuerzo de razonamiento, opcionales y por agente. El spec los declara con
+// nombres NEUTRALES —`model` y `effort`— igual que hace con `tools`, y cada runtime los
+// escribe con la clave que entiende: Claude Code lee `model:` y `effort:` (low, medium,
+// high, max o un entero); opencode lee `model:` y `variant:`, que es como llama a lo
+// mismo —su variante se traduce al `reasoning_effort` del proveedor— y cuyos valores los
+// declara cada modelo, no el runtime.
+//
+// El spec NO trae valores, y es a propósito: qué variantes existen depende del modelo que
+// use cada cliente, así que fijar aquí un "high" le rompería la configuración a quien
+// conduzca con un modelo que no lo declare. Esto es la fontanería; el valor lo pone el
+// operador en el repositorio destino, que es el único sitio donde se sabe.
+function modelLines(agent, effortKey) {
+  const lines = [];
+  if (agent.model) lines.push(`model: ${quoteYaml(agent.model)}`);
+  if (agent.effort !== undefined && agent.effort !== null) {
+    lines.push(`${effortKey}: ${typeof agent.effort === 'number' ? agent.effort : quoteYaml(agent.effort)}`);
+  }
+  return lines;
+}
+
 // The MCP surface is remote: a URL plus the identity headers. Each runtime has
 // its own way of interpolating an environment variable, so the caller passes the
 // pattern (e.g. '${%s}' for Claude Code, '{env:%s}' for opencode).
@@ -210,12 +230,24 @@ function emitClaude(spec, root, written) {
     hooks: hooksToClaude(spec.hooks),
   }));
 
+  // `mcpSurface: false` es la excepcion a todo lo anterior: hay agentes que NO deben poder
+  // llamar a APTS. Las tres capas de la revision adversaria son el caso — reportan hallazgos y
+  // nada mas—, y darles la superficie abriria una puerta trasera justo al lado de la compuerta
+  // que ellas mismas son: una capa con `submit_step` puede cerrar la unidad que esta revisando.
+  //
+  // Se cierra AQUI y no en opencode porque solo aqui se puede: en Claude Code la lista es
+  // exclusiva, asi que omitir las `mcp__*` las deja fuera de verdad. En opencode el mapa es
+  // aditivo y lo que no se nombra queda habilitado, de modo que alli la unica barrera es la que
+  // llevan escrita en su propio cuerpo. Es la misma asimetria que ya tiene `edit` en
+  // `apts-bugfix-intake`, y se deja dicha en vez de fingir que el spec la resuelve.
+  //
   // Agents
   for (const agent of spec.agents) {
     const fm = [
       `name: ${quoteYaml(agent.name)}`,
       `description: ${quoteYaml(agent.description)}`,
-      `tools: ${[...mapTools(agent.tools, CLAUDE_TOOLS), ...mcpTools].join(', ')}`,
+      `tools: ${[...mapTools(agent.tools, CLAUDE_TOOLS), ...(agent.mcpSurface === false ? [] : mcpTools)].join(', ')}`,
+      ...modelLines(agent, 'effort'),
     ];
     if (agent.userInvocable === false) fm.push('disable-model-invocation: false');
     writeFileTracked(written, path.join(root, '.claude', 'agents', `${agent.id}.md`),
@@ -285,6 +317,7 @@ function emitOpencode(spec, root, written) {
     const fm = [
       `description: ${quoteYaml(agent.description)}`,
       `mode: ${agent.role === 'primary' ? 'primary' : 'subagent'}`,
+      ...modelLines(agent, 'variant'),
       'tools:',
       ...mapTools(agent.tools, OPENCODE_TOOLS).map((tool) => `  ${tool}: true`),
     ];

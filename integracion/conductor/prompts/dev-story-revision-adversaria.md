@@ -83,6 +83,13 @@ Y no la esquives: si las tres capas no se pueden lanzar de ninguna de las dos fo
 declara `HALT`, reporta el bloqueo y para. Revisar en tu propio hilo no cuenta como
 revisión adversaria, y el paso 8 no está hecho.
 
+Si tu adaptador APTS es del 2026-08-17 o posterior, las tres capas ya existen como
+agentes propios —`apts-review-blind-hunter`, `apts-review-edge-cases` y
+`apts-review-acceptance`— y se invocan por nombre: llevan su lente escrita y son el sitio
+donde el operador fija modelo y esfuerzo de razonamiento por capa. Úsalos si están. Si no
+están, lánzalas con el subagente genérico de tu runtime y las instrucciones de abajo, que
+son las mismas: la lente es lo que importa, no de dónde salga el agente.
+
 - Blind Hunter. Dale SÓLO el diff de esta unidad (`git diff` contra el punto de partida,
   más los archivos nuevos). Nada de story, nada de criterios de aceptación, nada de
   intención. Que juzgue el código por lo que hace, no por lo que se suponía que hacía.
@@ -108,6 +115,18 @@ Lo que no llega a eso —gusto, nombres, estructura, "quedaría más limpio si"�
 se anota y NO se corrige. Estás cerrando una unidad, no reescribiendo el proyecto a tu
 gusto. Si dos capas señalan lo mismo, es UN hallazgo, no dos.
 
+MEMORIA DEL TRIAGE. Si ésta no es la primera pasada, `docs/reviews/{story_id}.md` ya
+existe: léelo ANTES de triar y trátalo como parte de la entrada.
+- Un hallazgo que ya figura entre sus ANOTADOS ya se juzgó ruido. No lo vuelvas a
+  desarrollar ni a discutir: comprueba que es el mismo caso y déjalo anotado.
+- Un hallazgo que ya figura entre sus CONFIRMADOS ya se corrigió. Si reaparece no es un
+  hallazgo nuevo: es una REGRESIÓN, y se dice así en el documento, nombrando la pasada
+  que lo cerró la primera vez.
+
+Esa memoria es del TRIAGE y sólo de él. A las capas no les llega: siguen naciendo ciegas
+en su propio subagente, que es lo innegociable. Contarles lo que ya se descartó sería
+enseñarles dónde no mirar.
+
 QUÉ HACER CON LO CONFIRMADO. Si queda al menos un hallazgo confirmado, la validación del
 paso 8 ha fallado y no se entrega limpia. Declara la rama que el propio método tiene
 para eso, copiada literal de `branches`:
@@ -121,13 +140,29 @@ esquives el tope corrigiendo en silencio para llegar al submit terminal. Si el p
 te sirve esa rama en `branches`, corrige antes de entregarlo y dilo en el archivo de
 revisión.
 
+CÓMO CORREGIR. Un arreglo hecho a ojo produce el hallazgo de la pasada siguiente, y esa
+cadena es la que encarece la revisión: en una corrida real del 2026-08-16, cuatro pasadas
+seguidas sobre un mismo validador, cada una arreglando lo que había roto la anterior. Por
+cada confirmado, y en este orden:
+1. Un test que reproduzca su escenario de fallo y que FALLE contra el código actual. Si
+   no falla, no habías entendido el hallazgo: entiéndelo antes de tocar nada.
+2. El arreglo, hasta que ese test pase y las suites sigan verdes.
+3. Antes de entregar el paso 8, recorre los CONFIRMADOS de las pasadas anteriores como
+   lista de comprobación y verifica que sus tests siguen en verde. Un arreglo que revive
+   un hallazgo ya cerrado no está terminado.
+
+Si un hallazgo no admite test —configuración, un borde del runtime, algo que sólo se ve
+a mano—, dilo en el documento y describe la comprobación que hiciste en su lugar. Lo que
+no vale es saltarse el paso en silencio.
+
 Si no queda ningún hallazgo confirmado, entrega el paso 8 por el camino normal.
 
 RASTRO. La revisión se escribe una vez y viaja por dos caminos. Corta y sin adornos:
 - la story y el commit revisado;
 - una línea por capa, con cuántos hallazgos confirmó;
-- los CONFIRMADOS: `archivo:línea`, escenario de fallo, y qué se hizo con cada uno;
-- los ANOTADOS, una línea cada uno, sin desarrollar.
+- los CONFIRMADOS de TODAS las pasadas, no sólo los de la última: `archivo:línea`,
+  escenario de fallo, qué se hizo con cada uno y en qué pasada se cerró;
+- los ANOTADOS, una línea cada uno, sin desarrollar, también acumulados.
 
 Los dos caminos:
 1. `docs/reviews/{story_id}.md` en el repositorio, commiteado junto con el trabajo de la
@@ -140,7 +175,9 @@ Los dos caminos:
    ese paso espera.
 
 Si volviste al paso 5, la revisión se rehace con la pasada nueva; el archivo se actualiza,
-no se duplica ni se crea uno por vuelta.
+no se duplica ni se crea uno por vuelta. Actualizar es AÑADIR: las listas acumuladas son
+la memoria del triage de la pasada siguiente, así que reescribir el archivo con sólo lo
+que encontró la última pasada la borra y hace que todo vuelva a encontrarse desde cero.
 
 No toques el ciclo más allá de esta unidad: no arranques iniciativas, no conduzcas
 fases generativas y no cierres otras stories.

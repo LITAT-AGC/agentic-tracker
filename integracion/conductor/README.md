@@ -507,13 +507,41 @@ el agente declara la rama que el propio método tiene, `{"goto":"step:5"}`, en v
 parchear en silencio — con el tope de revisitas haciendo su trabajo si la unidad no
 sobrevive a las pasadas.
 
-La revisión se escribe una vez y viaja por dos caminos: `docs/reviews/<story_id>.md`
+**Cada confirmado cuesta una ronda entera, así que la plantilla se ocupa de no generarlos
+de más.** Una revisita relanza las tres capas sobre el diff completo: en una corrida real
+del 2026-08-16 fueron 41 rondas para 14 stories, y las capas costaron más que el hilo que
+escribía el código. Dos reglas atacan las rondas evitables. La primera es **cómo
+corregir**: al volver del paso 5, el arreglo empieza por un test que reproduzca el
+escenario de fallo y falle, y antes de entregar el paso 8 se recorren los confirmados de
+las pasadas previas como lista de comprobación. Sin eso, el arreglo hecho a ojo produce el
+hallazgo de la pasada siguiente — se vieron cuatro pasadas seguidas sobre un mismo
+validador, cada una arreglando lo que había roto la anterior. La segunda es la **memoria
+del triage**: el hilo principal lee el documento de la pasada anterior, así que lo ya
+anotado no se vuelve a desarrollar y lo ya confirmado que reaparece se nombra regresión en
+vez de contarse como hallazgo nuevo. Esa memoria es del triage y **no** de las capas: nacen
+ciegas en su subagente y así siguen, porque contarles lo que ya se descartó sería
+enseñarles dónde no mirar.
+
+La revisión se escribe una vez por pasada y viaja por dos caminos: `docs/reviews/<story_id>.md`
 commiteado en el repositorio destino, y `output.content` del submit terminal, donde el
-motor la guarda como artefacto `code_review` **de esa unidad**. El segundo camino es una
+motor la guarda como artefacto `code_review` **de esa unidad**. El archivo **acumula**
+todas las pasadas, y no por prolijidad: es donde vive la memoria del triage. Reescribirlo
+con sólo lo que encontró la última la borra, y entonces todo vuelve a encontrarse desde
+cero — se llegó a reanotar el mismo hallazgo en las pasadas 5, 6 y 7. El segundo camino es una
 compuerta de verdad: el paso terminal lo declara `required_for_close`, así que un submit
 sin él se rechaza con `ok:false` y la story no cierra. La plantilla vale también contra un
 servidor que todavía no tenga la compuerta —ahí ese `content` simplemente no se captura—,
 así que no hay que sincronizar el despliegue con el reinicio del conductor.
+
+**Las tres capas son agentes del adaptador.** Desde `surface_spec` 1.2.0 el generador emite
+`apts-review-blind-hunter`, `apts-review-edge-cases` y `apts-review-acceptance`, y la
+plantilla los invoca por nombre. No cambia lo que hacen —la lente ya estaba escrita en la
+plantilla— sino que ahora hay **dónde colgarles configuración**: el frontmatter de cada uno
+admite `model` y el esfuerzo de razonamiento (`effort` en Claude Code, `variant` en
+opencode), así que se puede revisar con un modelo distinto del que escribe el código, y con
+distinto esfuerzo por capa. APTS no elige esos valores: los emite vacíos, porque qué
+variantes existen depende del modelo de cada cliente. Con un adaptador anterior no se pierde
+nada: la plantilla degrada al subagente genérico con las mismas instrucciones.
 
 **En paralelo si tu runtime lo sostiene; en fila si no.** Lo innegociable es el contexto
 limpio de cada capa, no que vayan a la vez: son independientes por construcción —ninguna

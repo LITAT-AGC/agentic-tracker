@@ -2442,7 +2442,8 @@ const integrationArtifacts = {
     filePath: path.join(integrationRoot, 'paquete-apts', 'SKILL.md'),
     fileName: 'SKILL.md',
     contentType: 'text/markdown; charset=utf-8',
-    artifactVersion: '1.1.0',
+    // 1.1.1: el paquete pasa de cuatro agentes a siete, con las tres capas de revision.
+    artifactVersion: '1.1.1',
     kind: 'skill_package',
     recommended: false,
     usagePriority: 'discovery',
@@ -2479,7 +2480,19 @@ const integrationArtifacts = {
     // 1.1.1: el orquestador de metodo conoce `adopt_backlog_items` y para que sirve. Es prosa
     //        del prompt, no una forma nueva en el spec, asi que es de parche —pero hay que
     //        regenerar para que llegue al cliente—.
-    artifactVersion: '1.1.1',
+    // 1.2.0: tres agentes nuevos, las capas de la revision adversaria —`apts-review-blind-hunter`,
+    //        `apts-review-edge-cases` y `apts-review-acceptance`—. Existian ya como lentes
+    //        descritas en la plantilla del conductor, pero se lanzaban con el subagente generico
+    //        del runtime y por eso NO habia donde colgarles configuracion. Con ficha propia la
+    //        hay: el operador les pone modelo y esfuerzo por capa, que es lo que pedia el reparto
+    //        del gasto —en una corrida real del 2026-08-16 las capas costaron mas que el hilo que
+    //        escribia el codigo—. Van sin `edit` (una capa reporta, no parchea) y con
+    //        `mcpSurface: false`, forma nueva del spec: sin ella una capa hereda la superficie
+    //        APTS entera y puede cerrar con `submit_step` la misma unidad que esta revisando,
+    //        que es una puerta trasera justo al lado de la compuerta. Por eso este spec PIDE el
+    //        generador 1.6.0: uno anterior ignora el campo y emite las tres capas con los 23
+    //        `mcp__apts__*` puestos, que es peor que no emitirlas.
+    artifactVersion: '1.2.0',
     kind: 'runtime_surface_spec',
     recommended: true,
     usagePriority: 'discovery',
@@ -2525,7 +2538,19 @@ const integrationArtifacts = {
     // tiene medio arreglo y el mismo sintoma. Se les gana porque el evaluador de opencode es
     // `findLast` y las reglas del proyecto se apilan despues de las suyas; las semillas van
     // DELANTE de lo declarado para que el proyecto siga ganandoles.
-    artifactVersion: '1.5.0',
+    // 1.6.0: emite `model` y `effort` por agente cuando el spec los declara. Son NEUTRALES
+    // como `tools`, y cada runtime los escribe con la clave que entiende: Claude Code lee
+    // `model:` y `effort:`; opencode lee `model:` y `variant:`, que es como llama a lo mismo
+    // —su variante se traduce al `reasoning_effort` del proveedor—. El generador no inventa
+    // valores y el spec no los trae: que variantes existen depende del modelo de cada cliente,
+    // asi que fijar aqui un "high" le rompe la configuracion a quien conduzca con un modelo que
+    // no lo declare. Esto es la fontaneria; el valor lo pone el operador en su repositorio.
+    // Y honra `mcpSurface: false`, que retira las `mcp__apts__*` del agente. Solo puede
+    // cumplirse en Claude Code, donde `tools:` es lista exclusiva; en opencode el mapa es
+    // aditivo y lo que no se nombra queda habilitado, asi que alli la barrera es la que la capa
+    // lleva escrita en su cuerpo. La asimetria se documenta en el generador en vez de fingir
+    // que el spec la resuelve.
+    artifactVersion: '1.6.0',
     kind: 'adapter_generator',
     recommended: true,
     usagePriority: 'primary',
@@ -2725,7 +2750,15 @@ const integrationArtifacts = {
     // 1.16.0: documenta que el 21 cubre dos cosas —el tope que se restablece y la cuenta sin
     // saldo—, que comparten codigo y no detalle, y cual de las cuatro frases de la tabla
     // esta medida y cuales no.
-    artifactVersion: '1.16.0',
+    // 1.17.0: documenta las dos reglas que la plantilla de revision estrena en su 1.4.0 —el
+    // arreglo que empieza por un test que falla y repasa los confirmados previos, y la
+    // memoria del triage que lee la pasada anterior—, y por que el documento de revision
+    // acumula todas las pasadas en vez de reescribirse. Va aqui porque el manual es el que
+    // explica que hace la plantilla antes de que nadie la descargue.
+    // 1.18.0: dice que las tres capas ya son agentes del adaptador y que ahi es donde se les
+    // fija modelo y esfuerzo, con la plantilla degradando al subagente generico si el
+    // adaptador es anterior.
+    artifactVersion: '1.18.0',
     kind: 'loop_conductor_manual',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -2806,13 +2839,32 @@ const integrationArtifacts = {
     // plantilla vuelve a pedir la tanda paralela, dice que una capa que no vuelve se arregla en
     // la configuracion del runtime y no en el prompt, y conserva lo unico que si era del
     // prompt: que revisar en el hilo propio no cuenta y que sin subagentes se declara HALT.
-    artifactVersion: '1.3.0',
+    // 1.4.0: corta el bucle que se llevo la mitad del gasto de una corrida real el
+    // 2026-08-16: 41 rondas de tres capas para 14 stories, 61 hallazgos confirmados, y las
+    // capas costando mas que el hilo que escribia el codigo. Dos anadidos, los dos en el
+    // prompt y ninguno en el motor. UNO, como corregir: al volver del paso 5 el arreglo
+    // empieza por un test que reproduzca el escenario de fallo y FALLE, y antes de entregar
+    // el paso 8 se recorren los confirmados de las pasadas previas como lista de
+    // comprobacion. Sin eso el arreglo a ojo generaba el hallazgo de la pasada siguiente
+    // —se vieron cuatro pasadas seguidas sobre un mismo validador, cada una arreglando lo
+    // que habia roto la anterior, y una story agoto el tope de revisitas—. DOS, memoria del
+    // triage: lee el documento de la pasada anterior, asi que lo ya anotado no se vuelve a
+    // desarrollar y lo ya confirmado que reaparece se nombra regresion en vez de contarse
+    // como hallazgo nuevo. Esa memoria es del TRIAGE y no de las capas: siguen naciendo
+    // ciegas en su subagente, que es lo innegociable. Y el documento pasa a acumular todas
+    // las pasadas porque es donde vive esa memoria: reescribirlo con lo de la ultima la
+    // borraba, y se habia visto reanotar el mismo hallazgo en las pasadas 5, 6 y 7.
+    // 1.5.0: las tres capas se invocan por nombre —`apts-review-blind-hunter`,
+    // `apts-review-edge-cases`, `apts-review-acceptance`— cuando el adaptador las trae, que es
+    // donde el operador les fija modelo y esfuerzo. Con un adaptador anterior no cambia nada:
+    // se lanzan con el subagente generico y las instrucciones de siempre, que son las mismas.
+    artifactVersion: '1.5.0',
     kind: 'loop_conductor_prompt',
     recommended: false,
     usagePriority: 'optional_entrypoint',
     optional: true,
     dependsOnArtifactIds: ['loop_conductor'],
-    selection_rule: 'Prompt template for the loop conductor (--prompt-file), replacing its built-in default. It adds an adversarial review gate before the dev-story validation step: three layers in SEPARATE subagents under distinct lenses (Blind Hunter sees only the diff, Edge Case Hunter the boundaries, Acceptance Auditor only the story and its acceptance criteria) — in parallel where the runtime sustains it, sequentially otherwise, a triage that counts a finding only with file:line plus a concrete failure scenario, and the method\'s own {"goto":"step:5"} branch when something is confirmed. Download it only if you run the conductor and want the gate in the agent session; the engine gate (the required_for_close code_review artifact on the terminal dev-story step) applies either way. Placeholders substituted by the conductor: {story_id}, {agent_name}, {project_url}, {role}, {iteration}, {attempt}, {max_attempts}, {task_id}.',
+    selection_rule: 'Prompt template for the loop conductor (--prompt-file), replacing its built-in default. It adds an adversarial review gate before the dev-story validation step: three layers in SEPARATE subagents under distinct lenses (Blind Hunter sees only the diff, Edge Case Hunter the boundaries, Acceptance Auditor only the story and its acceptance criteria) — in parallel where the runtime sustains it, sequentially otherwise, a triage that counts a finding only with file:line plus a concrete failure scenario, and the method\'s own {"goto":"step:5"} branch when something is confirmed. On a revisit the fix must start from a test that reproduces the finding and fails, and the previous passes\' confirmed findings are re-checked before delivering; the triage — never the layers, which stay blind by construction — reads the previous pass\'s review document, so annotated noise is not re-litigated and a confirmed finding that reappears is named a regression. Download it only if you run the conductor and want the gate in the agent session; the engine gate (the required_for_close code_review artifact on the terminal dev-story step) applies either way. Placeholders substituted by the conductor: {story_id}, {agent_name}, {project_url}, {role}, {iteration}, {attempt}, {max_attempts}, {task_id}.',
     description: 'Prompt template for the conductor that demands an adversarial review before a story closes.'
   }
 };
@@ -3194,7 +3246,7 @@ const buildIntegrationManifest = (req, methodConductionOverride = null) => {
           how_to: 'Download surface_spec and adapter_generator, run `node generate-adapters.js` (it reads the spec next to it and needs no dependencies), then copy the whole directory of your runtime into the client project root, preserving relative paths.'
         },
         // Un mapping por runtime, y el destino es el DIRECTORIO entero: cada
-        // runtime materializa el registro MCP, sus cuatro agentes, sus cinco
+        // runtime materializa el registro MCP, sus siete agentes, sus cinco
         // comandos, los permisos y su archivo de instrucciones. Enumerar
         // agente por agente era lo que dejaba fuera al orquestador de metodo,
         // que no figuraba en ningun mapping y es justo el que conduce el ciclo.
@@ -3208,7 +3260,7 @@ const buildIntegrationManifest = (req, methodConductionOverride = null) => {
               '.mcp.json (MCP registration)',
               'CLAUDE.md (imports AGENTS.md and carries the APTS managed section)',
               '.claude/settings.json (tool allowlist derived from the contract)',
-              '.claude/agents/*.md (4 agents)',
+              '.claude/agents/*.md (7 agents)',
               '.claude/commands/*.md (5 slash commands: apts-next, apts-method, apts-bug, apts-status, apts-resume)'
             ]
           },
@@ -3220,7 +3272,7 @@ const buildIntegrationManifest = (req, methodConductionOverride = null) => {
             materializes: [
               'opencode.json (MCP registration and permissions)',
               'AGENTS.md (APTS managed section)',
-              '.opencode/agent/*.md (4 agents)',
+              '.opencode/agent/*.md (7 agents)',
               '.opencode/command/*.md (5 commands: apts-next, apts-method, apts-bug, apts-status, apts-resume)',
               '.opencode/plugin/apts-env.js (loads the project .env into the MCP registration — opencode does not read .env on its own, so without this file the identity headers arrive empty)'
             ]
