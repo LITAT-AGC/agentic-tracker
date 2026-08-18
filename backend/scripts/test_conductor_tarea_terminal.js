@@ -81,7 +81,7 @@ const crearApts = () => http.createServer((req, res) => {
       result: { content: [{ type: 'text', text: JSON.stringify(datos) }], ...(isError ? { isError: true } : {}) },
     });
 
-    if (herramienta === 'apts_status') {
+    if (herramienta === 'status') {
       llamadas += 1;
       const cerrando = llamadas > 1;
       return sobre({

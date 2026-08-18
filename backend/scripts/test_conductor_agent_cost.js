@@ -48,7 +48,7 @@ const crearApts = () => http.createServer((req, res) => {
     let peticion = {};
     try { peticion = JSON.parse(cuerpo || '{}'); } catch (_) { /* da igual */ }
     const herramienta = (peticion.params && peticion.params.name) || '';
-    const datos = herramienta === 'apts_status'
+    const datos = herramienta === 'status'
       ? {
         project_url: PROYECTO,
         phase: 'implementation',

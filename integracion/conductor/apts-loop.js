@@ -831,6 +831,26 @@ const textoDeError = (valor) => {
   return String(valor);
 };
 
+// Un error de operación puede ser pasajero, y APTS ya lo dice: manda `retriable` en el
+// objeto de error —y el `statusCode` del que sale—. Esto lo daba por definitivo SIEMPRE,
+// así que un 500 del servidor se perdía a la primera mientras el MISMO fallo, si llegaba
+// por el cable como HTTP 5xx, se reintentaba tres veces. La asimetría se vio el
+// 2026-08-17 en "tickets": una conexión del pool de Postgres entregada ya muerta
+// —`Connection terminated unexpectedly`— tumbó un `log_agent_progress`, la anotación se
+// perdió, y la llamada siguiente contra el mismo servidor funcionó sin más.
+//
+// Se cree lo que dice el servidor y sólo se deduce cuando calla. Reintentar una escritura
+// que quizá se aplicó puede duplicarla, sí, pero esa política ya estaba tomada aquí para
+// los errores de red y para los 5xx del cable: lo que hacía falta era aplicarla igual por
+// los dos caminos, que es justo lo que el servidor se propone al mandar `retriable`.
+const reintentableDeError = (valor) => {
+  if (!valor || typeof valor !== 'object') return false;
+  if (typeof valor.retriable === 'boolean') return valor.retriable;
+  const codigo = Number(valor.statusCode);
+  if (!Number.isInteger(codigo)) return false;
+  return codigo === 408 || codigo === 425 || codigo === 429 || codigo >= 500;
+};
+
 const intentarMcp = async (cfg, herramienta, argumentos) => {
   let respuesta;
   try {
@@ -873,7 +893,11 @@ const intentarMcp = async (cfg, herramienta, argumentos) => {
     : null;
   const datos = texto ? JSON.parse(texto) : null;
   if (sobre.result && sobre.result.isError) {
-    throw errorRed(`${herramienta}: ${textoDeError(datos && (datos.error || datos.message)) || 'la operación devolvió error'}`, false);
+    const detalle = datos && (datos.error || datos.message);
+    throw errorRed(
+      `${herramienta}: ${textoDeError(detalle) || 'la operación devolvió error'}`,
+      reintentableDeError(detalle),
+    );
   }
   return datos;
 };
@@ -2594,7 +2618,7 @@ const conducir = async (cfg, plantillaPrompt) => {
     // identidad—, así que la cabecera no se inyecta y sin este argumento la
     // recomendación vuelve sin resolver. Los argumentos ganan a la cabecera, y aquí
     // ambos dicen lo mismo, así que no hay conflicto que rechazar.
-    const estado = await llamarMcp(cfg, 'apts_status', { agent_name: cfg.agentName });
+    const estado = await llamarMcp(cfg, 'status', { agent_name: cfg.agentName });
     const rec = (estado && estado.recommendation) || {};
     const fase = estado ? estado.phase : null;
     const args_ = rec.args || {};
@@ -2637,7 +2661,7 @@ const conducir = async (cfg, plantillaPrompt) => {
       // trabajada y el panel enseña un proyecto a medias que ya está hecho. Con la
       // recomendación en `done` no hay nada que reclamar, así que esta llamada sólo
       // persiste el recorrido de fases.
-      const confirmado = await llamarMcp(cfg, 'apts_next', {});
+      const confirmado = await llamarMcp(cfg, 'next', {});
       if (confirmado.next !== 'done') {
         log(`aviso: apts_status dijo done pero apts_next devolvió '${confirmado.next}' (${confirmado.why || ''})`);
       }
@@ -2852,7 +2876,7 @@ const conducir = async (cfg, plantillaPrompt) => {
       // una sesión de opus en una story que el agente ya cerró antes de morir al salir,
       // e insistir sobre un bloqueo que el agente reportó correctamente.
       log(`intento ${intento}/${cfg.escalera.length} falló (código ${ultimo.codigo}); preguntando al motor antes de reintentar`);
-      const revision = await llamarMcp(cfg, 'apts_status', { agent_name: cfg.agentName });
+      const revision = await llamarMcp(cfg, 'status', { agent_name: cfg.agentName });
       const rev = (revision && revision.recommendation) || {};
       if (rev.next !== 'run_step' || rev.target_id !== storyId) {
         // No se decide aquí qué significa: la vuelta siguiente lo resuelve con el mismo

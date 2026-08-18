@@ -92,16 +92,35 @@ son las mismas: la lente es lo que importa, no de dónde salga el agente.
 
 - Blind Hunter. Dale SÓLO el diff de esta unidad (`git diff` contra el punto de partida,
   más los archivos nuevos). Nada de story, nada de criterios de aceptación, nada de
-  intención. Que juzgue el código por lo que hace, no por lo que se suponía que hacía.
-- Edge Case Hunter. Dale el diff y los archivos que toca. Que busque los bordes:
-  entradas vacías o nulas, límites de índice y de buffer, tamaños o tasas distintos de
-  los probados, NaN / infinitos / denormales, división por cero, reentrada y orden de
-  inicialización, rutas de error que ningún test recorre, estado que sobrevive entre
-  llamadas.
+  intención. Que juzgue el código por lo que hace, no por lo que se suponía que hacía:
+  lógica equivocada en el camino normal, contratos rotos entre funciones, datos que no
+  cuadran, respuestas que no dicen lo que el código hizo.
+- Edge Case Hunter. Dale el diff y los archivos que toca. Suyo es TODO lo que depende del
+  tiempo y de los bordes, y de nadie más: entradas vacías o nulas, límites de índice y de
+  buffer, tamaños o tasas distintos de los probados, NaN / infinitos / denormales,
+  división por cero, reentrada, orden de inicialización, carreras entre peticiones en
+  vuelo, rutas de error que ningún test recorre, estado que sobrevive entre llamadas.
 - Acceptance Auditor. Dale SÓLO la story y sus criterios de aceptación. Que recorra
   criterio por criterio contra el código real y diga cuáles no están implementados,
   cuáles lo están a medias y cuáles quedaron implementados en otro sitio del que dice
   la story.
+
+El reparto entre las dos primeras es una LÍNEA, no un solapamiento: la concurrencia y las
+rutas de fallo son de Edge Case Hunter, y Blind Hunter no las reporta aunque las vea. Sin
+esa línea las dos devuelven el mismo hallazgo y la pasada cuesta el doble de lo que
+encuentra —medido el 2026-08-17: en una unidad de comentarios, casi todo lo de Blind venía
+también en Edge, pasada tras pasada—.
+
+BARRE LA FAMILIA, NO LA INSTANCIA. Es la regla que decide lo que cuesta esta compuerta.
+Un defecto casi nunca está solo: el mismo descuido está repetido en las funciones hermanas
+del mismo archivo. Cuando encuentres uno, ANTES de devolverlo recorre sus hermanas y
+devuelve la familia entera como UN hallazgo con todas sus líneas. Devolver una instancia
+por pasada convierte la revisión en un goteo: se arregla la que dijiste y la pasada
+siguiente trae la de al lado. Medido el 2026-08-17: ocho pasadas sobre una misma unidad, y
+de la cuarta a la séptima TODAS sobre el mismo archivo de vista, cada una una variante del
+mismo olvido —recargas que no comprueban si salieron bien, formularios que se limpian sin
+mirar, banderas que no se reinician al cambiar de elemento—. Una sola pasada que hubiera
+barrido la familia habría cerrado las cuatro.
 
 Cada capa devuelve su lista de hallazgos y nada más: sin resumen de lo que leyó, sin
 plan de trabajo, sin valoración general. Lo que no sea un hallazgo no hace falta.
@@ -139,6 +158,23 @@ sobrevive a las pasadas de revisión no se cierra como done, se reporta como blo
 esquives el tope corrigiendo en silencio para llegar al submit terminal. Si el paso 8 no
 te sirve esa rama en `branches`, corrige antes de entregarlo y dilo en el archivo de
 revisión.
+
+CUÁNTAS PASADAS SEGUIDAS. El ciclo revisar-corregir-revisar que hagas DENTRO de un paso el
+método NO lo ve: su tope cuenta saltos declarados, y una unidad con ocho pasadas dentro del
+paso 5 le parece idéntica a una con una sola. Ese ciclo lo topas TÚ, y el tope es CUATRO
+pasadas seguidas sin salir del paso. Si a la cuarta sigue habiendo confirmados, no hagas la
+quinta ahí: entrega el paso, camina hasta el 8 y declara `{"goto":"step:5"}` con lo que
+quede. Eso devuelve el control al método —gasta una revisita, que es exactamente lo que una
+revisita significa— y a partir de ahí decide su tope, que para eso está. Medido el
+2026-08-17: ocho pasadas dentro del paso 5 y UNA revisita contada por el motor; el tope de
+cinco ni se asomó, y la unidad se llevó ochenta y cinco minutos de los que setenta fueron
+revisión.
+
+Y que el registro no lo esconda: al entregar el paso 8, tanto `control_why` como el archivo
+de revisión cuentan las pasadas y los confirmados de TODA la unidad, no los de la última
+tanda. Un `control_why` que dice «4 hallazgos confirmados» cuando fueron veinticuatro
+repartidos en ocho pasadas convierte el registro en un sitio donde las cosas siempre salen
+bien.
 
 CÓMO CORREGIR. Un arreglo hecho a ojo produce el hallazgo de la pasada siguiente, y esa
 cadena es la que encarece la revisión: en una corrida real del 2026-08-16, cuatro pasadas

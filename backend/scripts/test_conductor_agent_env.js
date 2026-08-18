@@ -58,7 +58,7 @@ const crearApts = () => http.createServer((req, res) => {
     const herramienta = (peticion.params && peticion.params.name) || '';
     llamadas.push(herramienta);
 
-    if (errorObjeto && herramienta === 'apts_status') {
+    if (errorObjeto && herramienta === 'status') {
       return responder({
         jsonrpc: '2.0',
         id: peticion.id,
@@ -75,7 +75,7 @@ const crearApts = () => http.createServer((req, res) => {
       });
     }
 
-    const datos = herramienta === 'apts_status'
+    const datos = herramienta === 'status'
       ? {
         project_url: PROYECTO,
         phase: 'implementation',
@@ -226,7 +226,7 @@ const intentos = (r) => r.eventos.filter((e) => e.evento === 'agente');
       'el diario se queda con la hora de reset', JSON.stringify(parada(r).reset));
     ok(/no se gastan|Quedaba/i.test(parada(r).detalle || ''),
       'el detalle dice que quedaba escalera sin gastar');
-    ok(!llamadas.includes('apts_next'), 'no reclama nada al parar');
+    ok(!llamadas.includes('next'), 'no reclama nada al parar');
     console.log();
 
     console.log('1.bis) sin saldo: mismo codigo, distinto detalle');

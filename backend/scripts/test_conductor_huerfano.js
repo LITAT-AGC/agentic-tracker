@@ -66,7 +66,7 @@ const crearApts = () => http.createServer((req, res) => {
     const herramienta = (peticion.params && peticion.params.name) || '';
 
     let datos = {};
-    if (herramienta === 'apts_status') {
+    if (herramienta === 'status') {
       datos = {
         project_url: PROYECTO,
         phase: 'implementation',

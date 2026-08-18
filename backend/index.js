@@ -2431,7 +2431,7 @@ const integrationArtifacts = {
     //        una operacion: un cliente que leyera el contrato viejo encuentra ahora una
     //        herramienta mas. Es la unica via publicada para tocar la jerarquia del backlog,
     //        y sin ella un proyecto con la epica vacia solo salia con un UPDATE a mano.
-    artifactVersion: '1.1.0',
+    artifactVersion: '2.0.0',
     kind: 'skills_contract',
     recommended: true,
     usagePriority: 'discovery',
@@ -2492,7 +2492,7 @@ const integrationArtifacts = {
     //        que es una puerta trasera justo al lado de la compuerta. Por eso este spec PIDE el
     //        generador 1.6.0: uno anterior ignora el campo y emite las tres capas con los 23
     //        `mcp__apts__*` puestos, que es peor que no emitirlas.
-    artifactVersion: '1.2.0',
+    artifactVersion: '1.3.0',
     kind: 'runtime_surface_spec',
     recommended: true,
     usagePriority: 'discovery',
@@ -2694,7 +2694,7 @@ const integrationArtifacts = {
     // que no va a pasar solo. Se añaden ademas las frases equivalentes de OpenAI y
     // OpenRouter, que no estan medidas aqui y se dicen como tales. Quien se quede en 1.14.0
     // seguira leyendo «el agente fallo» cuando lo que pasa es que hay que pagar.
-    artifactVersion: '1.15.0',
+    artifactVersion: '1.16.0',
     kind: 'loop_conductor',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -2872,7 +2872,7 @@ const integrationArtifacts = {
     // `apts-review-edge-cases`, `apts-review-acceptance`— cuando el adaptador las trae, que es
     // donde el operador les fija modelo y esfuerzo. Con un adaptador anterior no cambia nada:
     // se lanzan con el subagente generico y las instrucciones de siempre, que son las mismas.
-    artifactVersion: '1.5.0',
+    artifactVersion: '1.6.0',
     kind: 'loop_conductor_prompt',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -4531,10 +4531,10 @@ const MCP_IDENTITY_FIELDS_BY_OPERATION = {
   log_agent_progress: ['task_id', 'project_url', 'agent_name'],
   report_blocker: ['task_id', 'project_url', 'agent_name'],
   heartbeat: ['task_id', 'project_url', 'agent_name'],
-  apts_next: ['project_url', 'agent_name'],
-  apts_status: ['project_url'],
-  apts_workflow_step: ['project_url', 'agent_name'],
-  apts_submit_step: ['project_url', 'agent_name'],
+  next: ['project_url', 'agent_name'],
+  status: ['project_url'],
+  workflow_step: ['project_url', 'agent_name'],
+  submit_step: ['project_url', 'agent_name'],
   create_initiative: ['project_url'],
   set_agent_role: ['project_url'],
   adopt_backlog_items: ['project_url']
@@ -4840,7 +4840,7 @@ const mcpLocalExecutor = {
     { fallbackMessage: 'Failed to register heartbeat', logMessage: 'heartbeat failed' }
   ),
 
-  aptsNext: (payload) => runMcpOperation(
+  next: (payload) => runMcpOperation(
     () => aptsNext(db, {
       project_url: requireMcpTrimmedString(payload?.project_url, 'project_url is required'),
       agent_name: requireMcpTrimmedString(payload?.agent_name, 'agent_name is required')
@@ -4848,7 +4848,7 @@ const mcpLocalExecutor = {
     { fallbackMessage: 'Failed to resolve next method step', logMessage: 'apts_next failed' }
   ),
 
-  aptsStatus: (payload) => runMcpOperation(
+  status: (payload) => runMcpOperation(
     () => {
       // La ruta lee `url` de la cadena de consulta; el contrato lo llama project_url.
       const projectUrl = requireMcpTrimmedString(payload?.project_url, 'url is required');
@@ -4858,7 +4858,7 @@ const mcpLocalExecutor = {
     { fallbackMessage: 'Failed to read method status', logMessage: 'apts_status failed' }
   ),
 
-  aptsSetStatus: (payload) => runMcpOperation(
+  setStatus: (payload) => runMcpOperation(
     () => {
       const backlogItemId = payload?.backlog_item_id;
       if (!UUID_REGEX.test(backlogItemId || '')) {
@@ -4885,7 +4885,7 @@ const mcpLocalExecutor = {
     }
   ),
 
-  aptsWorkflowStep: (payload) => runMcpOperation(
+  workflowStep: (payload) => runMcpOperation(
     () => {
       const projectUrl = requireMcpTrimmedString(payload?.project_url, 'project_url is required');
       const agentName = requireMcpTrimmedString(payload?.agent_name, 'agent_name is required');
@@ -4898,7 +4898,7 @@ const mcpLocalExecutor = {
     { fallbackMessage: 'Failed to serve workflow step', logMessage: 'apts_workflow_step failed' }
   ),
 
-  aptsSubmitStep: (payload) => runMcpOperation(
+  submitStep: (payload) => runMcpOperation(
     () => {
       const projectUrl = requireMcpTrimmedString(payload?.project_url, 'project_url is required');
       const agentName = requireMcpTrimmedString(payload?.agent_name, 'agent_name is required');

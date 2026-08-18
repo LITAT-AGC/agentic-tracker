@@ -202,6 +202,76 @@ vista. Se buscan con `Get-CimInstance Win32_Process -Filter "Name='node.exe'"` f
 las dos corridas salieron con 24—: un freno mayor no cura un cuelgue infinito, solo tarda mas en
 declararlo.
 
+**Un fallo pasajero del servidor perdia la anotacion sin gastar un reintento.** Medido el 2026-08-17
+en "tickets", al cerrar la vuelta 2 de una corrida de cinco con Flash: el conductor escribio «no se
+pudo anotar el progreso en la tarea (log_agent_progress: Failed to log agent progress)». El log de
+PROD nombra la causa a las 21:15:57 —`select * from "tasks" where "id" = $1 - Connection terminated
+unexpectedly`, un 500—: una conexion del pool de Postgres que el otro extremo habia cerrado en
+silencio y que el pool entrego igualmente. Que fue pasajero lo prueba la llamada siguiente del mismo
+cierre: `update_task_status` a `done`, contra el mismo servidor y la misma tarea, paso sin un aviso.
+El mensaje generico es de paso la firma de un 5xx —un 404 o un 400 viajan con su texto propio,
+porque `shouldExposeError` solo calla por encima de 500—.
+
+Lo que convertia ese 500 en una anotacion perdida era del CLIENTE. `intentarMcp` marcaba
+`reintentable = false` para TODO error de operacion, asi que los tres reintentos configurados
+(2s/6s/18s) no se gastaban; el mismo 500, si llegaba como HTTP 5xx por el cable, si se reintentaba.
+La asimetria es lo grave, porque el servidor ya mandaba la respuesta dentro del objeto de error
+—`retriable: true` y su `statusCode`, comprobado contra PROD con una sonda— y el conductor la tiraba.
+Ahora se cree lo que dice el servidor y solo se deduce del `statusCode` cuando calla: un 404 se sigue
+rindiendo a la primera sin pagar esperas. Lo fija `test_conductor_reintento_transitorio.js`, que
+copia entero el sobre de error de PROD a proposito —si alla cambiara la forma, la prueba seguiria en
+verde mientras el conductor deja de reintentar, y alguien tendria que venir a mirar por que—.
+
+La causa se ataca ademas donde nace. El pool del backend era `min: 2` sin `keepAlive`, y con el
+minimo por encima de cero el reaper no recicla NUNCA esas dos conexiones: en un servidor de poco
+trafico son justo las que atienden casi todo y las que se pudren, al otro lado de una red privada con
+NAT y contra una base compartida con otros sistemas. Pasa a `min: 0` —una conexion ociosa se cierra y
+la siguiente peticion abre otra, milisegundos en red local— y `keepAlive: true`. Tres caidas asi en
+quince dias de log, y son practicamente los unicos errores de nivel 50 del periodo: es episodico, no
+una degradacion en curso.
+
+**Cinco operaciones se llamaban `apts_apts_*` en el cliente, y por eso los agentes inventaban
+herramientas.** Medido el 2026-08-17 en "tickets": dos llamadas a `apts_apts_get_backlog_item` y
+`apts_apts_get_task`, que no existen. No era capricho del modelo sino del contrato: cinco de las 23
+operaciones llevaban el prefijo DENTRO del nombre —`apts_next`, `apts_status`, `apts_set_status`,
+`apts_workflow_step`, `apts_submit_step`— y las otras dieciocho no. El runtime antepone el nombre del
+servidor MCP a todas, asi que en opencode convivian `apts_apts_next` y `apts_get_task`: dos
+convenciones a la vez, y el modelo generalizaba la equivocada. El servidor nunca anuncio un
+`apts_apts_*` —se comprobo pidiendole el catalogo—: el doble prefijo lo pone el cliente.
+
+Ahora las cinco se llaman `next`, `status`, `set_status`, `workflow_step` y `submit_step`, y las 23
+quedan con una sola forma: `apts_next` y `apts_get_task` en opencode, `mcp__apts__next` y
+`mcp__apts__get_task` en Claude Code. **Esto ROMPE a quien no regenere sus adaptadores**: la lista de
+`tools` es una allowlist EXCLUSIVA por nombre exacto, asi que un cliente con `mcp__apts__apts_next`
+escrito se queda sin las cinco operaciones que conducen el metodo. Por eso `skills_json` salta a
+**2.0.0** y no a una minor. Se descarto anunciar los nombres viejos como alias: no rompe a nadie,
+pero las cinco son el **19% del catalogo** —922 tokens de 4.926, medidos contra PROD— y ese peaje se
+paga en CADA sesion mientras sigan anunciados; regenerar los dos proyectos vivos es una sola vez. La
+prosa que dice `apts_next` no se toca y ahora es MAS correcta que antes: describe exactamente la
+herramienta que ve un agente de opencode, que era lo que el doble prefijo desmentia.
+
+**La revision adversaria encontraba de una en una lo que estaba repetido.** La compuerta funciona
+—en cinco unidades destapo carreras de FK, comentarios de un issue pintados bajo otro, un titulo
+leido fuera de la transaccion, un `confirm` que aceptaba la cadena "true"—, pero converge muy caro.
+Medido el 2026-08-17 en una unidad de comentarios: **ocho pasadas**, veinticuatro confirmados, y de
+la cuarta a la septima TODAS sobre el mismo archivo de vista, cada una una variante del mismo olvido.
+Setenta de sus ochenta y cinco minutos fueron revision. Dos causas, las dos ya corregidas en el
+prompt y en las lentes de los agentes generados: las capas devolvian una INSTANCIA en vez de la
+familia —ahora barren las hermanas antes de devolver, y la familia entera es UN hallazgo—, y Blind
+Hunter y Edge Case Hunter se pisaban en lo mismo —ahora la concurrencia y las rutas de fallo son de
+Edge y solo de Edge, y Blind no las reporta aunque las vea—.
+
+**Y el tope de revisitas no puede ver ese ciclo, por diseño.** Las ocho pasadas ocurrieron con el
+cursor parado en el paso 5, no en el 8: el agente no esquivo nada, hizo lo que el prompt permite
+—corregir antes de entregar cuando la rama no esta servida—. Pero el motor solo cuenta saltos
+DECLARADOS, asi que conto **una** revisita de las cinco que permite, y un ciclo de ocho pasadas le
+parecio identico a uno de una. Lo que ocurre dentro de un paso el metodo no lo ve y no lo vera: el
+tope de ese ciclo tiene que vivir donde si se ve, que es el prompt. Ahora son cuatro pasadas seguidas
+como mucho; a la quinta hay que entregar, caminar al paso 8 y declarar `{"goto":"step:5"}`, que gasta
+revisita y devuelve el freno al motor. Y el `control_why` del submit terminal cuenta las pasadas y
+los confirmados de TODA la unidad: decir «4 hallazgos» cuando fueron veinticuatro convierte el
+registro en un sitio donde las cosas siempre salen bien.
+
 **Y la plantilla se corrige en vez de conservarse.** La 1.2.0 recomendaba la via secuencial bajo
 opencode nombrando el caso; se escribio sobre un diagnostico equivocado y no protegia de nada.
 Vuelve a pedir la tanda paralela, dice que una capa que no vuelve se arregla en la configuracion

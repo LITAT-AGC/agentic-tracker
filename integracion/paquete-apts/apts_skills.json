@@ -900,7 +900,7 @@
       }
     },
     {
-      "name": "apts_next",
+      "name": "next",
       "description": "Resolve the next deterministic method step for an agent in a project (server-authoritative method engine). Minimum payload via the official MCP server: none (the integration layer supplies project_url and agent_name). Returns a single directive { next: run_step|wait|done|blocked, target_id, role, why, args } for the calling agent's required role, advancing the lifecycle phase and claiming iterable work without collision across agents. Use this instead of reading and reasoning over project state in-context.",
       "parameters": {
         "type": "object",
@@ -916,7 +916,7 @@
       }
     },
     {
-      "name": "apts_status",
+      "name": "status",
       "description": "Read the method state of a project in data-mode: backlog item counts by status for the active epic, current lifecycle phase, progress, and a single read-only recommendation line (computed via apts_next without mutating state). Minimum payload via the official MCP server: none (the integration layer supplies project_url; pass agent_name for an agent-specific recommendation).",
       "parameters": {
         "type": "object",
@@ -932,7 +932,7 @@
       }
     },
     {
-      "name": "apts_set_status",
+      "name": "set_status",
       "description": "Advance a story (backlog item) through the method state machine (ready_for_dev -> in_progress -> review -> done). The server validates the transition and rejects invalid ones with 409. This is the method's state machine, distinct from update_backlog_item (free-form edit). Story-only in this version (epic/initiative phase advance is handled by apts_next).",
       "parameters": {
         "type": "object",
@@ -957,7 +957,7 @@
       }
     },
     {
-      "name": "apts_workflow_step",
+      "name": "workflow_step",
       "description": "Serve the current generative workflow step for an agent by goteo (model B: fresh context per step). The server reconstructs the step payload from server-authoritative state (the agent's cursor in project_state): it re-cables the verbatim instruction_chunk at serve-time and reinjects only what the step needs[] as bounded slices, so per-step context stays ~constant regardless of project size. Returns { mode: run|await_input|wait|done|blocked, workflow_key, step_key, step_order, goal, role, target_id, instruction_chunk, template_slice, needs[], outputs[] }. If the step is an elicitation point, mode='await_input' with questions[]; resume by calling again with `answers`. Minimum payload via the official MCP server: none (the integration layer supplies project_url and agent_name).",
       "parameters": {
         "type": "object",
@@ -976,7 +976,7 @@
       }
     },
     {
-      "name": "apts_submit_step",
+      "name": "submit_step",
       "description": "Capture the output of the current workflow step and advance the cursor (goteo, model B). Doc artifacts are persisted as typed semantic_documents (doc_type from the enum: brief/prd/architecture/epics/story_spec/retro), code is recorded as a reference (code_ref), and iterable units update the claimed story's status. What is captured is decided by the step's declared outputs[] (coherent with the workflow-level completion that apts_next checks). Then it advances to the next step, or closes the workflow and releases the pointer. Returns { ok, captured[], advanced_to, workflow_complete }. Pass the produced content/reference in `output`. Minimum payload via the official MCP server: none (the integration layer supplies project_url and agent_name).",
       "parameters": {
         "type": "object",

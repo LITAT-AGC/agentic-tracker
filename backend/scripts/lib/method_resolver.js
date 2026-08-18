@@ -1095,7 +1095,7 @@ const aptsSubmitStep = (db, { project_url, agent_name, output }) =>
       const ausentes = capas.filter((capa) => !texto.includes(capa));
       if (ausentes.length) {
         await registrarDesviacion(trx, {
-          operacion: 'apts_submit_step',
+          operacion: 'submit_step',
           regla: 'revision-adversaria-de-tres-capas',
           resultado: 'allowed',
           identidad: { agent_name, project_url },

@@ -37,11 +37,23 @@ const requireConnectionString = (connectionString, { label, variables }) => {
   );
 };
 
+// `keepAlive` y `min: 0` son la misma precaucion contra el mismo fallo: una conexion
+// ociosa que el otro extremo cerro en silencio y que el pool entrega igualmente, con lo
+// que revienta la primera consulta que la use. Visto en PROD el 2026-08-17 —`select *
+// from "tasks" where "id" = $1 - Connection terminated unexpectedly`, tres veces en
+// quince dias—: la base esta al otro lado de la red privada y es compartida con otros
+// sistemas, asi que en medio hay NAT y tiempos de espera que no gobernamos.
+//
+// Con `min: 2` el pool mantiene dos conexiones abiertas para siempre —el reaper solo
+// cierra por encima del minimo— y en un servidor de poco trafico son justo esas dos las
+// que se pudren. Con `min: 0` una conexion ociosa se cierra y la siguiente peticion abre
+// otra, que contra una base en red local cuesta milisegundos. `keepAlive` ataca el otro
+// lado: que el corte no llegue a ocurrir.
 const createPostgresConfig = (connectionString) => ({
   client: 'pg',
-  connection: connectionString,
+  connection: { connectionString, keepAlive: true },
   pool: {
-    min: 2,
+    min: 0,
     max: 10
   },
   migrations: {

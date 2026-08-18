@@ -66,7 +66,7 @@ const crearApts = () => http.createServer((req, res) => {
     const herramienta = (peticion.params && peticion.params.name) || '';
 
     let datos = {};
-    if (herramienta === 'apts_status') {
+    if (herramienta === 'status') {
       llamadas += 1;
       const cerrando = llamadas > guion.vueltas;
       datos = {
@@ -77,7 +77,7 @@ const crearApts = () => http.createServer((req, res) => {
       };
     } else if (herramienta === 'register_task') {
       datos = { task_id: 'cccccccc-9999-0000-1111-222222222222' };
-    } else if (herramienta === 'apts_next') {
+    } else if (herramienta === 'next') {
       // Solo la llama la rama `done`, para persistir el avance de fase.
       datos = { next: 'done' };
     }
