@@ -31,6 +31,35 @@ node integracion/conductor/apts-loop.js \
   --max-iterations 20
 ```
 
+### Si lo lanzas desde otro proceso, DESLÍGALO
+
+Una corrida dura de veinte minutos a dos horas. Si el conductor cuelga del árbol de
+procesos de la cosa que lo lanzó —una sesión de agente, un CI, una terminal que se
+cierra—, muere con ella y **no deja rastro de por qué**: sin `parada` en el diario y sin
+una línea en stderr, porque un proceso matado nunca vacía el buffer de la redirección.
+
+```powershell
+# Windows: hijo de nadie
+Start-Process pwsh -ArgumentList '-NoProfile','-File','.apts\conductor\apts-supervisor.ps1',
+  'node','.apts\conductor\apts-loop.js','--max-iterations','2' `
+  -WindowStyle Hidden -RedirectStandardOutput run.log -RedirectStandardError run.err.log
+```
+
+```bash
+# POSIX
+setsid nohup node .apts/conductor/apts-loop.js --max-iterations 2 \
+  > run.log 2> run.err.log < /dev/null &
+```
+
+Costó tres corridas descubrirlo, el 2026-08-19. Las dos primeras muertes coincidieron con
+el arranque de Playwright y parecían cosa suya; la tercera se llevó por delante también al
+**supervisor**, que está en PowerShell justamente para sobrevivir a un barrido de `node`, y
+ahí se vio que lo que caía era el árbol entero. Desligado, la sesión que lo lanzó se murió a
+mitad y la corrida siguió, cerró dos unidades más y terminó sola.
+
+Desligar y el supervisor resuelven cosas distintas y se complementan: desligar te salva de
+que muera **quien te lanzó**; el supervisor, de que te maten **a ti**.
+
 La identidad cae al entorno si no se pasa por bandera: `APTS_MCP_URL`, `APTS_API_KEY`,
 `APTS_PROJECT_URL`, `APTS_AGENT_NAME`, `APTS_AGENT_EMAIL`.
 

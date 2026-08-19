@@ -2800,7 +2800,15 @@ const integrationArtifacts = {
     // «el tope paro y hay trabajo a medias». Con la nota de que un 17 no siempre es un
     // fallo —una unidad grande puede seguir viva al agotarse las vueltas— y de que lo que
     // hay que mirar es si se repite sin que el backlog avance.
-    artifactVersion: '1.21.0',
+    // 1.22.0: «Si lo lanzas desde otro proceso, DESLIGALO», con la receta para Windows y
+    // para POSIX. Costo tres corridas el 2026-08-19: el conductor colgaba del arbol de
+    // procesos de la sesion que lo lanzaba y moria con ella, sin `parada` en el diario y
+    // sin stderr —un proceso matado no vacia el buffer de la redireccion—. Las dos
+    // primeras muertes parecian cosa de Playwright; la tercera se llevo tambien al
+    // supervisor, que esta en PowerShell para sobrevivir a un barrido de `node`, y ahi se
+    // vio que caia el arbol entero. Desligar y el supervisor son complementarios: uno te
+    // salva de que muera quien te lanzo, el otro de que te maten a ti.
+    artifactVersion: '1.22.0',
     kind: 'loop_conductor_manual',
     recommended: false,
     usagePriority: 'optional_entrypoint',

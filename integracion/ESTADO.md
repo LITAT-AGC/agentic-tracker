@@ -2546,6 +2546,43 @@ Playwright, dejando vivos su backend (34211) y su Vite (34210). Dos de dos es un
 y no un mecanismo: no hay con que cerrarlo, y queda anotado para la proxima vez que pase. Conducir
 bajo `apts-supervisor.ps1` es lo que hace que deje de importar.
 
+## El cliente "tickets" llego a 26/26, y lo ultimo que faltaba era desligar el proceso
+
+El 2026-08-19 la iniciativa de `tickets` cerro entera: **26 de 26** historias, fase `done`,
+`PARADA (done): lifecycle completo` —no el tope de iteraciones, sino el motor diciendo que la fase
+termino—. Lint en 0 y 392 pruebas de backend en verde. Ocho unidades se cerraron esa noche por unos
+110 USD, media de 13,70 por unidad, contra los 1,48 de `deepseek-v4-flash` bajo opencode.
+
+**Las tres compuertas nuevas se estrenaron en esa misma corrida** y se comportaron:
+
+- `output.gates` se entrego correcto en las **cuatro** ultimas unidades, **sin un solo rechazo**, y
+  el lint paso de correrse cero veces a correrse diez en una sola vuelta.
+- El **17** disparo en real dos horas despues de existir, sobre el fallo exacto que lo justificaba.
+- La plantilla 1.9.0 aguanto: el agente siguio usando el segundo plano para las tres capas —que es
+  legitimo— y dejo de irse.
+
+**Lo que costo tres corridas enteras no era de APTS.** El conductor murio tres veces sin escribir
+`parada`, y a la tercera se llevo por delante al supervisor —que esta en PowerShell justamente para
+sobrevivir a un barrido de `node`— y al agente, sin una linea en stderr. La causa no era ni la
+maquina ni Playwright, aunque las dos primeras muertes coincidieran con su arranque: el conductor
+colgaba del arbol de procesos de la sesion que lo lanzaba, y moria con ella.
+
+La cura es de una linea y vale para cualquiera que conduzca desde dentro de otro proceso: **lanzar
+el conductor DESLIGADO**, con `Start-Process` en Windows o `setsid`/`nohup` en POSIX, en vez de como
+hijo de la sesion. Comprobado en la misma noche: con el conductor desligado, la sesion que lo lanzo
+se murio a mitad y **la corrida siguio**, cerro dos unidades mas y termino sola. Queda escrito en el
+manual del conductor, que es donde lo va a buscar quien lo necesite.
+
+Dos limites que esas muertes dejaron a la vista y que no se arreglan solos:
+
+- **Una corrida matada no deja rastro contable.** El coste solo aparece en los eventos `result`, y
+  un proceso muerto no cierra ninguno: 92 minutos y 18 subagentes se fueron con `$0,00 · 0 tok` en
+  el log. No es la regresion del `0 tok` que se arreglo el 2026-08-18 —aquella era leer mal muchos
+  `result`, y aqui no hay ni uno— pero el efecto en la factura es el mismo.
+- **`run.err.log` se pierde entero.** Un proceso matado nunca vacia el buffer de la redireccion de
+  PowerShell, asi que el unico canal que sobrevive es el diario. Es exactamente la razon por la que
+  la regla del supervisor se lee del diario y no del codigo de salida.
+
 ## Abierto
 
 **El camino de Cloudflare no se ha visto devolver un vector.** El `CLOUDFLARE_API_TOKEN` del `.env`
