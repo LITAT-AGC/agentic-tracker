@@ -2912,7 +2912,13 @@ const integrationArtifacts = {
     // cualquier subagente en vuelo. Aqui la prosa es lo unico que hay: el servidor no
     // alcanza al arbol de procesos del cliente, asi que no puede impedirlo. Lo que si se
     // hizo es que deje de pasar inadvertido, con el codigo 17 del conductor 1.18.0.
-    artifactVersion: '1.8.0',
+    // 1.9.0: la 1.8.0 se quedo corta el mismo dia. Prohibia delegar la unidad a un
+    // SUBAGENTE, y la vuelta siguiente cayo por la otra puerta: el agente mando la suite
+    // de tests a segundo plano y escribio «I'll pause here and continue automatically once
+    // the background test run notifies me». No hubo aviso porque no habia a quien avisar.
+    // La regla se generaliza a lo que de verdad la causa —no hay turno siguiente, asi que
+    // terminar el turno esperando algo es morir— con los dos casos concretos debajo.
+    artifactVersion: '1.9.0',
     kind: 'loop_conductor_prompt',
     recommended: false,
     usagePriority: 'optional_entrypoint',

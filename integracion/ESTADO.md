@@ -2517,6 +2517,35 @@ del huerfano y del flujo de sesion aceptan los dos codigos del tope, porque lo q
 un proceso huerfano ni la falta del endpoint de sesion descarrilan la corrida, no cual de los dos
 finales le toca. Las **27** en verde.
 
+## Y el 17 disparo a la vuelta siguiente, por la otra puerta
+
+La plantilla 1.8.0 prohibia delegar la unidad a un subagente y retornar. La vuelta siguiente, el
+mismo dia, cayo igual sin desobedecerla: el agente mando la suite de tests **a segundo plano** y
+escribio su ultima frase, *«I'll pause here and continue automatically once the background test run
+notifies me»*. No hubo aviso porque no habia a quien avisar. 64 turnos, 5 min 47 s, 2,30 USD, la
+unidad abierta y cinco archivos sin commitear.
+
+Lo que la 1.8.0 nombraba era un sintoma. La causa es que **no hay turno siguiente**: la sesion es de
+un solo disparo, el conductor la lanzo sin nadie al teclado, y cuando el turno acaba muere todo lo
+que quedara en vuelo. Da igual si lo que se dejo en vuelo es un subagente o un `&`. La
+**1.9.0** dice la regla asi —terminar el turno esperando algo es morir— y deja los dos casos
+concretos debajo, que es lo que se reconoce cuando se esta a punto de repetirlo. Y aniade la salida
+honrada: si de verdad no se puede terminar en este turno, eso es un bloqueo, y un bloqueo declarado
+es un resultado.
+
+**Lo que si funciono es la parte que no es prosa.** La corrida salio **17** y no 14: la unidad a
+medias no se pudo disfrazar de exito, que es exactamente para lo que se estreno el codigo unas horas
+antes. Y el supervisor leyo `parada` en el diario, decidio que habia sido una decision del conductor
+y **no relanzo** —correcto: relanzar a un agente que se va solo habria quemado credito sin arreglar
+nada—.
+
+Queda dicho lo que no se sabe. Esa misma noche **dos corridas murieron desde fuera** —92 min y 11
+min, sin `parada` y sin una linea en stderr, porque un proceso matado nunca vacia el buffer de la
+redireccion de PowerShell—. Las dos murieron en el segundo exacto en que arrancaba la pila de
+Playwright, dejando vivos su backend (34211) y su Vite (34210). Dos de dos es una correlacion firme
+y no un mecanismo: no hay con que cerrarlo, y queda anotado para la proxima vez que pase. Conducir
+bajo `apts-supervisor.ps1` es lo que hace que deje de importar.
+
 ## Abierto
 
 **El camino de Cloudflare no se ha visto devolver un vector.** El `CLOUDFLARE_API_TOKEN` del `.env`

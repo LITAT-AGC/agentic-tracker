@@ -27,20 +27,30 @@ En resumen de lo que se espera de ti:
 4. Si no puedes continuar, reporta el bloqueo en APTS y detente. NO cierres la story
    como done.
 
-**La unidad la conduces TÚ, en esta sesión.** No delegues la unidad entera a un subagente
-y retornes: tu sesión es lo único que mantiene vivo el trabajo, y en cuanto termina se
-lleva por delante a cualquier subagente en vuelo. No termines tu turno hasta que la unidad
-esté cerrada o hayas reportado un bloqueo.
+**NO HAY TURNO SIGUIENTE. No termines tu turno esperando nada.**
 
-Esto no prohíbe los subagentes —las tres capas de revisión van en subagente y es
-innegociable—, prohíbe **irte**. Si tu runtime lanza subagentes en segundo plano y te
-devuelve el control enseguida, tienes que **esperar su resultado** y seguir trabajando con
-él; entregar el paso no es haber lanzado a alguien que lo hará.
+Corres en una sesión de un solo disparo que el conductor lanzó sin nadie al teclado. Cuando
+tu turno acaba, el proceso acaba: no llega ninguna notificación, no te despierta nadie, y
+todo lo que hayas dejado en vuelo —un subagente, un comando en segundo plano, una suite de
+tests— muere contigo. Tu turno termina **sólo** cuando la unidad está cerrada o has
+reportado un bloqueo. Cualquier otra cosa deja trabajo a medias y una corrida que parece
+haber ido bien.
 
-Pasó el 2026-08-19: un agente delegó la unidad completa a un ejecutor en segundo plano y
-retornó a los dos turnos. El proceso salió con éxito, el conductor leyó un turno bueno y
-la corrida acabó dando por buena una unidad que se quedó a medias, con seis archivos sin
-commitear y el ejecutor muerto al cerrarse la sesión que lo sostenía.
+En concreto, y las dos costaron una vuelta el 2026-08-19:
+
+- **No delegues la unidad entera a un subagente y retornes.** Un agente le pasó la unidad
+  completa a un ejecutor en segundo plano, escribió «lo he lanzado» y retornó a los dos
+  turnos. El ejecutor había llegado a tener los tests en verde y murió con la sesión: seis
+  archivos sin commitear. Esto **no** prohíbe los subagentes —las tres capas de revisión
+  van en subagente y es innegociable—, prohíbe **irte** en vez de esperar su resultado.
+- **No lances nada en segundo plano para «seguir cuando avise».** Otro agente mandó la
+  suite de tests al segundo plano y escribió: «I'll pause here and continue automatically
+  once the background test run notifies me». No hubo aviso, porque no había a quién
+  avisar. Si tu runtime te ofrece lanzar en segundo plano, **no lo uses para esperar**:
+  corre el comando y aguarda su salida, aunque tarde.
+
+Si de verdad no puedes terminar dentro de este turno, eso es un bloqueo: repórtalo en APTS
+y detente diciéndolo. Un bloqueo declarado es un resultado; irse a media faena no lo es.
 
 ELICITACIÓN. El paso de entrada de dev-story llega con `mode: "await_input"` y preguntas
 de BMAD del tipo "¿qué story quieres desarrollar?". Bajo APTS esa pregunta ya está
