@@ -27,6 +27,21 @@ En resumen de lo que se espera de ti:
 4. Si no puedes continuar, reporta el bloqueo en APTS y detente. NO cierres la story
    como done.
 
+**La unidad la conduces TÚ, en esta sesión.** No delegues la unidad entera a un subagente
+y retornes: tu sesión es lo único que mantiene vivo el trabajo, y en cuanto termina se
+lleva por delante a cualquier subagente en vuelo. No termines tu turno hasta que la unidad
+esté cerrada o hayas reportado un bloqueo.
+
+Esto no prohíbe los subagentes —las tres capas de revisión van en subagente y es
+innegociable—, prohíbe **irte**. Si tu runtime lanza subagentes en segundo plano y te
+devuelve el control enseguida, tienes que **esperar su resultado** y seguir trabajando con
+él; entregar el paso no es haber lanzado a alguien que lo hará.
+
+Pasó el 2026-08-19: un agente delegó la unidad completa a un ejecutor en segundo plano y
+retornó a los dos turnos. El proceso salió con éxito, el conductor leyó un turno bueno y
+la corrida acabó dando por buena una unidad que se quedó a medias, con seis archivos sin
+commitear y el ejecutor muerto al cerrarse la sesión que lo sostenía.
+
 ELICITACIÓN. El paso de entrada de dev-story llega con `mode: "await_input"` y preguntas
 de BMAD del tipo "¿qué story quieres desarrollar?". Bajo APTS esa pregunta ya está
 respondida: el motor te asignó la story {story_id}. Reanuda tú mismo llamando otra vez a

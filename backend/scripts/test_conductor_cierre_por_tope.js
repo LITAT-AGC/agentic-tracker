@@ -179,7 +179,11 @@ const agentes = (r) => r.eventos.filter((e) => e.evento === 'agente');
     console.log('2) el motor sigue apuntando a la misma: eso tampoco se disfraza');
     r = await correr(puerto, { cierre: recomendacionDeTrabajo });
     p = parada(r);
-    ok(r.codigoSalida === 14, 'sale 14', String(r.codigoSalida));
+    // 17 y no 14 desde el 2026-08-19: los dos finales del tope dejaron de compartir
+    // codigo el dia que uno de ellos —el agente que delego la unidad entera a un
+    // subagente en segundo plano y retorno— salio con el codigo de que todo fue bien.
+    ok(r.codigoSalida === 17, 'sale 17 y no 14: el tope paro con la unidad a medias', String(r.codigoSalida));
+    ok(p.motivo === 'tope_iteraciones', 'el motivo sigue siendo el del tope', p.motivo);
     ok(p.unidad_cerrada === false, 'el diario dice que NO cerro', JSON.stringify(p.unidad_cerrada));
     ok(/sigue en marcha/.test(p.detalle || ''), 'y el detalle lo dice en prosa', p.detalle);
     ok(tareas(r).some((e) => e.accion === 'soltada'),
@@ -224,7 +228,10 @@ const agentes = (r) => r.eventos.filter((e) => e.evento === 'agente');
     // es identica por construccion —entre las dos no ha corrido ningun agente—, asi que
     // sin la guarda el tope se reportaria como 13.
     r = await correr(puerto, { cierre: recomendacionDeTrabajo, maxStalls: 1 });
-    ok(r.codigoSalida === 14, 'para por el tope (14) y no por estancamiento (13)', String(r.codigoSalida));
+    // 17 y no 14 porque el cierre sigue apuntando a la misma unidad; lo que este caso fija
+    // es que para el TOPE y no el estancamiento, o sea que no es 13.
+    ok(r.codigoSalida !== 13, 'no para por estancamiento (13)', String(r.codigoSalida));
+    ok(r.codigoSalida === 17, 'para por el tope, con la unidad a medias (17)', String(r.codigoSalida));
     ok(parada(r).motivo === 'tope_iteraciones', 'con su motivo', parada(r).motivo);
   } finally {
     servidor.close();

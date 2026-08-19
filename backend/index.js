@@ -2700,7 +2700,14 @@ const integrationArtifacts = {
     // (256 KB) y en aquella corrida de 4,6 MB solo alcanzaba a los ultimos objetos. Quien
     // se quede en 1.16.0 seguira midiendo el gasto de sus corridas con Claude Code por un
     // solo tramo, y con cero cuando el corte sea por limite.
-    artifactVersion: '1.17.0',
+    // 1.18.0: codigo de salida 17 —`tope_sin_cerrar`— cuando el tope para la corrida y la
+    // ultima unidad NO cerro. Antes los dos finales salian 14, el codigo de que todo fue
+    // bien. Lo destapo la peor forma de fallar que se ha visto: el 2026-08-19 un agente
+    // delego la unidad ENTERA a un subagente en segundo plano y retorno a los dos turnos;
+    // `claude -p` salio con exito, el conductor leyo un turno bueno y la corrida acabo en
+    // 14 con seis archivos sin commitear. El diario ya decia la verdad en
+    // `unidad_cerrada: false`; el codigo de salida —lo unico que ve un script— no.
+    artifactVersion: '1.18.0',
     kind: 'loop_conductor',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -2788,7 +2795,12 @@ const integrationArtifacts = {
     // Y corrige la tabla de la contabilidad, que prometia «un unico objeto `result` al
     // final»: son muchos, el coste acumula y el `usage` va por tramo. Es lo que arregla
     // `loop_conductor` 1.17.0, contado desde el lado de quien lee la cifra.
-    artifactVersion: '1.20.0',
+    // 1.21.0: la tabla de codigos estrena el 17 y el 14 deja de significar las dos cosas.
+    // Acompania a `loop_conductor` 1.18.0: 14 es «el tope paro y la unidad cerro», 17 es
+    // «el tope paro y hay trabajo a medias». Con la nota de que un 17 no siempre es un
+    // fallo —una unidad grande puede seguir viva al agotarse las vueltas— y de que lo que
+    // hay que mirar es si se repite sin que el backlog avance.
+    artifactVersion: '1.21.0',
     kind: 'loop_conductor_manual',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -2895,7 +2907,12 @@ const integrationArtifacts = {
     // enumeraba tests, build y e2e sin mencionarlo. La plantilla lo dice porque el agente
     // la lee, pero quien lo IMPIDE es el motor: escribir esto solo aqui seria otra regla
     // que vive en la prosa, que son las unicas que se rompen.
-    artifactVersion: '1.7.0',
+    // 1.8.0: prohibe delegar la unidad ENTERA a un subagente y retornar. La sesion del
+    // agente es lo unico que sostiene el trabajo, y al terminar se lleva por delante a
+    // cualquier subagente en vuelo. Aqui la prosa es lo unico que hay: el servidor no
+    // alcanza al arbol de procesos del cliente, asi que no puede impedirlo. Lo que si se
+    // hizo es que deje de pasar inadvertido, con el codigo 17 del conductor 1.18.0.
+    artifactVersion: '1.8.0',
     kind: 'loop_conductor_prompt',
     recommended: false,
     usagePriority: 'optional_entrypoint',

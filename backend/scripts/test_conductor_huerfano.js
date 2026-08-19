@@ -259,7 +259,10 @@ const esperarA = async (cond, ms, que) => {
     const h4 = huerfanos(diario4);
     ok(h4.length === 1 && h4[0].accion === 'ignorado',
       'lo ignora en vez de esperarlo una hora y matarlo', JSON.stringify(h4.map((e) => e.accion)));
-    ok(r5.codigo === 14, 'y la corrida sigue su curso normal', String(r5.codigo));
+    // Lo que se fija es que el huerfano no descarrile la corrida: para por el tope y no
+    // por otra cosa. Los dos codigos del tope valen —14 si la unidad cerro, 17 si no—,
+    // que es cual sea no lo decide este caso.
+    ok([14, 17].includes(r5.codigo), 'y la corrida sigue su curso normal, parando por el tope', String(r5.codigo));
     ok(vivo(process.pid), 'el proceso ajeno sigue vivo');
     console.log();
 

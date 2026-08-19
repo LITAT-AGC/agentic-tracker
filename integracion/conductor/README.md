@@ -701,9 +701,10 @@ operador que puede colgarse.
 | 11 | `wait` — el motor pide otro rol (en modo secuencial es una anomalía) |
 | 12 | fuera de alcance — el paso recomendado no lo conduce este script |
 | 13 | estancado — la huella no cambió en N vueltas |
-| 14 | tope de iteraciones — el diario dice si la última unidad cerró |
+| 14 | tope de iteraciones **y la última unidad cerró** — la corrida dejó todo ordenado |
 | 15 | detenido — alguien lo paró desde el panel |
 | 16 | hay otro conductor vivo sobre este diario, con su agente trabajando |
+| 17 | tope de iteraciones **y la última unidad NO cerró** — hay trabajo a medias |
 | 20 | el agente terminó con error en todos sus intentos |
 | 21 | la CLI del agente agotó su límite de uso |
 | 22 | el comando de `--agent-cmd` no se pudo ejecutar |
@@ -726,11 +727,22 @@ Lo que cambia para quien lee el resultado:
 - Si el ciclo terminó justo en la última vuelta, sale **0**, no 14.
 - Si la última vuelta dejó un **bloqueo**, sale **10**, no 14. Con `--max-iterations 1`
   —la forma de lanzar una corrida de comprobación— antes no había manera de verlo.
-- Si el tope es de verdad lo que paró la corrida, sigue saliendo **14**, pero el `detalle`
-  dice si la última unidad cerró o sigue en marcha, y la parada lleva el campo
-  `unidad_cerrada` junto a `backlog_done` / `backlog_total`. Es un campo y no una frase
-  porque «¿cerró la unidad?» es la pregunta que se le hace al diario después de cada
-  corrida acotada, y una frase no se puede consultar.
+- Si el tope es de verdad lo que paró la corrida, el código **separa los dos finales**:
+  **14** si la última unidad cerró y **17** si sigue en marcha. En los dos casos el
+  `detalle` lo dice en prosa y la parada lleva el campo `unidad_cerrada` junto a
+  `backlog_done` / `backlog_total`. Es un campo y no una frase porque «¿cerró la unidad?»
+  es la pregunta que se le hace al diario después de cada corrida acotada, y una frase no
+  se puede consultar.
+
+  El 17 nació el 2026-08-19 de la peor forma de fallar que se ha visto aquí. El agente
+  delegó la unidad **entera** a un subagente en segundo plano y retornó al instante:
+  `claude -p` salió con éxito a los dos turnos, el conductor leyó un turno bueno, el tope
+  hizo su trabajo y la corrida salió **14** —el código de que todo fue bien— con el
+  ejecutor muerto a media faena y seis archivos sin commitear. El diario ya decía la
+  verdad; el código de salida, que es lo único que ve un script y lo primero que mira una
+  persona, no. Un 17 **no siempre es un fallo** —con `--max-iterations` alto una unidad
+  grande puede seguir viva legítimamente—, y en los dos casos lo que toca es relanzar. Lo
+  que hay que mirar es si se repite **sin que el backlog avance**: eso ya no es el tope.
 - La tarea de ejecución de esa unidad se cierra como `done` cuando el motor confirma que
   cerró, en vez de quedarse suelta en `review`.
 

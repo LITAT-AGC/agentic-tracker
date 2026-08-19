@@ -2474,6 +2474,49 @@ comandos declarados en la descripcion. La plantilla sube a `loop_prompt_code_rev
 cierra por ritmo con un 429 y arrastra a `test_dashboard_backlog_epic_scope` entero sin que nada este
 roto.
 
+## El agente delego la unidad entera y se fue, y la corrida salio con el codigo de que todo fue bien
+
+El 2026-08-19, tercera vuelta seguida sobre `tickets` con Claude Code. El agente llamo a su
+herramienta de subagentes con `run_in_background: true`, le paso la unidad **completa** al ejecutor
+`Backlog Item Executor Dev Test Commit`, escribio «Launched the implementation agent in the
+background» y **retorno**. `claude -p` salio con exito a los **dos turnos**, 0,41 USD. El conductor
+leyo un turno bueno, el tope hizo su trabajo, y la corrida termino en **14**.
+
+Lo que quedo detras: el subagente habia llegado lejisimos —rutas, validadores, vista, tests de
+backend y e2e de Playwright en verde— y murio cuando la sesion que lo sostenia se cerro. Seis
+archivos sin commitear, la unidad abierta, y un codigo de salida diciendo que la corrida habia ido
+bien.
+
+**No es lo mismo que el `run_in_background` de las capas de revision, y la diferencia importa.** En
+las dos vueltas anteriores el agente uso `run_in_background: true` tambien, para las tres capas, y
+funciono: delego la REVISION, espero sus resultados y siguio trabajando el. Aqui delego la UNIDAD y
+se fue. Lo que falla no es el segundo plano: es irse.
+
+**Lo que el servidor puede y no puede hacer.** No puede impedirlo: no alcanza al arbol de procesos
+del cliente, asi que la regla vive en la plantilla (`loop_prompt_code_review` **1.8.0**) y es prosa,
+con lo que eso significa. Lo que si se podia arreglar es que dejara de pasar inadvertido, y ahi
+estaba el defecto de verdad: **el conductor salia 14 en los dos finales del tope**. El diario ya
+decia la verdad —`unidad_cerrada: false`, campo y no frase, desde la vuelta de cierre— pero el
+codigo de salida, que es lo unico que ve un script y lo primero que mira una persona, no.
+
+`loop_conductor` **1.18.0** estrena **17** (`tope_sin_cerrar`): el tope paro y la ultima unidad NO
+cerro. El 14 pasa a significar solo «paro donde tocaba y dejo esto ordenado». El motivo sigue siendo
+`tope_iteraciones` en los dos, porque lo es; lo que se separa es el significado. El manual sube a
+**1.21.0** con la tabla corregida y con la advertencia de que **un 17 no siempre es un fallo** —con
+`--max-iterations` alto, una unidad grande puede seguir viva legitimamente al agotarse las
+vueltas—: en los dos casos lo que toca es relanzar, y lo que hay que mirar es si se repite **sin que
+el backlog avance**.
+
+El supervisor no necesito tocarse: trata cualquier codigo como «el conductor decidio, respeto su
+decision», asi que un codigo nuevo no le cambia el comportamiento.
+
+Cuatro pruebas afirmaban `codigoSalida === 14` y las cuatro se revisaron una por una, que es donde
+se ve si una asercion medía lo que decia medir. La del tope pasa a exigir **17** explicitamente
+—es su caso—; la del estancamiento gana ademas un `!== 13`, que es lo que de verdad fijaba; y las
+del huerfano y del flujo de sesion aceptan los dos codigos del tope, porque lo que fijan es que ni
+un proceso huerfano ni la falta del endpoint de sesion descarrilan la corrida, no cual de los dos
+finales le toca. Las **27** en verde.
+
 ## Abierto
 
 **El camino de Cloudflare no se ha visto devolver un vector.** El `CLOUDFLARE_API_TOKEN` del `.env`

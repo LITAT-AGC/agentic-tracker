@@ -74,6 +74,23 @@ const SALIDA = {
   // porque lo que hay que hacer con él —mirar qué proceso es y decidir cuál sobra— no se
   // parece a ninguna de las otras paradas.
   otro_conductor: 16,
+  // El tope paró la corrida y la última unidad NO cerró. Comparte motivo con el 14 pero
+  // no comparte código, porque no comparte significado: el 14 es «paré donde tocaba y
+  // dejé esto ordenado» y éste es «paré y hay una unidad a medias».
+  //
+  // Nació el 2026-08-19 de la peor forma posible de fallar. El agente delegó la unidad
+  // ENTERA a un subagente en segundo plano y retornó al instante: `claude -p` salió con
+  // éxito a los dos turnos, el conductor leyó un turno bueno, el tope hizo su trabajo y
+  // la corrida salió 14 —el código de que todo fue bien— con el ejecutor muerto a media
+  // faena y seis archivos sin commitear. El diario ya decía la verdad en
+  // `unidad_cerrada: false`, pero el código de salida —lo único que mira quien no abre el
+  // diario, y lo único que ve un script— decía que no había pasado nada.
+  //
+  // No siempre es un fallo: con `--max-iterations` alto, una unidad grande puede seguir
+  // viva legítimamente al agotarse las vueltas. En los dos casos lo que toca es relanzar;
+  // la diferencia es que si esto se repite SIN que el backlog avance, el problema no es
+  // el tope.
+  tope_sin_cerrar: 17,
   agente_fallo: 20,
   // Los tres de abajo también son el agente terminando mal, pero NO por la story: su
   // CLI se quedó sin crédito, el comando no existe, o sus credenciales no valen.
@@ -2803,7 +2820,8 @@ const conducir = async (cfg, plantillaPrompt) => {
             ? `; la última unidad (${ultima}) ${cerrada ? 'cerró' : 'sigue en marcha'}`
             : '')
           + `. Quedan ${b.remaining == null ? b.total - b.done : b.remaining} de ${b.total}: relanza para seguir.`,
-        codigo: SALIDA.tope_iteraciones,
+        // El código separa los dos finales que antes se confundían. Ver SALIDA.tope_sin_cerrar.
+        codigo: cerrada ? SALIDA.tope_iteraciones : SALIDA.tope_sin_cerrar,
         fase,
         storyId: ultima,
         iteracion: cfg.maxIterations,
