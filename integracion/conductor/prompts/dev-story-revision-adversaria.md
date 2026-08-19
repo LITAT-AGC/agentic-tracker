@@ -204,11 +204,37 @@ Los dos caminos:
 1. `docs/reviews/{story_id}.md` en el repositorio, commiteado junto con el trabajo de la
    unidad.
 2. En el submit terminal, dentro del mismo `output` que cierra la unidad:
-   `output: { status: "done", code_ref: "<hash>", title: "<título>", content: "<la revisión>" }`.
+   `output: { status: "done", code_ref: "<hash>", title: "<título>", content: "<la revisión>", gates: {...} }`.
    El paso terminal declara ese artefacto como `code_review` de ESTA unidad, y donde el
    motor ya tiene la compuerta el submit sin `content` se rechaza con `ok:false` y la
    story no cierra. Mira los `outputs[]` que te sirve el paso: son la verdad sobre lo que
    ese paso espera.
+
+## Las compuertas del proyecto se acreditan, no se prometen
+
+Antes de cerrar, lee `get_project_constraints` y quédate con los comandos que el proyecto
+declara: `lint_command`, `test_command` y `typecheck_command`. **Los que no estén vacíos son
+obligatorios, y ningún otro lo es.** Córrelos de verdad —enteros, no sobre los archivos que
+tocaste— y manda su código de salida en el mismo submit que cierra la unidad:
+
+```
+output: {
+  status: "done", code_ref: "<hash>", title: "<título>", content: "<la revisión>",
+  gates: {
+    "lint": { "command": "npm run lint", "exit_code": 0 },
+    "test": { "command": "npm test",     "exit_code": 0 }
+  }
+}
+```
+
+Las claves son `lint`, `test` y `typecheck`. Falta una, o llega un `exit_code` que no es un
+entero, o alguno no es cero: el submit se rechaza con `ok:false` y la story no cierra.
+
+Esto existe porque el 2026-08-19 una unidad cerró con el lint en rojo: el agente no lo corrió
+ni una vez y su documento de revisión enumeraba tests, build y e2e sin mencionarlo. No mintió,
+se lo saltó. El servidor no alcanza a tu árbol de procesos, así que no puede correrlos por ti;
+lo que sí puede es no creerse la promesa. Si una compuerta no hay forma de ponerla en verde,
+**no cierres la unidad**: reporta el bloqueo y detente.
 
 Si volviste al paso 5, la revisión se rehace con la pasada nueva; el archivo se actualiza,
 no se duplica ni se crea uno por vuelta. Actualizar es AÑADIR: las listas acumuladas son

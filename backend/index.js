@@ -63,6 +63,10 @@ const {
   checkLoopConductorInvocations
 } = require('./scripts/lib/loop_conductor_invocations');
 const { registrarDesviacion: registrarDesviacionEn } = require('./scripts/lib/deviations');
+const {
+  PREFIJO_CONFIG: PROJECT_CONSTRAINTS_CONFIG_PREFIX,
+  leerConstraintsCrudas
+} = require('./scripts/lib/project_gates');
 const rootPackage = require('../package.json');
 const db = createKnex(knexConfig[process.env.NODE_ENV || 'development']);
 
@@ -318,7 +322,6 @@ const MAX_PROJECT_CONTEXT_SECTION_LIMIT = 200;
 const DEFAULT_BACKLOG_LIST_LIMIT = 50;
 const MAX_BACKLOG_LIST_LIMIT = 200;
 const COMPACT_TEXT_EXCERPT_LIMIT = 240;
-const PROJECT_CONSTRAINTS_CONFIG_PREFIX = 'project_constraints:';
 const BACKLOG_COMPACT_SELECT_COLUMNS = [
   'id',
   'project_url',
@@ -2048,28 +2051,19 @@ const normalizeProjectConstraints = (input) => {
 };
 
 const getProjectConstraints = async (projectUrl, { connection = db } = {}) => {
-  const project = await connection('projects').where({ url: projectUrl }).first();
-  if (!project) {
+  // La mezcla de las dos fuentes se mudo a `scripts/lib/project_gates.js` el 2026-08-19,
+  // cuando el motor de metodo paso a necesitarla: la compuerta del paso terminal exige
+  // evidencia de los mismos comandos que este lector publica. Con una copia en cada sitio,
+  // el dia que se separaran la compuerta empezaria a pedir un comando que el proyecto ya
+  // no declara, o a no pedir el que si.
+  const crudas = await leerConstraintsCrudas(connection, projectUrl);
+  if (!crudas) {
     throw createHttpError(404, 'Project not found');
   }
 
-  const constraintsConfigKey = `${PROJECT_CONSTRAINTS_CONFIG_PREFIX}${projectUrl}`;
-  const hasConfigTable = await connection.schema.hasTable('config');
-  const constraintsConfig = hasConfigTable
-    ? await connection('config')
-      .where({ key: constraintsConfigKey })
-      .first()
-    : null;
-
-  const projectDescriptionConstraints = parseJsonObjectOrEmpty(project.description);
-  const configuredConstraints = parseJsonObjectOrEmpty(constraintsConfig?.value);
-
   return {
     project_url: projectUrl,
-    ...normalizeProjectConstraints({
-      ...projectDescriptionConstraints,
-      ...configuredConstraints
-    })
+    ...normalizeProjectConstraints(crudas)
   };
 };
 
@@ -2894,7 +2888,14 @@ const integrationArtifacts = {
     // `apts-review-edge-cases`, `apts-review-acceptance`— cuando el adaptador las trae, que es
     // donde el operador les fija modelo y esfuerzo. Con un adaptador anterior no cambia nada:
     // se lanzan con el subagente generico y las instrucciones de siempre, que son las mismas.
-    artifactVersion: '1.6.0',
+    // 1.7.0: manda acreditar las compuertas del proyecto en el submit terminal
+    // (`output.gates`, una clave por comando declarado en `project_constraints` con su
+    // codigo de salida). Lo pidio una corrida real: el 2026-08-19 US-KAN-02 cerro con el
+    // lint en rojo porque el agente no lo corrio en 561 turnos y su documento de revision
+    // enumeraba tests, build y e2e sin mencionarlo. La plantilla lo dice porque el agente
+    // la lee, pero quien lo IMPIDE es el motor: escribir esto solo aqui seria otra regla
+    // que vive en la prosa, que son las unicas que se rompen.
+    artifactVersion: '1.7.0',
     kind: 'loop_conductor_prompt',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -3047,6 +3048,7 @@ const METHOD_CONDUCTION = {
     'The iterable dev-story step does not auto-release: whoever holds the claim must drive the engine\'s dev-story workflow to completion.',
     'It is multi-step (the BMAD dev procedure; in the seeded library it is 10 iterable steps, and only the terminal step declares outputs). Acting as the SAME dev agent_name that holds the claim, walk it like a generative workflow (generative_step_rule): apts_workflow_step then apts_submit_step per step, answering any await_input, submitting empty output for the procedure steps.',
     'The terminal step declares TWO outputs, and both travel in the SAME submit: output: { status: "done", code_ref: "<commit hash>", title: "<review title>", content: "<the code review>" }. The code_review artifact is scoped to this unit and is required_for_close: a terminal submit without a non-empty output.content is rejected with ok:false, and the story is not closed. This is the adversarial review gate (bmad-code-review): review the unit\'s diff with parallel layers under distinct lenses — Blind Hunter (the diff alone, no story, no acceptance criteria), Edge Case Hunter (boundaries, empty and null input, error paths), Acceptance Auditor (the story and its acceptance criteria against the real code) — and count a finding only when it carries file:line plus a concrete failure scenario. Fix what the layers confirm before closing; output.content is the review itself.',
+    'The terminal submit ALSO has to accredit the project\'s own gates, in output.gates. Read them from get_project_constraints: every non-empty command among lint_command, test_command and typecheck_command is required, and nothing else is. Run each one for real and send its exit code — output.gates: { "lint": { "command": "npm run lint", "exit_code": 0 }, "test": { "command": "npm test", "exit_code": 0 } }, keyed lint/test/typecheck. A missing gate, an exit_code that is not an integer, or any non-zero code is rejected with ok:false and the story is not closed. The server cannot reach your process tree, so it cannot run these itself; what it can do is refuse to take your word for it. A project that declares no commands is asked for nothing. If a gate cannot be made to pass, do not close the unit: report the blocker and stop.',
     'Each submit advances one step. The claimed story is marked done and the cursor released only when that terminal submit is captured (workflow_complete / iterable_unit_done). Do not re-resolve via apts_next per step, and do not expect a single submit to close the story.',
     'A backlog status update made outside this workflow is not enough: a story left at review is non-terminal, so without the terminal apts_submit_step it is never done.',
     'Once it is closed, re-enter drive_loop: apts_next hands out the next free unit, or advances the phase once every story is done.',

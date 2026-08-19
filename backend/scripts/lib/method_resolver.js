@@ -30,6 +30,9 @@ const { resolvePhaseStep, evaluatePrimitive } = require('./method_primitives');
 const { buildWorkflowCompletion, perStoryDocTypes } = require('./method_outputs');
 const { applyRewire } = require('../importer/rewire');
 const { registrarDesviacion } = require('./deviations');
+const {
+  leerConstraintsCrudas, compuertasDeclaradas, revisarCompuertas, porQueRechaza,
+} = require('./project_gates');
 
 const LIFECYCLE = ['analysis', 'planning', 'solutioning', 'implementation', 'done'];
 const TERMINAL_STATUSES = ['done', 'archived'];
@@ -1103,6 +1106,50 @@ const aptsSubmitStep = (db, { project_url, agent_name, output }) =>
             message: `la revisión entregada no nombra ${ausentes.length} de las 3 capas (${ausentes.join(', ')})`,
           },
         });
+      }
+    }
+
+    // ---- 0.quinquies. Compuertas del proyecto: se EXIGEN, y con evidencia ----
+    //
+    // La de arriba mira la revisión; ésta mira si el código pasa lo que el proyecto pide
+    // que pase. El 2026-08-19 US-KAN-02 cerró con `npm run lint` en rojo porque el agente
+    // no lo corrió y nada se lo pidió: el documento de revisión enumera tests, build y
+    // e2e, y el lint no aparece. No hay que escribir más prosa en el prompt —eso no sube
+    // de escalón—, hay que exigir la evidencia.
+    //
+    // Ésta SÍ rechaza, y las dos razones que impiden cerrar la compuerta de las tres capas
+    // no aplican aquí. No acopla el motor a una plantilla: los comandos salen de las
+    // `project_constraints` del propio proyecto, no de `dev-story-revision-adversaria`,
+    // que es opcional y descargable. Y no arriesga plantar un ciclo ajeno: un proyecto que
+    // no declara comandos no ve exigencia ninguna, así que el estreno sólo alcanza a quien
+    // ya dijo por escrito cuáles son sus compuertas.
+    //
+    // Se comprueba en el mismo sitio y con el mismo criterio que el `code_review`: sólo
+    // cuando este submit cerraría la unidad. Un submit intermedio no acredita nada porque
+    // todavía no afirma que el trabajo esté hecho.
+    const cierraUnidad = cursor.story_id && declared.some(
+      (d) => d.kind === 'status' && (out.status || d.value || 'done') === 'done',
+    );
+    if (cierraUnidad) {
+      const constraints = await leerConstraintsCrudas(trx, project_url);
+      const exigidas = compuertasDeclaradas(constraints);
+      if (exigidas.length) {
+        const veredicto = revisarCompuertas(exigidas, out.gates);
+        if (veredicto.faltan.length || veredicto.fallan.length) {
+          await registrarDesviacion(trx, {
+            operacion: 'submit_step',
+            regla: 'compuertas-del-proyecto-acreditadas',
+            resultado: 'rejected',
+            identidad: { agent_name, project_url },
+            error: {
+              statusCode: 400,
+              message: `cierre sin compuertas: faltan ${
+                veredicto.faltan.map((f) => f.clave).join(',') || 'ninguna'
+              }; en rojo ${veredicto.fallan.map((f) => f.clave).join(',') || 'ninguna'}`,
+            },
+          });
+          return { ok: false, why: porQueRechaza(step.key, veredicto) };
+        }
       }
     }
 

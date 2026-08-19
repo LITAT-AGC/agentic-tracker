@@ -13,7 +13,7 @@ es la comprobacion previa en local, lanzarlo y leer lo que devuelve.
 
 | | |
 |---|---|
-| Servidor | `root@134.122.62.55`, clave `C:/Users/jntac/.ssh/general_todos` |
+| Servidor | `root@134.122.62.55` **puerto 51312**, clave `C:/Users/jntac/.ssh/general_todos` |
 | Aplicacion | `/opt/APTS`, rama `main`, remoto `github.com/LITAT-AGC/agentic-tracker` |
 | Backend | pm2 `apts-backend`, fork, cwd `backend/`, puerto 46315 |
 | Frontend | nginx sirve `/opt/APTS/frontend/dist` en `https://apts.informaticos.ar` |
@@ -44,9 +44,16 @@ Todo esto en el checkout local, y **para** si algo no cuadra:
 ## 2. Lanzarlo
 
 ```bash
-ssh -i C:/Users/jntac/.ssh/general_todos -o ConnectTimeout=25 \
+ssh -i C:/Users/jntac/.ssh/general_todos -p 51312 -o ConnectTimeout=25 \
   root@134.122.62.55 'bash -s' < scripts/deploy_prod.sh
 ```
+
+**El `-p 51312` no es opcional, y olvidarlo asusta.** En el 22 de esa misma IP
+contesta OTRA cosa —una RSA-2048 sola, sin ED25519—, asi que ssh aborta con
+`REMOTE HOST IDENTIFICATION HAS CHANGED` y el aviso de man-in-the-middle. No lo es:
+es el puerto equivocado. El servidor de APTS esta en el 51312 y ofrece ED25519,
+RSA-3072 y ECDSA. Si ves ese aviso, mira el puerto antes que nada — y **nunca**
+borres la entrada de `known_hosts` para «arreglarlo».
 
 El script no se guarda en el servidor a proposito: asi el que corre es siempre el
 del checkout, y actualizar el desplegador no exige desplegar.

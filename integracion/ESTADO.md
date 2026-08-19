@@ -2417,6 +2417,63 @@ cambia: el valor de `loop_agent_cmd` es distinto pero no aparece ninguna clave n
 que 1.1.1, 1.1.2 y 1.1.3. El test dirigido de la lectura del JSON gana el caso de los muchos
 `result`, con la forma reducida de la corrida real y los dos ultimos objetos a cero.
 
+## Una unidad cerro con el lint en rojo, y la compuerta que faltaba no era de revision
+
+El 2026-08-19, conduciendo `tickets` con Claude Code sobre `claude-sonnet-5`, la unidad US-KAN-02
+cerro con `npm run lint` **en rojo**: tres errores en `frontend/e2e/sprints.spec.js`, un archivo que
+la propia corrida acababa de crear. Todo lo demas cuadraba y por eso no se vio: codigo de salida 14,
+`PARADA` diciendo que la unidad cerro, APTS con la story en `done` y el `code_ref` apuntando a un
+commit que existe, 325 tests en verde. La compuerta del `code_review` estaba satisfecha porque el
+artefacto venia con texto.
+
+El agente **no mintio: se lo salto**. No corrio el lint ni una vez en 561 turnos —cinco veces en la
+unidad anterior, cero en esta, con la misma plantilla y el mismo repositorio— y su seccion de
+Validacion enumera exactamente lo que si comprobo: `npm test` 325/325, `npx vite build` sin errores,
+`npx playwright test` 42/42. El lint no aparece porque nadie se lo pidio.
+
+Es el tercer escalon de los tres con los que se mira cada regla, y estaba vacio para esto: una regla
+**verificable**. El servidor no alcanza al arbol de procesos del cliente, asi que no puede correr el
+lint ni verlo correr; lo unico que puede hacer es **exigir evidencia en vez de creerse la promesa**.
+Escribir mas prosa en la plantilla no sube de escalon —esa es justo la clase de regla que se rompe—,
+asi que la plantilla lo dice **y** el motor lo impide.
+
+**Los comandos los declara el proyecto, no el motor ni la plantilla.** `project_constraints` ya
+publicaba `lint_command`, `test_command` y `typecheck_command` desde que se le puso escritor el
+2026-08-08, y no los usaba nadie para decidir nada. Ahora el paso terminal exige un `output.gates`
+con una clave por cada comando **no vacio** —`lint`, `test`, `typecheck`— y su codigo de salida:
+falta una, o el `exit_code` no es un entero, o alguno no es cero, y el submit se rechaza con
+`ok:false` con la story sin cerrar, el cursor sin avanzar y la revision sin escribir.
+
+Esta compuerta **si rechaza**, y las dos razones que impiden cerrar la de las tres capas no aplican
+aqui. No acopla el motor al vocabulario de una plantilla opcional, porque los comandos salen de las
+constraints del propio proyecto y no de `dev-story-revision-adversaria`. Y no arriesga plantar un
+ciclo ajeno: **un proyecto que no declara comandos no ve exigencia nueva ninguna**, asi que el
+estreno solo alcanza a quien ya dijo por escrito cuales son sus compuertas. Esa propiedad es la que
+hace que esto se pueda soltar sin medir primero, y esta fijada como la primera comprobacion del test.
+
+**La evidencia es el codigo de salida y no un booleano, a proposito.** `passed: true` es una opinion
+y se escribe sin haber hecho nada; `exit_code` nombra una observacion que hubo que ir a buscar. No lo
+hace infalsificable —nada lo hace, el servidor no esta ahi—, pero mueve la unica salida que le queda
+al agente de «omitirlo en silencio» a «declarar un cero que no vio», que se cruza a sabiendas y queda
+contada: el rechazo se registra como desviacion `compuertas-del-proyecto-acreditadas`, clase
+`rejected`, en el mismo contador que el resto.
+
+**La lectura de las constraints se mudo a `scripts/lib/project_gates.js`** porque paso a tener dos
+clientes: `get_project_constraints`, que las publica, y el motor, que decide con ellas. La mezcla de
+las dos fuentes —`projects.description` de fondo, la clave de `config` encima— vivia entera dentro de
+`index.js`; una copia en el motor se habria separado a la primera, y el dia que se separara la
+compuerta pediria un comando que el proyecto ya no declara, o dejaria de pedir el que si. El test
+cubre las dos fuentes por eso.
+
+`test_project_gates.js` fija siete casos de la funcion pura sin tocar la base —incluido que `"0"`
+entrecomillado vale y que `passed: true` no— y cinco contra el motor: el proyecto sin compuertas que
+cierra igual que siempre, el rechazo sin evidencia con la story intacta y la desviacion contada, el
+rechazo en rojo con un mensaje distinto al de la que falta, el cierre con las dos en verde, y los
+comandos declarados en la descripcion. La plantilla sube a `loop_prompt_code_review` **1.7.0**. Las
+**27** pruebas del repositorio quedan en verde; ojo al correrlas en rafaga, que el login del panel se
+cierra por ritmo con un 429 y arrastra a `test_dashboard_backlog_epic_scope` entero sin que nada este
+roto.
+
 ## Abierto
 
 **El camino de Cloudflare no se ha visto devolver un vector.** El `CLOUDFLARE_API_TOKEN` del `.env`
