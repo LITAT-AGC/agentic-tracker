@@ -590,7 +590,7 @@ ejecutar nada:
 
 ```bash
 node apts-loop.js --agent-name mi-dev --dry-run \
-  --agent-cmd 'claude -p "$(cat {prompt_file})" --model {model} --permission-mode acceptEdits --output-format stream-json --verbose'
+  --agent-cmd 'claude -p "$(cat {prompt_file})" --model {model} --permission-mode bypassPermissions --output-format stream-json --verbose'
 ```
 
 Y despues, la corrida real:
@@ -598,7 +598,7 @@ Y despues, la corrida real:
 ```bash
 node apts-loop.js \
   --agent-name mi-dev \
-  --agent-cmd 'claude -p "$(cat {prompt_file})" --model {model} --permission-mode acceptEdits --output-format stream-json --verbose' \
+  --agent-cmd 'claude -p "$(cat {prompt_file})" --model {model} --permission-mode bypassPermissions --output-format stream-json --verbose' \
   --model-escalation 'claude-sonnet-5,claude-opus-5' \
   --max-iterations 20
 ```
@@ -607,7 +607,7 @@ node apts-loop.js \
 forma equivalente es:
 
 ```bash
-type {prompt_file} | claude -p --model {model} --permission-mode acceptEdits --output-format stream-json --verbose
+type {prompt_file} | claude -p --model {model} --permission-mode bypassPermissions --output-format stream-json --verbose
 ```
 
 Y para opencode, que ni siquiera mete el prompt en la linea de shell y por eso vale igual en
@@ -619,7 +619,7 @@ opencode run --format json --print-logs -m {model} --auto "Implementa la unidad 
 
 El mensaje va **antes** de `-f`: ese flag es de tipo array y se traga el positional que venga
 detras, asi que al reves la CLI muere con `File not found: Implementa la unidad...` sin llegar
-a resolver el modelo. Y `--auto` es el equivalente de `--permission-mode acceptEdits`: en
+a resolver el modelo. Y `--auto` es el equivalente de `--permission-mode bypassPermissions`: en
 headless, `opencode run` auto-rechaza los permisos que su config deje en `ask` y la sesion
 muere en el primer comando de shell.
 

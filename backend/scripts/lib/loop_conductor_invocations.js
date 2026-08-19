@@ -35,9 +35,28 @@ const fs = require('node:fs/promises');
 // Opencode no cambia: su `--format json` ya es NDJSON, o sea ya era stream.
 const LOOP_CONDUCTOR_INVOCATION_BY_RUNTIME = {
   claudecode: {
-    agent_cmd: 'claude -p "$(cat {prompt_file})" --model {model} --permission-mode acceptEdits --output-format stream-json --verbose',
+    // `bypassPermissions` y NO `acceptEdits`, desde 2026-08-18. Las dos lineas publicaron
+    // `acceptEdits` durante tres versiones creyendolo el hermano de `--auto` de opencode, y
+    // NO LO ES: `acceptEdits` auto-acepta EDICIONES DE ARCHIVO y nada mas. `WebFetch`,
+    // `Bash` y `Task` siguen preguntando, y en modo `-p` preguntar es morir —no hay nadie
+    // para contestar—. La plantilla de revision publicada empieza leyendo el manifiesto por
+    // `WebFetch`, asi que una corrida desatendida se plantaba en su PRIMERA herramienta.
+    //
+    // Y se plantaba de la peor manera: Claude Code trata la peticion sin respuesta como
+    // final normal de la sesion, imprime el «necesito autorizacion» como resultado y sale
+    // con codigo 0. El conductor lo lee como turno bueno y para con 14 —el codigo de «todo
+    // fue bien»—, de modo que la corrida entera se declara sana sin haber tocado una linea.
+    // Solo el contraste contra `apts_status` lo delata. Medido contra Claude Code 2.1.234
+    // conduciendo el cliente `tickets` con claude-sonnet-5: dos arranques en falso, 15 y 20
+    // segundos, $0,35, backlog inmovil en 17/26.
+    //
+    // Es peligroso por definicion —aprueba todo, incluido `Bash` arbitrario— y va en la
+    // linea publicada por exactamente la misma razon que `--auto` en la de opencode, que ya
+    // esta escrita ahi abajo: esta es la linea de una corrida DESATENDIDA. Quien no quiera
+    // esa cesion no debe rebajar el modo, sino conducir con la CLI delante.
+    agent_cmd: 'claude -p "$(cat {prompt_file})" --model {model} --permission-mode bypassPermissions --output-format stream-json --verbose',
     // En Windows `shell: true` resuelve a `cmd.exe`, donde `$(cat ...)` no existe.
-    agent_cmd_windows: 'type {prompt_file} | claude -p --model {model} --permission-mode acceptEdits --output-format stream-json --verbose',
+    agent_cmd_windows: 'type {prompt_file} | claude -p --model {model} --permission-mode bypassPermissions --output-format stream-json --verbose',
     model_escalation_example: 'claude-sonnet-5,claude-opus-5'
   },
   opencode: {
@@ -52,12 +71,16 @@ const LOOP_CONDUCTOR_INVOCATION_BY_RUNTIME = {
     // en la story. Lo encontro un cliente real el 2026-08-15 y se reprodujo aqui contra la
     // CLI de verdad. `--auto` es boolean, asi que puede ir donde sea.
     //
-    // `--auto` es el hermano de `--permission-mode acceptEdits`: en headless, `opencode
+    // `--auto` es el hermano de `--permission-mode bypassPermissions`: en headless, `opencode
     // run` AUTO-RECHAZA los permisos que su config deja en "ask", de modo que sin el la
     // sesion muere en el primer comando de shell. Es peligroso por definicion —aprueba
     // todo lo que no este explicitamente denegado— y va en la linea publicada por la misma
     // razon que su equivalente de Claude Code: esta linea es la de una corrida DESATENDIDA,
     // y una que se planta esperando una aprobacion que nadie va a dar no sirve de nada.
+    //
+    // El hermano es `bypassPermissions` y no `acceptEdits`, que es lo que decia aqui hasta
+    // el 2026-08-18: la equivalencia estaba bien pensada y mal escrita, y el arreglo esta
+    // contado arriba, en el bloque de claudecode.
     //
     // `--print-logs` manda el registro de la CLI a stderr, y no es para leerlo: es lo que hace
     // que el vigilante de silencio del conductor mida ACTIVIDAD y no charla del stream. En

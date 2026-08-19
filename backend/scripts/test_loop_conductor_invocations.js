@@ -87,7 +87,7 @@ const main = async () => {
     // unidad...» antes de resolver el modelo y el conductor lo anota como agente_fallo.
     // Se vio en un cliente real el 2026-08-15 y se reprodujo contra la CLI.
     assert.ok(cmd.indexOf('"Implementa') < cmd.indexOf('-f '), 'el mensaje tiene que ir antes de -f');
-    // El hermano de --permission-mode acceptEdits: sin el, `opencode run` en headless
+    // El hermano de --permission-mode bypassPermissions: sin el, `opencode run` en headless
     // auto-rechaza los permisos en "ask" y la sesion muere en el primer comando de shell.
     assert.ok(cmd.includes('--auto'));
   });
@@ -96,7 +96,19 @@ const main = async () => {
     const enWindows = LOOP_CONDUCTOR_INVOCATION_BY_RUNTIME.claudecode.agent_cmd_windows;
     assert.ok(!enWindows.includes('$(cat'), 'cmd.exe no expande $(...)');
     // Sin esto la CLI pide permiso y una corrida desatendida se planta esperando.
-    assert.ok(enWindows.includes('--permission-mode acceptEdits'));
+    assert.ok(enWindows.includes('--permission-mode bypassPermissions'));
+  });
+
+  comprobar('las dos lineas de Claude Code son desatendidas de verdad', () => {
+    // `acceptEdits` auto-acepta EDICIONES y nada mas: WebFetch, Bash y Task siguen
+    // preguntando, y en modo `-p` preguntar es morir. Peor: Claude Code sale con codigo 0
+    // al hacerlo, el conductor lo lee como turno bueno y para con 14, asi que la corrida se
+    // declara sana sin haber tocado una linea. Medido el 2026-08-18 contra 2.1.234.
+    for (const campo of ['agent_cmd', 'agent_cmd_windows']) {
+      const linea = LOOP_CONDUCTOR_INVOCATION_BY_RUNTIME.claudecode[campo];
+      assert.ok(linea.includes('--permission-mode bypassPermissions'), `${campo} tiene que ser desatendida`);
+      assert.ok(!linea.includes('acceptEdits'), `${campo} no puede volver a acceptEdits`);
+    }
   });
 
   // --- El auto-chequeo contra el README de verdad -----------------------------

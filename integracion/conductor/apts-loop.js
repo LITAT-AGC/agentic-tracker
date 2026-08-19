@@ -279,12 +279,25 @@ const vacio = () => ({ entrada: 0, salida: 0, cache_lectura: 0, cache_escritura:
 
 // Dos formas reales, capturadas de las dos CLIs y no deducidas de su documentación:
 //
-//   claude -p … --output-format json
-//     un ÚNICO objeto al final, con el total de la corrida ya sumado.
-//     {"type":"result","subtype":"success","is_error":false,"num_turns":1,
-//      "session_id":"…","total_cost_usd":0.017,
-//      "usage":{"input_tokens":10,"output_tokens":39,
-//               "cache_creation_input_tokens":7057,"cache_read_input_tokens":21649}}
+//   claude -p … --output-format stream-json --verbose
+//     MUCHOS objetos `result`, no uno. Este archivo dijo «un ÚNICO objeto al final» desde
+//     que se escribió, y es falso: medido el 2026-08-18 contra Claude Code 2.1.234, una
+//     sesión de 2 h 31 min emitió TREINTA Y TRES. Y las dos mitades del objeto no se leen
+//     igual, que es lo que hacía daño:
+//
+//       `total_cost_usd` es ACUMULADO de la sesión y crece monótonamente
+//         (1,9508 → 2,3566 → 3,5301 → … → 69,5580).
+//       `usage` es POR TRAMO y NO acumula: cada objeto trae lo suyo.
+//
+//     Leer el último objeto —que es lo que se hacía— acertaba el coste por casualidad y
+//     erraba los tokens siempre que ese último no fuera representativo. En la corrida
+//     medida el corte por límite de cuenta dejó los dos últimos con `usage` a cero y coste
+//     ya sumado, así que el conductor publicó «0 tok · $69,5580»: dos horas y media de
+//     trabajo declaradas como cero tokens.
+//     {"type":"result","subtype":"success","is_error":false,"num_turns":44,
+//      "session_id":"…","total_cost_usd":1.9508,
+//      "usage":{"input_tokens":62,"output_tokens":14776,
+//               "cache_creation_input_tokens":74552,"cache_read_input_tokens":2560029}}
 //
 //   opencode run --format json
 //     NDJSON de eventos; el coste y los tokens van POR PASO, así que aquí sí se suma.
@@ -292,25 +305,34 @@ const vacio = () => ({ entrada: 0, salida: 0, cache_lectura: 0, cache_escritura:
 //      "tokens":{"total":7643,"input":7641,"output":2,"reasoning":0,
 //                "cache":{"write":0,"read":0}}}}
 //
-// La diferencia entre «ya sumado» y «hay que sumar» es la razón por la que esto son dos
-// lectores y no una búsqueda genérica de claves parecidas: acumular el total de Claude
-// Code por cada objeto que lo lleve daría una factura inventada.
+// Así que los dos lectores suman tokens y sólo se diferencian en el coste: el de opencode
+// lo suma y el de Claude Code toma el MÁXIMO, porque ahí ya viene sumado. Tomar el máximo
+// y no el último es lo que hace que un corte a mitad —o un buffer recortado— no rebaje la
+// factura: el acumulado nunca baja.
 const LECTORES = [
   {
     reconoce: (o) => o.type === 'result' && (o.usage || typeof o.total_cost_usd === 'number'),
     leer: (objetos) => {
       const o = objetos[objetos.length - 1];
-      const u = o.usage || {};
+      const tokens = vacio();
+      let costeMax = null;
+      let turnos = 0;
+      for (const r of objetos) {
+        if (typeof r.total_cost_usd === 'number' && (costeMax === null || r.total_cost_usd > costeMax)) {
+          costeMax = r.total_cost_usd;
+        }
+        turnos += num(r.num_turns);
+        const u = r.usage || {};
+        tokens.entrada += num(u.input_tokens);
+        tokens.salida += num(u.output_tokens);
+        tokens.cache_lectura += num(u.cache_read_input_tokens);
+        tokens.cache_escritura += num(u.cache_creation_input_tokens);
+      }
       return {
         runtime: 'claudecode',
-        coste_usd: typeof o.total_cost_usd === 'number' ? o.total_cost_usd : null,
-        tokens: {
-          entrada: num(u.input_tokens),
-          salida: num(u.output_tokens),
-          cache_lectura: num(u.cache_read_input_tokens),
-          cache_escritura: num(u.cache_creation_input_tokens),
-        },
-        turnos: typeof o.num_turns === 'number' ? o.num_turns : null,
+        coste_usd: costeMax,
+        tokens,
+        turnos: turnos || null,
         sesion: o.session_id || null,
         subtipo: o.subtype || null,
         // Con `--output-format json`, un fallo dentro de la corrida —autenticación, sobre
@@ -369,6 +391,78 @@ const leerResumen = (texto) => {
     if (suyos.length) return lector.leer(suyos);
   }
   return null;
+};
+
+// Lo mismo que `leerResumen`, pero MIENTRAS PASA y no al final. Existe por una razón sola:
+// el buffer del que lee `leerResumen` es RODANTE (256 KB), y desde que se supo que Claude
+// Code emite muchos `result` en vez de uno, leer sólo la cola dejó de ser suficiente. En la
+// corrida medida el 2026-08-18 el flujo fueron 4,6 MB: de los 33 objetos `result` sólo los
+// últimos caían dentro de la cola, así que sumar los tokens ahí habría declarado una
+// fracción del trabajo. El coste no sufre —es acumulado, y el máximo de la cola sigue
+// siendo el total—, pero los tokens sí, y son la mitad de la pregunta.
+//
+// No sustituye a `leerResumen`: lo COMPLETA. Quien no hable NDJSON no alimenta esto y el
+// camino de siempre sigue entero, y una CLI que sólo emita un `result` da el mismo número
+// por los dos caminos. Es best-effort como el resto de la contabilidad: si algo aquí falla,
+// no puede ser el motivo de que se pierda una vuelta.
+const crearAcumuladorResultados = () => {
+  let resto = '';
+  let vistos = 0;
+  let costeMax = null;
+  let ultimo = null;
+  // `num_turns` es por tramo, como `usage`: 44, 3, 2, 30, 59… Leer sólo el último decía
+  // «1 turno» tras dos horas y media, porque el último tramo era el del corte.
+  let turnos = 0;
+  const tokens = vacio();
+
+  const ver = (o) => {
+    if (!o || o.type !== 'result') return;
+    if (!o.usage && typeof o.total_cost_usd !== 'number') return;
+    vistos += 1;
+    ultimo = o;
+    turnos += num(o.num_turns);
+    if (typeof o.total_cost_usd === 'number' && (costeMax === null || o.total_cost_usd > costeMax)) {
+      costeMax = o.total_cost_usd;
+    }
+    const u = o.usage || {};
+    tokens.entrada += num(u.input_tokens);
+    tokens.salida += num(u.output_tokens);
+    tokens.cache_lectura += num(u.cache_read_input_tokens);
+    tokens.cache_escritura += num(u.cache_creation_input_tokens);
+  };
+
+  // El mismo reensamblado que hace la copia a APTS: los trozos no respetan los saltos de
+  // línea y son justo los objetos grandes los que se parten.
+  const alimentar = (texto) => {
+    resto += texto;
+    if (resto.length > RESUMEN_MAX_BYTES) resto = resto.slice(-RESUMEN_MAX_BYTES);
+    const lineas = resto.split('\n');
+    resto = lineas.pop();
+    for (const linea of lineas) {
+      const t = linea.trim();
+      if (t.length < 2 || t[0] !== '{' || t[t.length - 1] !== '}') continue;
+      try { ver(JSON.parse(t)); } catch (_) { /* no era JSON */ }
+    }
+  };
+
+  // Una CLI que no cierre la última línea se dejaría dentro su último `result`.
+  const cerrar = () => { if (resto) { const u = resto; resto = ''; alimentar(`${u}\n`); } };
+
+  const leer = () => {
+    if (!vistos) return null;
+    return {
+      runtime: 'claudecode',
+      coste_usd: costeMax,
+      tokens,
+      turnos: turnos || null,
+      sesion: ultimo.session_id || null,
+      subtipo: ultimo.subtype || null,
+      fallo: ultimo.is_error === true,
+      resultados: vistos,
+    };
+  };
+
+  return { alimentar, cerrar, leer };
 };
 
 const miles = (n) => (n >= 10000 ? `${Math.round(n / 1000)}k` : String(n));
@@ -2216,6 +2310,8 @@ const lanzarAgente = (cfg, contexto) => {
     // Buffer aparte y sólo de stdout: es donde las dos CLIs escriben su JSON, y mezclarlo
     // con stderr metería trazas de la propia CLI entre las líneas que hay que parsear.
     let salida = '';
+    // Contabilidad al ritmo del flujo, para que el rodante de `salida` no recorte la suma.
+    const contable = crearAcumuladorResultados();
     // Cuándo se oyó al agente por última vez, por cualquiera de sus dos flujos. Es el
     // reloj del vigilante de silencio: lo que se mide es que la sesión siga hablando, no
     // que trabaje deprisa.
@@ -2249,6 +2345,10 @@ const lanzarAgente = (cfg, contexto) => {
         // El stream se lee mientras pasa; el resumen de coste, al terminar. Son dos
         // lecturas del mismo flujo con dos ritmos, y por eso no comparten camino.
         if (sesionActual) sesionActual.alimentar(texto);
+        // La contabilidad SÍ tiene que ir al ritmo del flujo desde que se supo que los
+        // objetos `result` son muchos: el buffer de arriba es rodante y se comería los
+        // primeros. Ver `crearAcumuladorResultados`.
+        try { contable.alimentar(texto); } catch (_) { /* la contabilidad no corta una vuelta */ }
       }
     };
     hijo.stdout.on('data', eco(process.stdout, true));
@@ -2316,7 +2416,12 @@ const lanzarAgente = (cfg, contexto) => {
 
       // Si la CLI habló JSON, aquí está lo que costó la sesión. Si no, `null` y nada
       // cambia: todo lo que hay debajo trata este resumen como opcional.
-      const resumen = leerResumen(salida);
+      //
+      // Se prefiere el acumulador porque vio el flujo ENTERO; `leerResumen` sólo vio los
+      // últimos 256 KB. Para una CLI que emita un único `result` los dos dan lo mismo, y
+      // para opencode —que no alimenta el acumulador— sigue mandando `leerResumen`.
+      try { contable.cerrar(); } catch (_) { /* best-effort */ }
+      const resumen = contable.leer() || leerResumen(salida);
 
       // Un fallo con código 0. Claude Code con `--output-format json` imprime el fallo de
       // dentro de la corrida —típicamente la autenticación— COMO RESULTADO, y el código de

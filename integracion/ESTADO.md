@@ -13,7 +13,7 @@ llego hasta aqui: eso esta en el historial de git.
 | Manifiesto | `GET /api/public/integrar`, `schema_version` 1.1.3 |
 | Guia para personas | `GET /api/public/integrar/guia`, HTML renderizado del manifiesto |
 | Runtimes soportados | Dos: Claude Code y opencode |
-| Artefactos publicados | 10; el conductor en `artifact_version` 1.15.0 y su README en 1.19.0, los dos supervisores (`.ps1` y `.sh`) en 1.0.0, `adapter_generator` en 1.7.0, `loop_prompt_code_review` en 1.5.0, `surface_spec` en 1.2.0, `agent_guidelines` y `skill_markdown` en 1.1.1, `skills_json` en 1.1.0 |
+| Artefactos publicados | 10; el conductor en `artifact_version` 1.17.0 y su README en 1.20.0, los dos supervisores (`.ps1` y `.sh`) en 1.0.0, `adapter_generator` en 1.7.0, `loop_prompt_code_review` en 1.5.0, `surface_spec` en 1.2.0, `agent_guidelines` y `skill_markdown` en 1.1.1, `skills_json` en 1.1.0 |
 | Descargas necesarias para **llamar** a las operaciones | Ninguna |
 | Descargas necesarias para **conducir** | El spec y el generador (agentes y comandos); el conductor y su README si se quiere el bucle desatendido, y su plantilla de revision si se quiere ademas la compuerta dentro de la sesion del agente |
 
@@ -2357,6 +2357,65 @@ con `opencode debug agent` y no de palabra. Las otras dos capas heredan.
 que su `variant` hay que escribirlo en el `opencode.json` del cliente, que es un archivo GENERADO y
 lleva su banner de "no editar": la proxima regeneracion se lo lleva. El adaptador de opencode no
 tiene hoy un sitio de configuracion del operador que sobreviva a regenerar.
+
+## La linea publicada para Claude Code no conducia, y la cuenta del gasto mentia
+
+Una corrida real del 2026-08-18 en el cliente `tickets` —Claude Code 2.1.234, `claude-sonnet-5`,
+Windows 11— destapo cinco cosas de golpe. Las tres primeras impedian arrancar; las dos ultimas
+falseaban lo que la corrida decia haber costado.
+
+**`acceptEdits` no era el hermano de `--auto`, y esa equivalencia estaba escrita en tres sitios.**
+El razonamiento era correcto y el valor no: `--auto` de opencode aprueba todo lo que no este
+denegado, mientras que `--permission-mode acceptEdits` auto-acepta EDICIONES DE ARCHIVO y nada mas.
+`WebFetch`, `Bash` y `Task` siguen preguntando, y en modo `-p` preguntar es morir. La plantilla de
+revision publicada empieza leyendo el manifiesto por `WebFetch`, asi que la corrida moria en su
+PRIMERA herramienta. El equivalente de verdad es `bypassPermissions`, y es lo que publican ahora las
+dos lineas de `claudecode`.
+
+**Y moria con codigo 0.** Claude Code trata la peticion de permiso sin contestar como final normal
+de la sesion: imprime el «necesito autorizacion» como resultado y sale con 0. El conductor lo lee
+como turno bueno y para con 14, que es el codigo de que todo fue bien. La corrida entera se declara
+sana sin haber tocado una linea, y solo el contraste contra `status` lo delata —el backlog no se
+movio—. Dos arranques en falso, 15 y 20 segundos, $0,35.
+
+**La variante de Windows estaba publicada pero escondida.** `agent_cmd_windows` existe desde 1.8.0,
+solo que el bloque `.env` del manual publicaba unicamente la POSIX y el aviso vivia setenta lineas
+mas abajo. Quien copiaba el bloque desde Windows se llevaba `$(cat ...)`, que `cmd.exe` no expande,
+y el agente recibia la ruta del prompt como texto literal. Ahora las dos lineas van juntas y
+etiquetadas.
+
+**Claude Code ignora `permissions.allow` mientras el workspace no este confiado**, y lo avisa solo
+por stderr —un flujo que en Windows no se vuelca hasta que el proceso cierra—. Las 23 entradas que
+el adaptador instala para las herramientas `mcp__apts__*` se caian enteras y en silencio. El manual
+lo dice ahora, con el mensaje literal y las dos formas de arreglarlo. No esta medido si
+`bypassPermissions` sobrevive a un workspace sin confiar: en aquella corrida las dos cosas se
+arreglaron juntas y no hay lectura que las separe.
+
+**La contabilidad leia un objeto donde habia treinta y tres.** Esta es la que mas lejos llegaba,
+porque no impedia conducir: solo mentia al final. El lector asumia UN objeto `type:"result"` —lo
+decia el codigo y lo prometia el manual— y son muchos. Ademas las dos mitades no se leen igual:
+
+- `total_cost_usd` **acumula** y crece monotonamente (1,9508 -> 2,3566 -> ... -> 69,5580), asi que
+  el total de la sesion es el MAXIMO. Sumarlo por objeto daria una factura inventada.
+- `usage` y `num_turns` son **por tramo** y no acumulan, asi que se SUMAN.
+
+Leer el ultimo objeto acertaba el coste de casualidad y perdia los tokens. Peor: cuando la corrida
+se corta por limite de cuenta, los ultimos objetos llegan con `usage` a cero y el coste ya sumado,
+de modo que el conductor publico **`0 tok · $69,5580`** tras dos horas y media de trabajo. Sumando
+los tramos son **122,3 M de tokens**, de los que 121,5 M son lectura de cache — que es exactamente
+la pregunta que esta contabilidad existe para responder: si lo que se pago fue trabajo o fue releer
+el repositorio.
+
+**Y la cuenta pasa a hacerse al ritmo del flujo.** El buffer del resumen es rodante (256 KB) y
+aquella corrida escribio 4,6 MB: de los 33 objetos solo los ultimos caian dentro. El coste
+sobrevivia por ser acumulado, pero los tokens habrian salido recortados. `crearAcumuladorResultados`
+cuenta mientras pasa y `leerResumen` queda como respaldo, asi que una CLI que emita un unico
+`result` da el mismo numero por los dos caminos y opencode no cambia en nada.
+
+El conductor sube a `artifact_version` **1.17.0** y su README a **1.20.0**. `schema_version` no
+cambia: el valor de `loop_agent_cmd` es distinto pero no aparece ninguna clave nueva, misma regla
+que 1.1.1, 1.1.2 y 1.1.3. El test dirigido de la lectura del JSON gana el caso de los muchos
+`result`, con la forma reducida de la corrida real y los dos ultimos objetos a cero.
 
 ## Abierto
 

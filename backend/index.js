@@ -2694,7 +2694,19 @@ const integrationArtifacts = {
     // que no va a pasar solo. Se añaden ademas las frases equivalentes de OpenAI y
     // OpenRouter, que no estan medidas aqui y se dicen como tales. Quien se quede en 1.14.0
     // seguira leyendo «el agente fallo» cuando lo que pasa es que hay que pagar.
-    artifactVersion: '1.16.0',
+    // 1.17.0: la contabilidad de Claude Code estaba mal leida. El lector asumia UN objeto
+    // `type:"result"` al final —lo decia el codigo y lo prometia el manual— y son MUCHOS:
+    // 33 en una sesion de 2 h 31 min medida el 2026-08-18 contra 2.1.234. Ademas las dos
+    // mitades del objeto no se leen igual: `total_cost_usd` ACUMULA (se toma el maximo) y
+    // `usage` es POR TRAMO (se suma), igual que `num_turns`. Leer el ultimo objeto perdia
+    // todo lo anterior, y cuando la corrida se corta por limite de cuenta ese ultimo llega
+    // con `usage` a cero, asi que el conductor publicaba «0 tok» tras dos horas y media de
+    // trabajo real —122,3 M de tokens, 121,5 M de ellos lectura de cache—. La cuenta pasa
+    // ademas a hacerse AL RITMO DEL FLUJO y no sobre el buffer de resumen, que es rodante
+    // (256 KB) y en aquella corrida de 4,6 MB solo alcanzaba a los ultimos objetos. Quien
+    // se quede en 1.16.0 seguira midiendo el gasto de sus corridas con Claude Code por un
+    // solo tramo, y con cero cuando el corte sea por limite.
+    artifactVersion: '1.17.0',
     kind: 'loop_conductor',
     recommended: false,
     usagePriority: 'optional_entrypoint',
@@ -2772,7 +2784,17 @@ const integrationArtifacts = {
     // adaptador es anterior.
     // 1.19.0: dice que las capas llegan sin permiso de escritura en los DOS runtimes, que es lo
     // que cambia `adapter_generator` 1.7.0.
-    artifactVersion: '1.19.0',
+    // 1.20.0: las dos lineas de Claude Code pasan de `acceptEdits` a `bypassPermissions`, que
+    // es el hermano de verdad de `--auto` —`acceptEdits` solo auto-acepta ediciones, asi que
+    // WebFetch/Bash/Task seguian preguntando y la corrida moria en su primera herramienta, con
+    // codigo 0 y por tanto declarandose sana—; el bloque del `.env` publica ya la variante de
+    // Windows, que estaba setenta lineas mas abajo; y el manual dice que hay que confiar el
+    // workspace antes de la primera corrida, porque si no Claude Code tira `permissions.allow`
+    // entero avisando solo por stderr. Los tres los destapo una corrida real el 2026-08-18.
+    // Y corrige la tabla de la contabilidad, que prometia «un unico objeto `result` al
+    // final»: son muchos, el coste acumula y el `usage` va por tramo. Es lo que arregla
+    // `loop_conductor` 1.17.0, contado desde el lado de quien lee la cifra.
+    artifactVersion: '1.20.0',
     kind: 'loop_conductor_manual',
     recommended: false,
     usagePriority: 'optional_entrypoint',

@@ -26,7 +26,7 @@ reparto natural es: el orquestador (o una persona) lleva la iniciativa hasta
 
 ```bash
 node integracion/conductor/apts-loop.js \
-  --agent-cmd 'claude -p "$(cat {prompt_file})" --model {model} --permission-mode acceptEdits --output-format stream-json --verbose' \
+  --agent-cmd 'claude -p "$(cat {prompt_file})" --model {model} --permission-mode bypassPermissions --output-format stream-json --verbose' \
   --model-escalation 'claude-sonnet-5,claude-opus-5' \
   --max-iterations 20
 ```
@@ -75,14 +75,23 @@ línea — por bandera o por `APTS_LOOP_AGENT_CMD` en el `.env`, para que cada d
 fije la suya sin tocar el comando de nadie.
 
 ```bash
-# Claude Code
-APTS_LOOP_AGENT_CMD='claude -p "$(cat {prompt_file})" --model {model} --permission-mode acceptEdits --output-format stream-json --verbose'
+# Claude Code — POSIX
+APTS_LOOP_AGENT_CMD='claude -p "$(cat {prompt_file})" --model {model} --permission-mode bypassPermissions --output-format stream-json --verbose'
 APTS_LOOP_MODEL_ESCALATION='claude-sonnet-5,claude-opus-5'
+
+# Claude Code — Windows: `shell: true` resuelve a cmd.exe, donde `$(cat ...)` NO existe
+APTS_LOOP_AGENT_CMD='type {prompt_file} | claude -p --model {model} --permission-mode bypassPermissions --output-format stream-json --verbose'
 
 # Opencode — `-f` adjunta el archivo, así que el prompt no pasa por el shell
 APTS_LOOP_AGENT_CMD='opencode run --format json --print-logs -m {model} --auto "Implementa la unidad descrita en el archivo adjunto" -f {prompt_file}'
 APTS_LOOP_MODEL_ESCALATION='anthropic/claude-sonnet-5,anthropic/claude-opus-5'
 ```
+
+**Las dos líneas de Claude Code son distintas y hay que elegir la del sistema.** La de
+Windows estaba publicada, pero setenta líneas más abajo: quien copiaba este bloque en
+Windows se llevaba la POSIX, y `$(cat ...)` llegaba al agente como texto literal. Lo que se
+ve entonces es al agente pidiendo permiso para leer un archivo temporal que no entiende por
+qué le nombran. Medido el 2026-08-18 conduciendo el cliente `tickets` desde Windows 11.
 
 Los nombres de modelo son de la CLI, no de APTS: el conductor los trata como texto opaco
 y los sustituye sin validarlos. Por eso la escalera de Opencode lleva `proveedor/modelo`
@@ -96,11 +105,52 @@ archivo adjunto` antes siquiera de resolver el modelo, y el conductor lo anota c
 opencode 1.18.18.
 
 **Y `--auto` es lo que hace que la corrida sea desatendida de verdad**, igual que
-`--permission-mode acceptEdits` en Claude Code: sin él, `opencode run` en headless
+`--permission-mode bypassPermissions` en Claude Code: sin él, `opencode run` en headless
 auto-rechaza todo permiso que su configuración deje en `ask` y la sesión muere en el
 primer comando de shell. Aprueba todo lo que no esté explícitamente denegado, así que la
 denegación explícita es tu único freno: si eso no te vale para este repositorio, quita
 `--auto` y conduce con la CLI delante.
+
+**El hermano de `--auto` es `bypassPermissions`, y NO `acceptEdits`.** Las líneas de Claude
+Code publicaron `acceptEdits` desde el 2026-08-15 hasta el 2026-08-18 por esta confusión, y
+no es un matiz: `acceptEdits` auto-acepta **ediciones de archivo** y nada más. `WebFetch`,
+`Bash` y `Task` siguen preguntando, así que la plantilla de revisión publicada —que empieza
+leyendo el manifiesto por `WebFetch`— moría en su **primera** herramienta.
+
+Y moría de la peor forma posible, que es la que describe el apartado *Un fallo con código
+0*: Claude Code trata la petición sin contestar como final normal, imprime el «necesito tu
+autorización» **como resultado de la sesión** y sale con **0**. El conductor lo lee como
+turno bueno y para con **14**, el código de que todo fue bien. La corrida se declara sana
+sin haber tocado una línea, y solo el contraste contra `apts_status` lo delata: el backlog
+no se movió. Medido el 2026-08-18 contra Claude Code 2.1.234 conduciendo el cliente
+`tickets` con `claude-sonnet-5` — dos arranques en falso, 15 y 20 segundos, $0,35 gastados,
+backlog inmóvil en 17/26.
+
+`bypassPermissions` aprueba todo, incluido `Bash` arbitrario. Es la misma cesión que hace
+`--auto` y está publicada por la misma razón; quien no quiera darla no debe rebajar el modo
+—rebajarlo no da una corrida más segura, da una corrida que miente al terminar—, sino
+conducir con la CLI delante.
+
+**Antes de la primera corrida hay que confiar el workspace.** Claude Code ignora
+`permissions.allow` de `.claude/settings.json` mientras el directorio no esté confiado, y lo
+avisa **solo por stderr**, en una línea que el conductor manda a `run.err.log` y que en
+Windows no se vuelca hasta que el proceso cierra:
+
+```
+Ignoring 23 permissions.allow entries from .claude/settings.json:
+this workspace has not been trusted.
+```
+
+Las entradas que el adaptador instala para las herramientas `mcp__apts__*` se caen enteras y
+en silencio. Se arregla abriendo `claude` una vez de forma interactiva en ese directorio y
+aceptando el diálogo, o poniendo `projects["<ruta>"].hasTrustDialogAccepted: true` en
+`~/.claude.json`.
+
+No está medido si `bypassPermissions` sobrevive a un workspace sin confiar: la corrida del
+2026-08-18 confió el directorio **antes** de cambiar el modo, así que las dos cosas se
+arreglaron juntas y no hay lectura que separe una de la otra. Confíalo de todas formas —es
+lo que hace que la valla del adaptador signifique algo el día que se conduzca con un modo
+más estrecho—, y no des por hecho que el modo te cubre la lista.
 
 **Pero `--auto` no alcanza a los subagentes, y eso cuelga la corrida entera.** Comprobado
 contra opencode 1.18.18 leyendo su binario, son dos cosas que se componen: una sesión de
@@ -147,7 +197,7 @@ nada. Si escribes tu propia línea y la quitas, quítale también el freno (`--a
 o cortará corridas sanas.
 
 **En Windows el `$(cat ...)` no existe**: `shell: true` resuelve a `cmd.exe`, así que la
-forma equivalente es `type {prompt_file} | claude -p --model {model} --permission-mode acceptEdits --output-format stream-json --verbose`.
+forma equivalente es `type {prompt_file} | claude -p --model {model} --permission-mode bypassPermissions --output-format stream-json --verbose`.
 La vía de Opencode no tiene ese problema porque nunca mete el prompt en la línea, así que
 vale igual en los dos sistemas y no necesita variante.
 
@@ -186,11 +236,31 @@ Se reconocen las dos formas reales, no una búsqueda de claves parecidas:
 
 | runtime | qué imprime | cómo se lee |
 |---|---|---|
-| Claude Code (`--output-format stream-json --verbose`) | NDJSON de eventos, y **un único objeto `type:"result"` al final** | el total de la corrida ya viene sumado en ese último objeto |
+| Claude Code (`--output-format stream-json --verbose`) | NDJSON de eventos y **VARIOS objetos `type:"result"`**, con `total_cost_usd` acumulado y `usage` por tramo | el coste es el **máximo**; los tokens y los turnos se **suman** |
 | Opencode (`--format json`) | NDJSON de eventos, con `cost` y `tokens` por paso | se **suman** los `step_finish` |
 
-Esa diferencia es la razón de que sean dos lectores: acumular el total de Claude Code una
-vez por objeto daría una factura inventada.
+**Este manual dijo hasta el 2026-08-18 que Claude Code emite «un único objeto `result` al
+final», y es falso.** Medido contra 2.1.234: una sesión de 2 h 31 min emitió **treinta y
+tres**, y las dos mitades del objeto no se leen igual. `total_cost_usd` acumula y crece
+(1,9508 → 2,3566 → … → 69,5580), de modo que el total de la sesión es el mayor. `usage`, en
+cambio, es **por tramo** y no acumula.
+
+Leer el último objeto —que es lo que se hacía— acertaba el coste de casualidad y perdía los
+tokens. Y cuando la corrida se corta por límite de cuenta, los últimos objetos llegan con
+`usage` a cero y el coste ya sumado, así que el conductor publicaba **`0 tok · $69,5580`**:
+dos horas y media de trabajo declaradas como cero tokens. Sumando los tramos, esa misma
+corrida son **122,3 M de tokens**, de los que 121,5 M son lectura de caché — que es
+exactamente la pregunta que esta contabilidad existe para responder: si lo que se pagó fue
+trabajo o fue releer el repositorio.
+
+Por eso el coste **no** se acumula por objeto en Claude Code: ahí ya viene sumado, y
+sumarlo otra vez daría una factura inventada. Se toma el máximo y no el último porque el
+acumulado nunca baja, así que un flujo cortado a mitad sigue dando el total bueno.
+
+**Y la cuenta va al ritmo del flujo, no del final.** El buffer del que se leía el resumen es
+rodante (256 KB) y aquella corrida escribió 4,6 MB: de los 33 objetos sólo los últimos
+caían dentro. El coste sobrevivía —es acumulado—, pero los tokens habrían salido
+recortados, así que se cuentan mientras pasan.
 
 Dónde aparece:
 

@@ -109,6 +109,26 @@ const CLAUDE_JSON_FALLO = JSON.stringify({
   type: 'result',
 }) + '\n';
 
+// `claude -p ... --output-format stream-json --verbose`: MUCHOS objetos `result`, no uno.
+// Esta forma esta REDUCIDA de una corrida real del 2026-08-18 (Claude Code 2.1.234, 2 h
+// 31 min, 33 objetos `result`, 4,6 MB de flujo). Lo que reproduce, que es lo que importa:
+//
+//   - `total_cost_usd` ACUMULA y crece; leer el ultimo acierta, sumarlos inventa.
+//   - `usage` es POR TRAMO y NO acumula; leer el ultimo pierde todo lo anterior.
+//   - los ultimos objetos, los del corte por limite de cuenta, traen `usage` A CERO con el
+//     coste ya sumado. Eso es lo que hacia publicar «0 tok» tras dos horas y media.
+const CLAUDE_STREAM_MULTI = [
+  { type: 'result', subtype: 'success', is_error: false, num_turns: 44, session_id: 'multi-1', total_cost_usd: 1.9508,
+    usage: { input_tokens: 62, output_tokens: 14776, cache_creation_input_tokens: 74552, cache_read_input_tokens: 2560029 } },
+  { type: 'result', subtype: 'success', is_error: false, num_turns: 3, session_id: 'multi-1', total_cost_usd: 2.3566,
+    usage: { input_tokens: 6, output_tokens: 325, cache_creation_input_tokens: 2098, cache_read_input_tokens: 332484 } },
+  { type: 'result', subtype: 'success', is_error: false, num_turns: 30, session_id: 'multi-1', total_cost_usd: 6.8047,
+    usage: { input_tokens: 46, output_tokens: 22489, cache_creation_input_tokens: 38008, cache_read_input_tokens: 3044564 } },
+  // El corte: coste ya sumado, tokens a cero.
+  { type: 'result', subtype: 'success', is_error: true, num_turns: 1, session_id: 'multi-1', total_cost_usd: 69.5580,
+    usage: { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } },
+].map((o) => JSON.stringify(o)).join('\n') + '\n';
+
 // `opencode run --format json`: NDJSON, con coste y tokens POR PASO. Dos pasos aqui, para
 // que sumar y no sumar den numeros distintos y la prueba pueda distinguirlos.
 const OPENCODE_NDJSON = [
@@ -256,6 +276,27 @@ const parada = (r) => r.eventos.find((e) => e.evento === 'parada') || {};
     console.log('6) el eco: la salida del agente se sigue viendo en consola');
     ok(r.visto.includes('Invalid API key'),
       'lo que la CLI escribe llega al terminal aunque ahora se parsee');
+    console.log();
+
+    console.log('7) Claude Code con MUCHOS `result`: coste al maximo, tokens sumados');
+    r = await correr(puerto, { stdout: CLAUDE_STREAM_MULTI, codigo: 0 });
+    a = agente(r);
+    ok(a.runtime === 'claudecode', 'sigue siendo el lector de Claude Code', a.runtime);
+    // El acumulado no baja nunca, asi que el maximo ES el total de la sesion. Leer el
+    // ultimo tambien acertaria aqui; el maximo ademas aguanta un flujo cortado a mitad.
+    ok(Math.abs(a.coste_usd - 69.5580) < 1e-9,
+      'el coste es el acumulado mayor y NO la suma de los cuatro', String(a.coste_usd));
+    // Lo que arregla el fallo: el ultimo tramo trae ceros, y aun asi se cuenta el trabajo.
+    ok(a.tokens && a.tokens.salida === 14776 + 325 + 22489 + 0,
+      'la salida suma los tramos y no se queda en el ultimo', JSON.stringify(a.tokens.salida));
+    ok(a.tokens && a.tokens.cache_lectura === 2560029 + 332484 + 3044564 + 0,
+      'la cache de lectura tambien, que es donde vive el grueso', String(a.tokens.cache_lectura));
+    ok(a.tokens && a.tokens.entrada === 62 + 6 + 46 + 0 && a.tokens.cache_escritura === 74552 + 2098 + 38008 + 0,
+      'entrada y cache de escritura igual', JSON.stringify(a.tokens));
+    ok(a.turnos === 44 + 3 + 30 + 1, 'los turnos son por tramo y se suman', String(a.turnos));
+    ok(parada(r).tokens_total === 62 + 6 + 46 + 14776 + 325 + 22489
+      + 74552 + 2098 + 38008 + 2560029 + 332484 + 3044564,
+      'y el total de la corrida no publica cero', String(parada(r).tokens_total));
   } finally {
     servidor.close();
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch (_) { /* da igual */ }
